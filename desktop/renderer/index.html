@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>Rirei</title>
+    <link rel="stylesheet" href="vendor/xterm.css" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="wordmark">
+        <span class="mark">R</span>
+        <span class="name">Rirei</span>
+      </div>
+      <button id="choose" class="project">
+        <span>Project</span><strong id="projectName">Choose folder</strong>
+      </button>
+    </header>
+
+    <section class="controls">
+      <div class="group task-group">
+        <p class="label">Task</p>
+        <div class="task-row">
+          <textarea
+            id="task"
+            rows="2"
+            placeholder="Describe the task for the next agent…"
+          ></textarea>
+          <button data-command="start" class="primary">Start task</button>
+        </div>
+        <label class="check"
+          ><input id="dirty" type="checkbox" /> Allow dirty working tree</label
+        >
+      </div>
+
+      <div class="group">
+        <p class="label">Agents</p>
+        <div class="agent-list">
+          <article>
+            <b>Claude</b>
+            <span>
+              <button data-interactive="run" data-agent="claude">Run</button>
+              <button data-interactive="switch" data-agent="claude">
+                Switch
+              </button>
+            </span>
+          </article>
+          <article>
+            <b>Codex</b>
+            <span>
+              <button data-interactive="run" data-agent="codex">Run</button>
+              <button data-interactive="switch" data-agent="codex">
+                Switch
+              </button>
+            </span>
+          </article>
+          <article>
+            <b>Antigravity</b>
+            <span>
+              <button data-interactive="run" data-agent="antigravity">
+                Run</button
+              ><button data-interactive="switch" data-agent="antigravity">
+                Switch
+              </button>
+            </span>
+          </article>
+        </div>
+      </div>
+
+      <div class="group">
+        <p class="label">Session</p>
+        <div class="ops-row">
+          <button data-command="init">Initialize</button>
+          <button data-command="status">Status</button>
+          <button data-command="doctor">Doctor</button>
+          <button data-command="handoff">Handoff</button>
+          <button id="usageBtn">Usage</button>
+        </div>
+        <div class="ops-row">
+          <input id="checkpoint" placeholder="Checkpoint label" />
+          <button data-command="checkpoint">Checkpoint</button>
+        </div>
+        <div class="ops-row">
+          <button data-command="finish" class="finish">Finish task</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="terminal-card">
+      <div class="output-head">
+        <div>
+          <span id="signal"></span>
+          <p class="label">Terminal</p>
+        </div>
+        <div class="terminal-actions">
+          <button id="showTerminal" hidden>Show terminal</button>
+          <button id="stop" disabled>Stop</button
+          ><button id="clear">Clear</button>
+        </div>
+      </div>
+      <pre id="output" tabindex="0">
+Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
+      <div id="terminal"></div>
+    </section>
+
+    <div id="usageModal" class="modal" hidden>
+      <div class="modal-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">Provider plans</p>
+            <h2>Usage remaining</h2>
+          </div>
+          <button id="usageClose" aria-label="Close usage">Close</button>
+        </div>
+        <p id="usageTask" class="usage-task"></p>
+        <div id="usageSummary" class="usage-summary"></div>
+        <div id="usageGrid" class="usage-grid"></div>
+        <p class="usage-note">
+          Percentages appear only when an official machine-readable provider
+          source is available. Unknown means Rirei refused to guess. No provider
+          credentials are read or stored.
+        </p>
+      </div>
+    </div>
+
+    <script src="vendor/xterm.js"></script>
+    <script src="vendor/addon-fit.js"></script>
+    <script src="renderer.js"></script>
+  </body>
+</html>

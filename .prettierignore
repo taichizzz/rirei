@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+release/
+*.app/
+desktop/renderer/vendor/
+desktop/__pycache__/

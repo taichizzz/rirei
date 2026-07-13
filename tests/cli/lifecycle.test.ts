@@ -80,6 +80,15 @@ describe('Relay lifecycle commands', () => {
     await expect(
       readFile(`${root}/.relay/events.jsonl`, 'utf8'),
     ).resolves.toContain('task_started');
+    const status = await relay(root, 'status', '--json');
+    expect(JSON.parse(status.stdout)).toMatchObject({
+      task: { title: 'Implement a reliable handoff', status: 'active' },
+      git: { currentBranch: 'main', dirty: false, changedFiles: 0 },
+      currentAgent: null,
+      remainingWork: [],
+      decisions: [],
+      blockers: [],
+    });
   });
 
   it('requires explicit acknowledgement of a dirty baseline', async () => {

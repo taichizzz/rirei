@@ -19,6 +19,14 @@ export interface AgentRunContext {
   projectRoot: string;
   prompt: string;
   providerSettingsPath?: string;
+  model?: string;
+  effort?: string;
+}
+
+export interface ModelOption {
+  id: string;
+  label: string;
+  efforts?: string[];
 }
 
 export interface ProcessResult {
@@ -48,6 +56,8 @@ export interface AgentAdapter {
   detectInstallation(): Promise<InstallationResult>;
   detectAuthentication(): Promise<AuthResult>;
   getVersion(): Promise<string | null>;
+  getModels(): Promise<ModelOption[]>;
+  getEffortLevels(model?: string): Promise<string[]>;
   buildInteractiveCommand(context: AgentRunContext): Promise<CommandSpec>;
   buildNonInteractiveCommand?(context: AgentRunContext): Promise<CommandSpec>;
   classifyExit(result: ProcessResult): Promise<{

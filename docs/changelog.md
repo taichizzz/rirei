@@ -6,6 +6,14 @@ branding changes.
 
 ## 2026-07-13
 
+### Task dashboard
+
+- Added structured `relay status --json` output for desktop and future integrations.
+- Added a compact Rirei dashboard with task/status, active agent, Git state, latest
+  checkpoint/test, remaining work, decisions, and blockers.
+- Added automatic dashboard refresh after commands, project selection, agent launch/exit, and
+  application startup.
+
 ### Provider plan usage
 
 - Replaced the observed-runtime Usage panel with provider plan usage remaining.

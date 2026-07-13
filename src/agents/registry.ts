@@ -10,6 +10,7 @@ import {
   type AgentRunContext,
   type CommandSpec,
   type ProcessResult,
+  type ModelOption,
 } from './adapter.js';
 
 const execFileAsync = promisify(execFile);
@@ -20,6 +21,8 @@ class OfficialCliAdapter implements AgentAdapter {
     readonly displayName: string,
     readonly executable: string,
     private readonly promptArgs: (context: AgentRunContext) => string[],
+    private readonly models: () => Promise<ModelOption[]>,
+    private readonly effortLevels: string[],
   ) {}
 
   detectInstallation(): Promise<InstallationResult> {
@@ -43,7 +46,18 @@ class OfficialCliAdapter implements AgentAdapter {
       return null;
     }
   }
+  getModels(): Promise<ModelOption[]> {
+    return this.models();
+  }
+  async getEffortLevels(model?: string): Promise<string[]> {
+    const models = model ? await this.models() : [];
+    return models.find((option) => option.id === model)?.efforts ?? this.effortLevels;
+  }
   buildInteractiveCommand(context: AgentRunContext): Promise<CommandSpec> {
+    if (context.model && (context.model.length > 120 || context.model.startsWith('-')))
+      throw new Error(`Invalid model for ${this.displayName}.`);
+    if (context.effort && !this.effortLevels.includes(context.effort))
+      throw new Error(`Unsupported effort for ${this.displayName}: ${context.effort}.`);
     return Promise.resolve({
       executable: this.executable,
       args: this.promptArgs(context),
@@ -67,29 +81,126 @@ class OfficialCliAdapter implements AgentAdapter {
   }
 }
 
+async function codexModels(): Promise<ModelOption[]> {
+  try {
+    const { stdout } = await execFileAsync('codex', ['debug', 'models'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const parsed = JSON.parse(stdout) as {
+      models?: Array<{
+        slug?: unknown;
+        display_name?: unknown;
+        supported_reasoning_levels?: Array<{ effort?: unknown }>;
+      }>;
+    };
+    return (parsed.models ?? []).flatMap((model) =>
+      typeof model.slug === 'string'
+        ? [
+            {
+              id: model.slug,
+              label:
+                typeof model.display_name === 'string'
+                  ? model.display_name
+                  : model.slug,
+              efforts: (model.supported_reasoning_levels ?? []).flatMap(
+                (level) =>
+                  typeof level.effort === 'string' ? [level.effort] : [],
+              ),
+            },
+          ]
+        : [],
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function antigravityModels(): Promise<ModelOption[]> {
+  try {
+    const { stdout } = await execFileAsync('agy', ['models'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    return stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((model) => ({ id: model, label: model }));
+  } catch {
+    return [];
+  }
+}
+
+const noModels = () => Promise.resolve([] as ModelOption[]);
+const claudeModels = () =>
+  Promise.resolve([
+    { id: 'sonnet', label: 'Sonnet' },
+    { id: 'opus', label: 'Opus' },
+    { id: 'fable', label: 'Fable' },
+  ]);
+
 const agents: ReadonlyArray<AgentAdapter> = [
-  new OfficialCliAdapter('claude', 'Claude', 'claude', (context) =>
-    context.providerSettingsPath
-      ? ['--settings', context.providerSettingsPath, context.prompt]
-      : [context.prompt],
+  new OfficialCliAdapter(
+    'claude',
+    'Claude',
+    'claude',
+    (context) => [
+      ...(context.providerSettingsPath
+        ? ['--settings', context.providerSettingsPath]
+        : []),
+      ...(context.model ? ['--model', context.model] : []),
+      ...(context.effort ? ['--effort', context.effort] : []),
+      context.prompt,
+    ],
+    claudeModels,
+    ['low', 'medium', 'high', 'xhigh', 'max'],
   ),
-  new OfficialCliAdapter('codex', 'Codex', 'codex', (context) => [
-    context.prompt,
-  ]),
+  new OfficialCliAdapter(
+    'codex',
+    'Codex',
+    'codex',
+    (context) => [
+      ...(context.model ? ['--model', context.model] : []),
+      ...(context.effort
+        ? ['--config', `model_reasoning_effort="${context.effort}"`]
+        : []),
+      context.prompt,
+    ],
+    codexModels,
+    ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+  ),
   // --prompt-interactive starts a real session; --prompt would run headless
   // and exit (and headless mode refuses to launch the first-run auth picker).
-  new OfficialCliAdapter('gemini', 'Gemini', 'gemini', (context) => [
-    '--prompt-interactive',
-    context.prompt,
-  ]),
+  new OfficialCliAdapter(
+    'gemini',
+    'Gemini',
+    'gemini',
+    (context) => [
+      ...(context.model ? ['--model', context.model] : []),
+      '--prompt-interactive',
+      context.prompt,
+    ],
+    noModels,
+    [],
+  ),
   // Antigravity CLI (`agy`) is Google's successor to Gemini CLI for individual
   // accounts (incl. Google AI Pro/Ultra). Interactive-with-prompt is -i /
   // --prompt-interactive; --prompt/-p is its headless one-shot mode.
   // Verify the binary name and flags against `agy --help` on the target machine.
-  new OfficialCliAdapter('antigravity', 'Antigravity', 'agy', (context) => [
-    '--prompt-interactive',
-    context.prompt,
-  ]),
+  new OfficialCliAdapter(
+    'antigravity',
+    'Antigravity',
+    'agy',
+    (context) => [
+      ...(context.model ? ['--model', context.model] : []),
+      '--prompt-interactive',
+      context.prompt,
+    ],
+    antigravityModels,
+    [],
+  ),
 ];
 
 export function registeredAgents(): ReadonlyArray<AgentAdapter> {

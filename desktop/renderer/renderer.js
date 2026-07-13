@@ -1,4 +1,4 @@
-/* global document, localStorage, window, Terminal, FitAddon */
+/* global document, localStorage, window, Terminal, FitAddon, setTimeout */
 let project = localStorage.getItem('relay-project') || '';
 const output = document.querySelector('#output');
 const projectName = document.querySelector('#projectName');
@@ -12,6 +12,18 @@ const commandButtons = [...document.querySelectorAll('[data-command]')];
 const interactiveButtons = [...document.querySelectorAll('[data-interactive]')];
 const stopButton = document.querySelector('#stop');
 const showTerminalButton = document.querySelector('#showTerminal');
+const dashboard = document.querySelector('#dashboard');
+const dashboardRefreshButton = document.querySelector('#dashboardRefresh');
+const dashboardTitle = document.querySelector('#dashboardTitle');
+const dashboardStatus = document.querySelector('#dashboardStatus');
+const dashboardAgent = document.querySelector('#dashboardAgent');
+const dashboardBranch = document.querySelector('#dashboardBranch');
+const dashboardChanges = document.querySelector('#dashboardChanges');
+const dashboardCheckpoint = document.querySelector('#dashboardCheckpoint');
+const dashboardTest = document.querySelector('#dashboardTest');
+const dashboardRemaining = document.querySelector('#dashboardRemaining');
+const dashboardDecisions = document.querySelector('#dashboardDecisions');
+const dashboardBlockers = document.querySelector('#dashboardBlockers');
 
 const HOW_TO =
   'To open an agent session:\n' +
@@ -65,9 +77,86 @@ function syncControls() {
   for (const button of commandButtons) button.disabled = locked;
   for (const button of interactiveButtons) button.disabled = locked;
   usageBtn.disabled = commandRunning;
+  dashboardRefreshButton.disabled = commandRunning;
   stopButton.disabled = !terminalRunning;
   showTerminalButton.hidden =
     !terminalRunning || card.classList.contains('live');
+}
+
+function renderDashboardList(element, items, empty, alert = false) {
+  element.textContent = '';
+  const visible = items.slice(0, 2);
+  if (visible.length === 0) visible.push({ description: empty });
+  for (const item of visible) {
+    const entry = document.createElement('li');
+    entry.textContent = item.description ?? item.summary ?? empty;
+    if (alert && items.length > 0) entry.className = 'alert';
+    element.append(entry);
+  }
+  if (items.length > visible.length) {
+    const more = document.createElement('li');
+    more.textContent = `+${items.length - visible.length} more`;
+    element.append(more);
+  }
+}
+
+function renderDashboard(data) {
+  dashboardTitle.textContent = data.task.title;
+  dashboardStatus.textContent = data.task.status;
+  dashboardStatus.className = `status-pill ${data.task.status}`;
+  dashboardAgent.textContent = data.currentAgent ?? 'None';
+  dashboardBranch.textContent = data.git.currentBranch;
+  dashboardChanges.textContent = data.git.dirty
+    ? `${data.git.changedFiles} changed`
+    : 'Clean';
+  dashboardCheckpoint.textContent = data.latestCheckpoint
+    ? relTime(data.latestCheckpoint.createdAt)
+    : 'None';
+  dashboardTest.textContent = data.latestTest
+    ? `${data.latestTest.status} · ${relTime(data.latestTest.createdAt)}`
+    : 'Not run';
+  renderDashboardList(
+    dashboardRemaining,
+    data.remainingWork,
+    'No remaining items recorded',
+  );
+  renderDashboardList(
+    dashboardDecisions,
+    data.decisions,
+    'No decisions recorded',
+  );
+  renderDashboardList(dashboardBlockers, data.blockers, 'No blockers', true);
+}
+
+function renderDashboardUnavailable(message) {
+  dashboardTitle.textContent = project
+    ? 'No Relay task loaded'
+    : 'No project selected';
+  dashboardStatus.textContent = project ? 'Not started' : 'Idle';
+  dashboardStatus.className = 'status-pill';
+  dashboardAgent.textContent = '—';
+  dashboardBranch.textContent = '—';
+  dashboardChanges.textContent = '—';
+  dashboardCheckpoint.textContent = '—';
+  dashboardTest.textContent = '—';
+  renderDashboardList(dashboardRemaining, [], message);
+  renderDashboardList(dashboardDecisions, [], 'No decisions recorded');
+  renderDashboardList(dashboardBlockers, [], 'No blockers');
+}
+
+async function refreshDashboard() {
+  if (!project) {
+    renderDashboardUnavailable('Choose a project to begin');
+    return;
+  }
+  dashboard.classList.add('loading');
+  try {
+    const result = await window.relay.dashboard({ project });
+    if (result.ok) renderDashboard(result.data);
+    else renderDashboardUnavailable('Initialize and start a task');
+  } finally {
+    dashboard.classList.remove('loading');
+  }
 }
 
 function syncSize() {
@@ -107,14 +196,14 @@ async function execute(command) {
       ? document.querySelector('#task').value
       : document.querySelector('#checkpoint').value;
   try {
-    show(
-      await window.relay.command({
-        project,
-        command,
-        value,
-        allowDirty: document.querySelector('#dirty').checked,
-      }),
-    );
+    const result = await window.relay.command({
+      project,
+      command,
+      value,
+      allowDirty: document.querySelector('#dirty').checked,
+    });
+    show(result);
+    await refreshDashboard();
   } finally {
     commandRunning = false;
     syncControls();
@@ -128,7 +217,10 @@ document.querySelector('#choose').addEventListener('click', async () => {
   project = selected;
   localStorage.setItem('relay-project', project);
   showProject();
-  execute('status');
+  showOutput();
+  output.textContent =
+    'Project selected. Initialize or start a task to continue.';
+  await refreshDashboard();
 });
 document
   .querySelectorAll('[data-command]')
@@ -167,6 +259,7 @@ document.querySelectorAll('[data-interactive]').forEach((button) =>
         terminalRunning = true;
         signal.className = 'ok';
         term.focus();
+        setTimeout(refreshDashboard, 250);
       } else {
         // Surface why it could not start (not initialized, no task, not installed…).
         showOutput();
@@ -197,6 +290,7 @@ showTerminalButton.addEventListener('click', () => {
   showTerminal();
   syncControls();
 });
+dashboardRefreshButton.addEventListener('click', refreshDashboard);
 /* ---- usage panel ---- */
 const usageBtn = document.querySelector('#usageBtn');
 const usageModal = document.querySelector('#usageModal');
@@ -341,9 +435,11 @@ window.relay.onTerminalExit(({ code, error }) => {
     }]\x1b[0m\r\n`,
   );
   syncControls();
+  refreshDashboard();
 });
 
 // Show the steps up front so the terminal panel explains itself.
 if (!project) output.textContent = HOW_TO;
 showProject();
 syncControls();
+refreshDashboard();

@@ -8,6 +8,7 @@ export interface GitBaseline {
   commit: string;
   branch: string;
   dirty: boolean;
+  changedFiles: number;
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -107,5 +108,11 @@ export async function inspectGitBaseline(
   if (!branch) {
     throw new Error('Relay requires a repository with a checked-out branch.');
   }
-  return { root, commit, branch, dirty: porcelain.length > 0 };
+  return {
+    root,
+    commit,
+    branch,
+    dirty: porcelain.length > 0,
+    changedFiles: porcelain ? porcelain.split('\n').length : 0,
+  };
 }

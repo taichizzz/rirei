@@ -54,8 +54,11 @@ Behavior:
 Print the current task status. Reads state plus a live Git baseline. Does **not** require an
 active task (it will surface a completed/cancelled task too).
 
+**Option:** `--json` — print the structured status used by Rirei's task dashboard, including
+live Git dirtiness/changed-file count and the full remaining-work, decision, and blocker lists.
+
 Displayed fields: session ID, task title, status, current agent, previous agents, starting
-commit, current commit (live), current branch (live), whether the baseline was dirty, latest
+commit, current commit (live), current branch (live), changed-file count, whether the baseline was dirty, latest
 test result, latest checkpoint id, and counts of completed items, remaining items,
 decisions, and blockers.
 

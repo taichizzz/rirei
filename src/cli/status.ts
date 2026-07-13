@@ -5,7 +5,8 @@ import { readState } from '../state/store.js';
 export function statusCommand(): Command {
   return new Command('status')
     .description('Display current Relay task status')
-    .action(async () => {
+    .option('--json', 'print machine-readable JSON')
+    .action(async (options: { json?: boolean }) => {
       const projectRoot = await discoverRepository(process.cwd());
       if (!projectRoot)
         throw new Error('Relay must be run inside a Git repository.');
@@ -15,15 +16,50 @@ export function statusCommand(): Command {
       ]);
       const latestTest = state.tests.at(-1);
       const latestCheckpoint = state.checkpoints.at(-1);
+      const previousAgents = [
+        ...new Set(state.agentHistory.map((record) => record.agent)),
+      ];
+      if (options.json) {
+        process.stdout.write(
+          `${JSON.stringify(
+            {
+              generatedAt: new Date().toISOString(),
+              sessionId: state.sessionId,
+              task: state.task,
+              git: {
+                startingCommit: state.git.startingCommit,
+                currentCommit: git.commit,
+                startingBranch: state.git.startingBranch,
+                currentBranch: git.branch,
+                dirtyAtStart: state.git.dirtyAtStart,
+                dirty: git.dirty,
+                changedFiles: git.changedFiles,
+              },
+              currentAgent: state.currentAgent ?? null,
+              previousAgents,
+              latestTest: latestTest ?? null,
+              latestCheckpoint: latestCheckpoint ?? null,
+              completedWork: state.completedWork,
+              remainingWork: state.remainingWork,
+              decisions: state.decisions,
+              blockers: state.blockers,
+            },
+            null,
+            2,
+          )}\n`,
+        );
+        return;
+      }
       const lines = [
         `Session ID: ${state.sessionId}`,
         `Task: ${state.task.title}`,
         `Status: ${state.task.status}`,
         `Current agent: ${state.currentAgent ?? 'None'}`,
-        `Previous agents: ${state.agentHistory.map((record) => record.agent).join(', ') || 'None'}`,
+        `Previous agents: ${previousAgents.join(', ') || 'None'}`,
         `Starting commit: ${state.git.startingCommit}`,
         `Current commit: ${git.commit}`,
         `Current branch: ${git.branch}`,
+        `Changed files: ${git.changedFiles}`,
         `Changed-file baseline: ${state.git.dirtyAtStart ? 'dirty' : 'clean'}`,
         `Latest test: ${latestTest ? `${latestTest.status} (${latestTest.command})` : 'None'}`,
         `Latest checkpoint: ${latestCheckpoint?.id ?? 'None'}`,

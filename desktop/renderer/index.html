@@ -91,6 +91,50 @@
       </div>
     </section>
 
+    <section id="dashboard" class="dashboard" aria-live="polite">
+      <div class="dashboard-head">
+        <div>
+          <p class="label">Task dashboard</p>
+          <div class="dashboard-title-row">
+            <h2 id="dashboardTitle">No project selected</h2>
+            <span id="dashboardStatus" class="status-pill">Idle</span>
+          </div>
+        </div>
+        <button id="dashboardRefresh" aria-label="Refresh dashboard">
+          Refresh
+        </button>
+      </div>
+      <div class="dashboard-metrics">
+        <div><span>Agent</span><strong id="dashboardAgent">—</strong></div>
+        <div><span>Branch</span><strong id="dashboardBranch">—</strong></div>
+        <div><span>Changes</span><strong id="dashboardChanges">—</strong></div>
+        <div>
+          <span>Checkpoint</span><strong id="dashboardCheckpoint">—</strong>
+        </div>
+        <div><span>Tests</span><strong id="dashboardTest">—</strong></div>
+      </div>
+      <div class="dashboard-memory">
+        <div>
+          <span>Remaining</span>
+          <ul id="dashboardRemaining">
+            <li>No task loaded</li>
+          </ul>
+        </div>
+        <div>
+          <span>Decisions</span>
+          <ul id="dashboardDecisions">
+            <li>None recorded</li>
+          </ul>
+        </div>
+        <div>
+          <span>Blockers</span>
+          <ul id="dashboardBlockers">
+            <li>None recorded</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
     <section class="terminal-card">
       <div class="output-head">
         <div>

@@ -169,6 +169,17 @@ function registerIpc() {
       return { ok: false, output: result.output || 'Could not read usage.' };
     }
   });
+  ipcMain.handle('relay:dashboard', async (_event, request) => {
+    if (!request || !validProject(request.project))
+      return { ok: false, output: 'Invalid project.' };
+    const result = await runCli(request.project, 'status', ['--json']);
+    if (!result.ok) return result;
+    try {
+      return { ok: true, data: JSON.parse(result.output) };
+    } catch {
+      return { ok: false, output: 'Could not read structured task status.' };
+    }
+  });
   ipcMain.handle('relay:interactive', (event, request) => {
     if (
       !request ||

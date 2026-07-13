@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('relay', {
   selectProject: () => ipcRenderer.invoke('relay:select-project'),
   command: (request) => ipcRenderer.invoke('relay:command', request),
   usage: (request) => ipcRenderer.invoke('relay:usage', request),
+  dashboard: (request) => ipcRenderer.invoke('relay:dashboard', request),
   interactive: (request) => ipcRenderer.invoke('relay:interactive', request),
   terminalInput: (data) => ipcRenderer.send('relay:terminal-input', data),
   resizeTerminal: (size) => ipcRenderer.send('relay:terminal-resize', size),

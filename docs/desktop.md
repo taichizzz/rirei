@@ -13,8 +13,8 @@ The integrated terminal is **not** a free-standing shell — it hosts a launched
 only becomes typeable once a session starts. The order is:
 
 The window is a single black, terminal-first layout: a slim header (wordmark + project
-chooser), one control band (Task / Agents / Session groups), and an integrated terminal
-that fills all remaining window height.
+chooser), one control band (Task / Agents / Session groups), a compact task dashboard, and an
+integrated terminal that fills all remaining window height.
 
 1. **Project** (top right) — choose your Git repository folder.
 2. **Initialize** (Session group) — runs `relay init` (creates `.relay/`). Required once per repo.
@@ -40,6 +40,11 @@ machine-readable source is available:
 
 Provider values captured more than 15 minutes ago, from an invalid/future timestamp, or past
 their reset time remain visible but are labeled `Stale`. Only fresh values are labeled `Live`.
+
+The **Task dashboard** reads `relay status --json` and shows the active task/status, current
+agent, branch and changed-file count, latest checkpoint/test, remaining work, decisions, and
+blockers. It refreshes after task commands, agent launch/exit, project selection, manual
+Refresh, and application startup for a remembered project.
 
 If you click **Run** before steps 2–3, the panel shows the reason (e.g. "Start a Relay task
 before running an agent") in the command-output view instead of going live. **Stop** sends
@@ -129,17 +134,18 @@ Requires the system `python3` at `/usr/bin/python3` (macOS ships this).
 The renderer only sees `window.relay`, exposed over `contextBridge` with
 `contextIsolation: true`, `nodeIntegration: false`, and `sandbox: true`:
 
-| `window.relay` method  | Channel                 | Direction                         |
-| ---------------------- | ----------------------- | --------------------------------- |
-| `selectProject()`      | `relay:select-project`  | invoke                            |
-| `command(request)`     | `relay:command`         | invoke (non-interactive commands) |
-| `usage(request)`       | `relay:usage`           | invoke (read provider plan usage) |
-| `interactive(request)` | `relay:interactive`     | invoke (starts a terminal)        |
-| `terminalInput(data)`  | `relay:terminal-input`  | send (keystrokes → PTY stdin)     |
-| `resizeTerminal(size)` | `relay:terminal-resize` | send (→ PTY fd 3)                 |
-| `stopTerminal()`       | `relay:terminal-stop`   | invoke (sends Ctrl+C)             |
-| `onTerminalData(cb)`   | `relay:terminal-data`   | receive (PTY output)              |
-| `onTerminalExit(cb)`   | `relay:terminal-exit`   | receive (session ended)           |
+| `window.relay` method  | Channel                 | Direction                            |
+| ---------------------- | ----------------------- | ------------------------------------ |
+| `selectProject()`      | `relay:select-project`  | invoke                               |
+| `command(request)`     | `relay:command`         | invoke (non-interactive commands)    |
+| `usage(request)`       | `relay:usage`           | invoke (read provider plan usage)    |
+| `dashboard(request)`   | `relay:dashboard`       | invoke (read structured task status) |
+| `interactive(request)` | `relay:interactive`     | invoke (starts a terminal)           |
+| `terminalInput(data)`  | `relay:terminal-input`  | send (keystrokes → PTY stdin)        |
+| `resizeTerminal(size)` | `relay:terminal-resize` | send (→ PTY fd 3)                    |
+| `stopTerminal()`       | `relay:terminal-stop`   | invoke (sends Ctrl+C)                |
+| `onTerminalData(cb)`   | `relay:terminal-data`   | receive (PTY output)                 |
+| `onTerminalExit(cb)`   | `relay:terminal-exit`   | receive (session ended)              |
 
 ### `renderer.js`
 

@@ -49,6 +49,10 @@ Open `Relay Launcher.app`, choose a Git repository, and Relay will initialize it
 
 **Rirei** is the macOS Electron app for the Relay CLI. Task-control commands (`init`, `start`, `status`, `doctor`, `checkpoint`, `handoff`, `finish`) run non-interactively and print their results in the app. Interactive agents (`run`/`switch` for `claude`, `codex`, `gemini`) launch inside an **integrated terminal** built on [xterm.js](https://xtermjs.org): the agent's full-screen TUI renders correctly and accepts keyboard input directly in the window.
 
+Its task dashboard shows live task status, current agent, Git branch and changes, latest
+checkpoint/test, remaining work, decisions, and blockers from structured `relay status --json`
+output.
+
 After installing development dependencies, use `npm run desktop:dev` or build DMG and ZIP artifacts with `npm run desktop:build`. The existing AppleScript launcher remains available unchanged.
 
 Rirei's Usage panel reports provider plan usage when a supported machine-readable source is available. Claude and Codex show 5-hour and weekly remaining percentages and reset times; stale values are labeled explicitly. Gemini and Antigravity remain `Unknown` until a verified structured source exists. Rirei never invents percentages or reads provider credentials.

@@ -55,12 +55,30 @@ Print the current task status. Reads state plus a live Git baseline. Does **not*
 active task (it will surface a completed/cancelled task too).
 
 **Option:** `--json` — print the structured status used by Rirei's task dashboard, including
-live Git dirtiness/changed-file count and the full remaining-work, decision, and blocker lists.
+live Git dirtiness/changed-file count; the full remaining-work, decision, and blocker lists;
+and the complete `agentHistory` array used by the session timeline. History stays in launch
+order (oldest first) and includes the provider, optional model/effort overrides, timestamps,
+exit code, and classified exit reason. Rirei reverses this array for newest-first display.
 
 Displayed fields: session ID, task title, status, current agent, previous agents, starting
 commit, current commit (live), current branch (live), changed-file count, whether the baseline was dirty, latest
 test result, latest checkpoint id, and counts of completed items, remaining items,
 decisions, and blockers.
+
+The human-readable status continues to summarize current and previous agents. Detailed
+per-run history is intentionally confined to `--json` so the default terminal output remains
+compact.
+
+---
+
+## `relay agents`
+
+Show installed adapters, CLI versions, discovered models, and supported effort levels.
+
+**Option:** `--json` — print the machine-readable catalog used by Rirei's session-profile
+picker. Codex models come from `codex debug models`; Antigravity uses a catalog verified from
+`agy models`; Claude uses documented model aliases and effort values. Discovery failures return an empty
+model list rather than guessing.
 
 ---
 
@@ -91,9 +109,13 @@ the exact section layout.
 
 ## `relay run <agent>`
 
-Launch an installed official CLI (`claude`, `codex`, or `gemini`) for the current task.
+Launch an installed official CLI (`claude`, `codex`, `gemini`, or `antigravity`) for the current task.
 
 **Option:** `--prompt <prompt>` — use an explicit prompt instead of the generated handoff.
+
+**Options:** `--model <model>` and `--effort <level>` — apply provider-specific session
+overrides without changing global provider configuration. Unsupported effort values fail
+before launch.
 
 Behavior:
 
@@ -103,13 +125,17 @@ Behavior:
   CLI with **inherited stdio** in the repository root, classifies the exit, and records
   `agent_ended`. Relay's exit code mirrors the agent's non-zero exit code.
 
-The launched CLI handles its own authentication — Relay passes only the prompt argument.
+The launched CLI handles its own authentication. Relay passes the prompt and any explicit
+model/effort selection.
 
 ---
 
 ## `relay switch <agent>`
 
 Checkpoint, preview a handoff, then launch another agent.
+
+**Options:** `--model <model>` and `--effort <level>` — use the same session overrides as
+`relay run` for the incoming agent.
 
 Sequence:
 

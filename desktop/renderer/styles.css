@@ -204,6 +204,23 @@ textarea:focus {
   display: flex;
   gap: 5px;
 }
+.agent-list .agent-identity {
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+.profile-trigger {
+  max-width: 145px;
+  overflow: hidden;
+  border: 0 !important;
+  color: var(--muted) !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 9px var(--mono) !important;
+}
+.profile-trigger:hover {
+  color: var(--accent) !important;
+}
 .agent-list button {
   font-size: 11px;
   padding: 3px 9px;
@@ -271,15 +288,33 @@ textarea:focus {
   font-size: 16px;
   font-weight: 550;
 }
-#dashboardRefresh {
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#dashboardRefresh,
+#timelineOpen {
   border: 0;
   background: transparent;
   color: var(--muted);
   font: 500 10px var(--mono);
   cursor: pointer;
 }
-#dashboardRefresh:hover {
+#dashboardRefresh:hover,
+#timelineOpen:hover {
   color: var(--accent);
+}
+#timelineOpen span {
+  display: inline-grid;
+  min-width: 17px;
+  height: 17px;
+  margin-left: 3px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 9px;
 }
 .status-pill {
   flex: none;
@@ -488,7 +523,9 @@ textarea:focus {
   font-size: 20px;
   margin: 4px 0 0;
 }
-#usageClose {
+#usageClose,
+#timelineClose,
+#profileClose {
   background: none;
   border: none;
   color: var(--muted);
@@ -496,8 +533,160 @@ textarea:focus {
   cursor: pointer;
   padding: 3px 6px;
 }
-#usageClose:hover {
+#usageClose:hover,
+#timelineClose:hover,
+#profileClose:hover {
   color: var(--text);
+}
+
+/* ---- agent session timeline ---- */
+.timeline-panel {
+  width: min(760px, 100%);
+}
+.timeline-summary,
+.timeline-note {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.timeline-summary {
+  margin: 8px 0 16px;
+}
+.timeline-note {
+  margin: 16px 0 0;
+}
+.timeline-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.timeline-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 10px;
+}
+.timeline-item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 13px;
+  bottom: -3px;
+  left: 5px;
+  width: 1px;
+  background: var(--line);
+}
+.timeline-marker {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  margin-top: 12px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: #55574f;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.timeline-item.active .timeline-marker {
+  background: var(--accent);
+  box-shadow: 0 0 7px var(--accent);
+}
+.timeline-item.completed .timeline-marker {
+  background: #8eab80;
+}
+.timeline-item.cancelled .timeline-marker {
+  background: #e3b55b;
+}
+.timeline-item.failed .timeline-marker {
+  background: var(--danger);
+}
+.timeline-card {
+  min-width: 0;
+  padding: 11px 13px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #11120f;
+}
+.timeline-card-head,
+.timeline-identity,
+.timeline-profile {
+  display: flex;
+  align-items: center;
+}
+.timeline-card-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+.timeline-identity {
+  min-width: 0;
+  gap: 8px;
+}
+.timeline-identity strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.timeline-relative,
+.timeline-status,
+.timeline-profile {
+  font: 500 9px var(--mono);
+}
+.timeline-relative {
+  color: var(--muted);
+}
+.timeline-status {
+  flex: none;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.timeline-item.active .timeline-status,
+.timeline-item.completed .timeline-status {
+  color: var(--accent);
+}
+.timeline-item.cancelled .timeline-status {
+  color: #e3b55b;
+}
+.timeline-item.failed .timeline-status {
+  color: var(--danger);
+}
+.timeline-profile {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+.timeline-profile span {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: #b9b9b1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 11px 0 0;
+}
+.timeline-facts div {
+  min-width: 0;
+}
+.timeline-facts dt {
+  color: var(--muted);
+  font: 500 8px var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.timeline-facts dd {
+  overflow: hidden;
+  margin: 3px 0 0;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 10px var(--mono);
 }
 .usage-task {
   color: var(--text);
@@ -674,6 +863,71 @@ textarea:focus {
   margin: 16px 0 0;
 }
 
+/* ---- model and effort profile ---- */
+.profile-panel {
+  width: min(540px, 100%);
+}
+.profile-status {
+  margin: 8px 0 16px;
+  color: var(--muted);
+  font: 10px var(--mono);
+}
+.profile-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.profile-fields label {
+  display: grid;
+  gap: 6px;
+}
+.profile-fields label > span {
+  color: var(--muted);
+  font: 500 9px var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.profile-fields select,
+.profile-fields input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #11120f;
+  color: var(--text);
+  padding: 9px 10px;
+  font: 11px var(--mono);
+}
+.profile-preview {
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: #b9b9b1;
+  background: #050505;
+  font: 11px/1.5 var(--mono);
+}
+.profile-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.profile-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.profile-actions button {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 11px;
+  cursor: pointer;
+}
+
 @media (max-width: 900px) {
   body {
     overflow: auto;
@@ -690,6 +944,9 @@ textarea:focus {
   }
   .dashboard h2 {
     max-width: 65vw;
+  }
+  .timeline-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .terminal-card {
     min-height: 420px;

@@ -34,6 +34,8 @@ const blockerSchema = z.object({
 const agentRunSchema = z.object({
   id: z.string().min(1).optional(),
   agent: z.string().min(1),
+  model: z.string().min(1).optional(),
+  effort: z.string().min(1).optional(),
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime().optional(),
   exitCode: z.number().int().nullable().optional(),

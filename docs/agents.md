@@ -8,7 +8,7 @@ implementations are in `src/agents/registry.ts`.
 ## The adapter contract
 
 ```ts
-type AgentId = 'claude' | 'codex' | 'gemini';
+type AgentId = 'claude' | 'codex' | 'gemini' | 'antigravity';
 
 interface AgentAdapter {
   readonly id: AgentId;
@@ -19,6 +19,8 @@ interface AgentAdapter {
   detectAuthentication(): Promise<AuthResult>; // ready | not_authenticated |
   //   unknown | unsupported | error
   getVersion(): Promise<string | null>;
+  getModels(): Promise<ModelOption[]>;
+  getEffortLevels(model?: string): Promise<string[]>;
 
   buildInteractiveCommand(ctx: AgentRunContext): Promise<CommandSpec>;
   buildNonInteractiveCommand?(ctx: AgentRunContext): Promise<CommandSpec>; // optional
@@ -36,6 +38,14 @@ interface CommandSpec {
 interface AgentRunContext {
   projectRoot: string;
   prompt: string;
+  providerSettingsPath?: string;
+  model?: string;
+  effort?: string;
+}
+interface ModelOption {
+  id: string;
+  label: string;
+  efforts?: string[];
 }
 interface ProcessResult {
   exitCode: number | null;
@@ -64,6 +74,20 @@ provider:
 | `codex`       | Codex       | `codex`    | `[prompt]` (positional)            |
 | `gemini`      | Gemini      | `gemini`   | `["--prompt-interactive", prompt]` |
 | `antigravity` | Antigravity | `agy`      | `["--prompt-interactive", prompt]` |
+
+### Model and effort discovery
+
+- Claude publishes verified aliases (`sonnet`, `opus`, `fable`) and effort levels through the
+  adapter.
+- Codex reads `codex debug models` and preserves model-specific reasoning levels from the JSON
+  catalog.
+- Antigravity uses model variants verified against `agy models`; that command requires a TTY,
+  so the background catalog is static and custom IDs cover newer variants. The names encode
+  effort where applicable, so Relay does not pass a separate effort flag.
+- Gemini accepts `--model` but has no verified model-list or effort discovery path here.
+
+`relay agents --json` exposes this metadata to Rirei. Adapter validation rejects model values
+that look like flags and effort values unsupported by the selected provider.
 
 > Gemini's flag matters: `--prompt-interactive` (`-i`) starts a real interactive session
 > seeded with the prompt. Plain `--prompt` would run headless — it answers once and exits,

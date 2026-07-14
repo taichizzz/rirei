@@ -46,6 +46,41 @@ agent, branch and changed-file count, latest checkpoint/test, remaining work, de
 blockers. It refreshes after task commands, agent launch/exit, project selection, manual
 Refresh, and application startup for a remembered project.
 
+### Agent session timeline
+
+The dashboard's **Sessions** button displays the number of agent launches recorded for the
+current task and opens a newest-first timeline. Each entry shows:
+
+- Provider name and relative launch time.
+- Running, completed, cancelled, or failed visual state.
+- The explicit model and effort overrides passed for that launch. **Auto** means Relay passed
+  no override and left the final choice to the provider.
+- Local start and end timestamps plus a derived duration. A live entry uses the current time
+  until the provider exits.
+- The adapter-classified exit reason and process exit code. Unknown failures remain labeled
+  conservatively rather than being reinterpreted by the renderer.
+
+The timeline is derived entirely from `agentHistory` returned by `relay status --json`; the
+renderer does not create a separate history database. This means entries survive desktop
+restarts, remain visible for completed tasks, and stay ordered consistently with CLI state.
+Older state files remain compatible because the newly recorded model and effort fields are
+optional. The view updates whenever the normal dashboard refreshes, including shortly after
+launch and when the PTY reports exit. It records metadata only—no prompt, response, terminal
+transcript, credentials, or provider conversation content is displayed or added to state.
+
+Each agent row includes a **session profile** button. The picker discovers installed CLI
+versions and current model catalogs, offers only provider-supported effort levels, supports a
+custom model ID, previews the launch selection, and stores preferences per provider in desktop
+`localStorage`. Auto delegates model/effort selection to the provider. Saved selections are
+passed only for that launch and never rewrite the provider's global configuration.
+
+- Claude: `--model` and `--effort` (`low`, `medium`, `high`, `xhigh`, `max`).
+- Codex: `--model` and a session-only `model_reasoning_effort` config override; effort options
+  come from each live catalog entry.
+- Antigravity: `--model`; effort is represented by verified model variants from `agy models`
+  because that command requires a TTY and cannot be queried safely in the background.
+- Gemini: `--model`; no separate verified effort flag.
+
 If you click **Run** before steps 2–3, the panel shows the reason (e.g. "Start a Relay task
 before running an agent") in the command-output view instead of going live. **Stop** sends
 `Ctrl+C` to the session; **Clear** clears the terminal (or restores the how-to text when idle).
@@ -158,6 +193,9 @@ The renderer only sees `window.relay`, exposed over `contextBridge` with
   `{cols, rows}` into the `interactive` request so the PTY starts at the correct size. A
   window `resize` listener re-fits and calls `resizeTerminal`.
 - The card toggles a `live` class to switch between the command-output pane and the terminal.
+- The dashboard caches the returned `agentHistory` only for rendering, updates the Sessions
+  count, and rebuilds the open modal whenever fresh status arrives. Timeline durations are
+  derived in the renderer from persisted timestamps rather than written back to state.
 
 ## Content Security Policy
 

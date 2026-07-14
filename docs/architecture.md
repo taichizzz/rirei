@@ -73,11 +73,16 @@ switch.ts
   └─ renderHandoff(root, state)        # compact text from structured state
   └─ launchAgent(root, state, codexAdapter, handoff)
         ├─ adapter.detectInstallation()  # must be "ready"
-        ├─ writeState() + appendEvent("agent_started")
+        ├─ writeState() + appendEvent("agent_started") # run ID + session profile
         ├─ spawn("codex", [prompt], { stdio: "inherit" })
         ├─ adapter.classifyExit(result)
-        └─ writeState() + appendEvent("agent_ended")
+        └─ writeState() + appendEvent("agent_ended")   # same run ID + result
 ```
+
+`launchAgent` stores explicit model and effort selections on the run record before spawning
+the CLI. On exit it re-reads the latest state and updates the matching stable run ID with the
+end time, exit code, and classified reason. `relay status --json` returns this chronological
+history, and Rirei renders it newest-first without maintaining a second desktop-only store.
 
 The same `createCheckpoint` / `renderHandoff` / `launchAgent` primitives back `run`,
 `checkpoint`, `handoff`, and `finish`, which keeps behavior consistent across commands.

@@ -51,17 +51,26 @@ class OfficialCliAdapter implements AgentAdapter {
   }
   async getEffortLevels(model?: string): Promise<string[]> {
     const models = model ? await this.models() : [];
-    return models.find((option) => option.id === model)?.efforts ?? this.effortLevels;
+    return (
+      models.find((option) => option.id === model)?.efforts ?? this.effortLevels
+    );
   }
-  buildInteractiveCommand(context: AgentRunContext): Promise<CommandSpec> {
-    if (context.model && (context.model.length > 120 || context.model.startsWith('-')))
+  async buildInteractiveCommand(
+    context: AgentRunContext,
+  ): Promise<CommandSpec> {
+    if (
+      context.model &&
+      (context.model.length > 120 || context.model.startsWith('-'))
+    )
       throw new Error(`Invalid model for ${this.displayName}.`);
     if (context.effort && !this.effortLevels.includes(context.effort))
-      throw new Error(`Unsupported effort for ${this.displayName}: ${context.effort}.`);
-    return Promise.resolve({
+      throw new Error(
+        `Unsupported effort for ${this.displayName}: ${context.effort}.`,
+      );
+    return {
       executable: this.executable,
       args: this.promptArgs(context),
-    });
+    };
   }
   classifyExit(result: ProcessResult): Promise<{
     reason:
@@ -117,21 +126,19 @@ async function codexModels(): Promise<ModelOption[]> {
   }
 }
 
-async function antigravityModels(): Promise<ModelOption[]> {
-  try {
-    const { stdout } = await execFileAsync('agy', ['models'], {
-      encoding: 'utf8',
-      timeout: 10_000,
-    });
-    return stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((model) => ({ id: model, label: model }));
-  } catch {
-    return [];
-  }
-}
+const antigravityModels = () =>
+  Promise.resolve(
+    [
+      'Gemini 3.5 Flash (Medium)',
+      'Gemini 3.5 Flash (High)',
+      'Gemini 3.5 Flash (Low)',
+      'Gemini 3.1 Pro (Low)',
+      'Gemini 3.1 Pro (High)',
+      'Claude Sonnet 4.6 (Thinking)',
+      'Claude Opus 4.6 (Thinking)',
+      'GPT-OSS 120B (Medium)',
+    ].map((model) => ({ id: model, label: model })),
+  );
 
 const noModels = () => Promise.resolve([] as ModelOption[]);
 const claudeModels = () =>
@@ -236,4 +243,33 @@ export function conservativeAuthenticationStatus(): AuthResult {
 
 export function isAgentId(value: string): value is AgentId {
   return agents.some((agent) => agent.id === value);
+}
+
+export async function agentCatalog(): Promise<
+  Array<{
+    id: AgentId;
+    displayName: string;
+    installed: boolean;
+    version: string | null;
+    models: ModelOption[];
+    efforts: string[];
+  }>
+> {
+  return Promise.all(
+    agents.map(async (agent) => {
+      const installation = await agent.detectInstallation();
+      const installed = installation.status === 'ready';
+      const [version, models] = installed
+        ? await Promise.all([agent.getVersion(), agent.getModels()])
+        : [null, []];
+      return {
+        id: agent.id,
+        displayName: agent.displayName,
+        installed,
+        version,
+        models,
+        efforts: await agent.getEffortLevels(),
+      };
+    }),
+  );
 }

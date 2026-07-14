@@ -10,6 +10,7 @@ import { handoffCommand } from './cli/handoff.js';
 import { runCommand } from './cli/run.js';
 import { switchCommand } from './cli/switch.js';
 import { usageCommand } from './cli/usage.js';
+import { agentsCommand } from './cli/agents.js';
 
 const program = new Command()
   .name('relay')
@@ -23,6 +24,7 @@ const program = new Command()
   .addCommand(runCommand())
   .addCommand(switchCommand())
   .addCommand(usageCommand())
+  .addCommand(agentsCommand())
   .addCommand(finishCommand())
   .addCommand(doctorCommand());
 

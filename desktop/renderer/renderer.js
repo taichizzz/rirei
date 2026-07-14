@@ -10,6 +10,7 @@ let commandRunning = false;
 const projectButton = document.querySelector('#choose');
 const commandButtons = [...document.querySelectorAll('[data-command]')];
 const interactiveButtons = [...document.querySelectorAll('[data-interactive]')];
+const profileButtons = [...document.querySelectorAll('[data-profile-agent]')];
 const stopButton = document.querySelector('#stop');
 const showTerminalButton = document.querySelector('#showTerminal');
 const dashboard = document.querySelector('#dashboard');
@@ -24,6 +25,21 @@ const dashboardTest = document.querySelector('#dashboardTest');
 const dashboardRemaining = document.querySelector('#dashboardRemaining');
 const dashboardDecisions = document.querySelector('#dashboardDecisions');
 const dashboardBlockers = document.querySelector('#dashboardBlockers');
+const timelineOpen = document.querySelector('#timelineOpen');
+const timelineCount = document.querySelector('#timelineCount');
+const timelineModal = document.querySelector('#timelineModal');
+const timelineClose = document.querySelector('#timelineClose');
+const timelineSummary = document.querySelector('#timelineSummary');
+const timelineList = document.querySelector('#timelineList');
+let agentHistory = [];
+let agentProfiles = {};
+try {
+  agentProfiles = JSON.parse(
+    localStorage.getItem('rirei-agent-profiles') || '{}',
+  );
+} catch {
+  agentProfiles = {};
+}
 
 const HOW_TO =
   'To open an agent session:\n' +
@@ -76,6 +92,7 @@ function syncControls() {
   projectButton.disabled = locked;
   for (const button of commandButtons) button.disabled = locked;
   for (const button of interactiveButtons) button.disabled = locked;
+  for (const button of profileButtons) button.disabled = locked;
   usageBtn.disabled = commandRunning;
   dashboardRefreshButton.disabled = commandRunning;
   stopButton.disabled = !terminalRunning;
@@ -126,6 +143,9 @@ function renderDashboard(data) {
     'No decisions recorded',
   );
   renderDashboardList(dashboardBlockers, data.blockers, 'No blockers', true);
+  agentHistory = Array.isArray(data.agentHistory) ? data.agentHistory : [];
+  timelineCount.textContent = String(agentHistory.length);
+  if (!timelineModal.hidden) renderTimeline(agentHistory);
 }
 
 function renderDashboardUnavailable(message) {
@@ -142,6 +162,9 @@ function renderDashboardUnavailable(message) {
   renderDashboardList(dashboardRemaining, [], message);
   renderDashboardList(dashboardDecisions, [], 'No decisions recorded');
   renderDashboardList(dashboardBlockers, [], 'No blockers');
+  agentHistory = [];
+  timelineCount.textContent = '0';
+  if (!timelineModal.hidden) renderTimeline(agentHistory);
 }
 
 async function refreshDashboard() {
@@ -249,10 +272,13 @@ document.querySelectorAll('[data-interactive]').forEach((button) =>
     commandRunning = true;
     syncControls();
     try {
+      const profile = agentProfiles[agent] ?? {};
       const result = await window.relay.interactive({
         project,
         command: button.dataset.interactive,
         agent,
+        model: profile.model,
+        effort: profile.effort,
         size: { cols: term.cols, rows: term.rows },
       });
       if (result.ok) {
@@ -291,6 +317,128 @@ showTerminalButton.addEventListener('click', () => {
   syncControls();
 });
 dashboardRefreshButton.addEventListener('click', refreshDashboard);
+
+/* ---- durable agent session timeline ---- */
+function formatSessionTime(iso) {
+  if (!iso) return '—';
+  const value = new Date(iso);
+  if (Number.isNaN(value.getTime())) return 'Unknown';
+  return value.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function formatDuration(startedAt, endedAt) {
+  const start = Date.parse(startedAt);
+  const end = endedAt ? Date.parse(endedAt) : Date.now();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 'Unknown';
+  const seconds = Math.floor((end - start) / 1000);
+  if (seconds < 1) return '<1s';
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function displayAgent(agent) {
+  const names = {
+    claude: 'Claude',
+    codex: 'Codex',
+    gemini: 'Gemini',
+    antigravity: 'Antigravity',
+  };
+  return names[agent] ?? agent ?? 'Unknown agent';
+}
+
+function displayExitReason(reason) {
+  if (!reason) return 'Result unknown';
+  return reason
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function timelineTone(run) {
+  if (!run.endedAt) return 'active';
+  if (run.exitReason === 'completed') return 'completed';
+  if (run.exitReason === 'user_cancelled') return 'cancelled';
+  return 'failed';
+}
+
+function renderTimeline(runs) {
+  timelineList.textContent = '';
+  timelineSummary.textContent =
+    runs.length === 0
+      ? 'No agent sessions recorded for this task.'
+      : `${runs.length} ${runs.length === 1 ? 'session' : 'sessions'} recorded · newest first`;
+
+  for (const run of [...runs].reverse()) {
+    const tone = timelineTone(run);
+    const item = el('li', `timeline-item ${tone}`);
+    const marker = el('span', 'timeline-marker');
+    marker.setAttribute('aria-hidden', 'true');
+    const card = el('article', 'timeline-card');
+    const head = el('div', 'timeline-card-head');
+    const identity = el('div', 'timeline-identity');
+    identity.append(
+      el('strong', null, displayAgent(run.agent)),
+      el('span', 'timeline-relative', relTime(run.startedAt)),
+    );
+    const status = el(
+      'span',
+      'timeline-status',
+      tone === 'active' ? 'Running' : displayExitReason(run.exitReason),
+    );
+    head.append(identity, status);
+
+    const profile = el('div', 'timeline-profile');
+    profile.append(
+      el('span', null, `Model · ${run.model ?? 'Auto'}`),
+      el('span', null, `Effort · ${run.effort ?? 'Auto'}`),
+    );
+
+    const facts = el('dl', 'timeline-facts');
+    for (const [label, value] of [
+      ['Started', formatSessionTime(run.startedAt)],
+      ['Ended', run.endedAt ? formatSessionTime(run.endedAt) : 'Still running'],
+      ['Duration', formatDuration(run.startedAt, run.endedAt)],
+      [
+        'Exit',
+        run.endedAt
+          ? `${displayExitReason(run.exitReason)}${run.exitCode == null ? '' : ` · code ${run.exitCode}`}`
+          : 'Pending',
+      ],
+    ]) {
+      const fact = el('div');
+      fact.append(el('dt', null, label), el('dd', null, value));
+      facts.append(fact);
+    }
+    card.append(head, profile, facts);
+    item.append(marker, card);
+    timelineList.append(item);
+  }
+}
+
+function openTimeline() {
+  renderTimeline(agentHistory);
+  timelineModal.hidden = false;
+}
+
+function closeTimeline() {
+  timelineModal.hidden = true;
+}
+
+timelineOpen.addEventListener('click', openTimeline);
+timelineClose.addEventListener('click', closeTimeline);
+timelineModal.addEventListener('click', (event) => {
+  if (event.target === timelineModal) closeTimeline();
+});
 /* ---- usage panel ---- */
 const usageBtn = document.querySelector('#usageBtn');
 const usageModal = document.querySelector('#usageModal');
@@ -420,8 +568,156 @@ usageClose.addEventListener('click', closeUsage);
 usageModal.addEventListener('click', (event) => {
   if (event.target === usageModal) closeUsage();
 });
+
+/* ---- model and effort profile ---- */
+const profileModal = document.querySelector('#profileModal');
+const profileClose = document.querySelector('#profileClose');
+const profileTitle = document.querySelector('#profileTitle');
+const profileStatus = document.querySelector('#profileStatus');
+const profileModel = document.querySelector('#profileModel');
+const profileEffort = document.querySelector('#profileEffort');
+const profileCustomRow = document.querySelector('#profileCustomRow');
+const profileCustomModel = document.querySelector('#profileCustomModel');
+const profilePreview = document.querySelector('#profilePreview');
+const profileReset = document.querySelector('#profileReset');
+const profileSave = document.querySelector('#profileSave');
+let selectedProfileAgent = null;
+let agentCatalogCache = null;
+let selectedCatalogAgent = null;
+
+function addOption(select, value, label) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = label;
+  select.append(option);
+}
+
+function selectedProfileModel() {
+  if (profileModel.value === '__custom')
+    return profileCustomModel.value.trim() || undefined;
+  return profileModel.value || undefined;
+}
+
+function updateProfilePreview() {
+  const model = selectedProfileModel();
+  const effort = profileEffort.value || undefined;
+  const provider =
+    selectedCatalogAgent?.displayName ?? selectedProfileAgent ?? 'Agent';
+  profilePreview.textContent = `${provider} will launch with model ${model ?? 'Auto'} and effort ${effort ?? 'Auto'}.`;
+}
+
+function populateEfforts(preferred) {
+  const model = selectedProfileModel();
+  const modelOption = selectedCatalogAgent?.models?.find(
+    (item) => item.id === model,
+  );
+  const efforts = modelOption?.efforts?.length
+    ? modelOption.efforts
+    : (selectedCatalogAgent?.efforts ?? []);
+  profileEffort.textContent = '';
+  addOption(profileEffort, '', 'Auto · provider default');
+  for (const effort of efforts) addOption(profileEffort, effort, effort);
+  profileEffort.disabled = efforts.length === 0;
+  profileEffort.value = efforts.includes(preferred) ? preferred : '';
+  updateProfilePreview();
+}
+
+async function loadAgentCatalog() {
+  if (agentCatalogCache) return agentCatalogCache;
+  const result = await window.relay.agentCatalog({ project });
+  if (!result.ok)
+    throw new Error(result.output || 'Could not load agent catalog.');
+  agentCatalogCache = result.data.agents;
+  return agentCatalogCache;
+}
+
+async function openProfile(agent) {
+  if (!project)
+    return show({ ok: false, output: 'Choose a project folder first.' });
+  selectedProfileAgent = agent;
+  selectedCatalogAgent = null;
+  profileModal.hidden = false;
+  profileTitle.textContent = agent;
+  profileStatus.textContent = 'Loading installed provider capabilities…';
+  profileModel.disabled = true;
+  profileEffort.disabled = true;
+  try {
+    const catalog = await loadAgentCatalog();
+    selectedCatalogAgent = catalog.find((item) => item.id === agent);
+    if (!selectedCatalogAgent)
+      throw new Error(`No adapter found for ${agent}.`);
+    profileTitle.textContent = selectedCatalogAgent.displayName;
+    profileStatus.textContent = selectedCatalogAgent.installed
+      ? `${selectedCatalogAgent.version ?? 'Installed'} · live model catalog`
+      : 'CLI not installed · selections can be saved for later';
+    const saved = agentProfiles[agent] ?? {};
+    profileModel.textContent = '';
+    addOption(profileModel, '', 'Auto · provider default');
+    for (const model of selectedCatalogAgent.models)
+      addOption(profileModel, model.id, model.label);
+    addOption(profileModel, '__custom', 'Custom model ID…');
+    const known = selectedCatalogAgent.models.some(
+      (model) => model.id === saved.model,
+    );
+    profileModel.value = saved.model ? (known ? saved.model : '__custom') : '';
+    profileCustomModel.value = known ? '' : (saved.model ?? '');
+    profileCustomRow.hidden = profileModel.value !== '__custom';
+    profileModel.disabled = false;
+    populateEfforts(saved.effort);
+  } catch (error) {
+    profileStatus.textContent =
+      error instanceof Error ? error.message : String(error);
+  }
+}
+
+function closeProfile() {
+  profileModal.hidden = true;
+}
+
+function updateProfileButtons() {
+  for (const button of profileButtons) {
+    const profile = agentProfiles[button.dataset.profileAgent] ?? {};
+    button.textContent = `${profile.model ?? 'Auto'} · ${profile.effort ?? 'Auto'}`;
+    button.title = button.textContent;
+  }
+}
+
+for (const button of profileButtons)
+  button.addEventListener('click', () =>
+    openProfile(button.dataset.profileAgent),
+  );
+profileModel.addEventListener('change', () => {
+  profileCustomRow.hidden = profileModel.value !== '__custom';
+  populateEfforts(agentProfiles[selectedProfileAgent]?.effort);
+  if (!profileCustomRow.hidden) profileCustomModel.focus();
+});
+profileCustomModel.addEventListener('input', updateProfilePreview);
+profileEffort.addEventListener('change', updateProfilePreview);
+profileClose.addEventListener('click', closeProfile);
+profileModal.addEventListener('click', (event) => {
+  if (event.target === profileModal) closeProfile();
+});
+profileReset.addEventListener('click', () => {
+  if (!selectedProfileAgent) return;
+  delete agentProfiles[selectedProfileAgent];
+  localStorage.setItem('rirei-agent-profiles', JSON.stringify(agentProfiles));
+  updateProfileButtons();
+  closeProfile();
+});
+profileSave.addEventListener('click', () => {
+  if (!selectedProfileAgent) return;
+  const model = selectedProfileModel();
+  const effort = profileEffort.value || undefined;
+  agentProfiles[selectedProfileAgent] = { model, effort };
+  localStorage.setItem('rirei-agent-profiles', JSON.stringify(agentProfiles));
+  updateProfileButtons();
+  closeProfile();
+});
+
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !usageModal.hidden) closeUsage();
+  if (event.key === 'Escape' && !profileModal.hidden) closeProfile();
+  if (event.key === 'Escape' && !timelineModal.hidden) closeTimeline();
 });
 
 window.addEventListener('resize', syncSize);
@@ -443,3 +739,4 @@ if (!project) output.textContent = HOW_TO;
 showProject();
 syncControls();
 refreshDashboard();
+updateProfileButtons();

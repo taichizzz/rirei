@@ -4,7 +4,37 @@ This file records user-visible changes made to Relay and its Rirei desktop app. 
 CLI command and `.relay/` state directory retain their existing names when the desktop app
 branding changes.
 
+## 2026-07-14
+
+### Agent session timeline
+
+- Added a Sessions counter and newest-first timeline to Rirei's task dashboard.
+- Added per-session provider, relative launch time, start/end timestamps, calculated duration,
+  active/completed/cancelled/failure styling, classified exit reason, and exit code.
+- Persisted explicit model and effort overrides with each new agent-run record. Missing values
+  are displayed as Auto and correctly mean Relay delegated selection to the provider.
+- Exposed the complete chronological `agentHistory` through `relay status --json`; the normal
+  human-readable status remains compact.
+- Added stable run IDs plus model/effort metadata to `agent_started` events and the same run ID
+  to `agent_ended`, making repeated launches correlatable in the append-only audit log.
+- Kept schema-version-1 compatibility by making the new run fields optional, so existing task
+  state needs no migration.
+- Added lifecycle coverage proving launch-profile metadata reaches state, structured status,
+  and the event log.
+- Documented timeline rendering, refresh behavior, exit classification, Auto semantics,
+  persistence, backward compatibility, and the no-transcript privacy boundary.
+
 ## 2026-07-13
+
+### Model and effort profiles
+
+- Added a persistent per-agent model and effort picker to Rirei.
+- Added live Codex model/reasoning discovery through `codex debug models` and an Antigravity
+  catalog verified through `agy models`.
+- Added verified Claude aliases and effort levels plus custom model ID support.
+- Added `relay agents --json` for machine-readable adapter capabilities.
+- Added `--model` and `--effort` session overrides to `relay run` and `relay switch` without
+  changing provider-global configuration.
 
 ### Task dashboard
 

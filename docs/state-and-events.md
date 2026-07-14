@@ -63,12 +63,20 @@ type BlockerRecord = { description: string; createdAt: string };
 type AgentRunRecord = {
   id?: string; // stable ID on new records; optional for schema-v1 compatibility
   agent: string;
+  model?: string; // explicit session override; absent means provider default
+  effort?: string; // explicit session override; absent means provider default
   startedAt: string;
   endedAt?: string;
   exitCode?: number | null;
   exitReason?: string;
 };
 ```
+
+Agent runs are appended in launch order and form the durable source for Rirei's session
+timeline. `model` and `effort` record only overrides Relay actually passed to the provider.
+Their absence means **Auto** (the provider chose its default); it does not claim which model
+the provider ultimately resolved. Both fields are optional so existing schema-version-1
+state files and older run records continue to validate without migration.
 
 Every field is validated on read. Timestamps are ISO-8601 strings; `datetime()` validation
 means a malformed timestamp is rejected.
@@ -117,16 +125,20 @@ loudly rather than loading partial data.
 
 Event types emitted today:
 
-| Event                | Emitted by                                                |
-| -------------------- | --------------------------------------------------------- |
-| `task_started`       | `relay start`                                             |
-| `checkpoint_created` | `createCheckpoint` (via `checkpoint`, `switch`, `finish`) |
-| `agent_started`      | `launchAgent` (via `run`, `switch`)                       |
-| `agent_ended`        | `launchAgent`, with `exitCode` and classified `reason`    |
-| `task_completed`     | `relay finish`                                            |
+| Event                | Emitted by                                                          |
+| -------------------- | ------------------------------------------------------------------- |
+| `task_started`       | `relay start`                                                       |
+| `checkpoint_created` | `createCheckpoint` (via `checkpoint`, `switch`, `finish`)           |
+| `agent_started`      | `launchAgent`, with run ID, agent, and model/effort overrides       |
+| `agent_ended`        | `launchAgent`, with run ID, agent, exit code, and classified reason |
+| `task_completed`     | `relay finish`                                                      |
 
 The log is append-only and intended for debugging, auditability, and reconstructing what
 happened. It is safe to git-ignore.
+
+`agent_started` writes `model: null` and `effort: null` when Auto was selected. Both the
+start and end events share the run ID stored on `AgentRunRecord`, allowing event consumers to
+correlate the pair even when the same provider is launched repeatedly.
 
 ## Recovery notes
 

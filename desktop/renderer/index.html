@@ -42,7 +42,12 @@
         <p class="label">Agents</p>
         <div class="agent-list">
           <article>
-            <b>Claude</b>
+            <span class="agent-identity">
+              <b>Claude</b>
+              <button class="profile-trigger" data-profile-agent="claude">
+                Auto · Auto
+              </button>
+            </span>
             <span>
               <button data-interactive="run" data-agent="claude">Run</button>
               <button data-interactive="switch" data-agent="claude">
@@ -51,7 +56,12 @@
             </span>
           </article>
           <article>
-            <b>Codex</b>
+            <span class="agent-identity">
+              <b>Codex</b>
+              <button class="profile-trigger" data-profile-agent="codex">
+                Auto · Auto
+              </button>
+            </span>
             <span>
               <button data-interactive="run" data-agent="codex">Run</button>
               <button data-interactive="switch" data-agent="codex">
@@ -60,7 +70,12 @@
             </span>
           </article>
           <article>
-            <b>Antigravity</b>
+            <span class="agent-identity">
+              <b>Antigravity</b>
+              <button class="profile-trigger" data-profile-agent="antigravity">
+                Auto · Auto
+              </button>
+            </span>
             <span>
               <button data-interactive="run" data-agent="antigravity">
                 Run</button
@@ -100,9 +115,14 @@
             <span id="dashboardStatus" class="status-pill">Idle</span>
           </div>
         </div>
-        <button id="dashboardRefresh" aria-label="Refresh dashboard">
-          Refresh
-        </button>
+        <div class="dashboard-actions">
+          <button id="timelineOpen" aria-label="Open agent session timeline">
+            Sessions <span id="timelineCount">0</span>
+          </button>
+          <button id="dashboardRefresh" aria-label="Refresh dashboard">
+            Refresh
+          </button>
+        </div>
       </div>
       <div class="dashboard-metrics">
         <div><span>Agent</span><strong id="dashboardAgent">—</strong></div>
@@ -152,6 +172,29 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
       <div id="terminal"></div>
     </section>
 
+    <div id="timelineModal" class="modal" hidden>
+      <div class="modal-panel timeline-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">Agent history</p>
+            <h2>Session timeline</h2>
+          </div>
+          <button id="timelineClose" aria-label="Close session timeline">
+            Close
+          </button>
+        </div>
+        <p id="timelineSummary" class="timeline-summary">
+          No agent sessions recorded for this task.
+        </p>
+        <ol id="timelineList" class="timeline-list"></ol>
+        <p class="timeline-note">
+          Times, launch profiles, and exit results come from Relay's durable
+          task state. Auto means no model or effort override was passed for that
+          session.
+        </p>
+      </div>
+    </div>
+
     <div id="usageModal" class="modal" hidden>
       <div class="modal-panel">
         <div class="modal-head">
@@ -169,6 +212,42 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
           source is available. Unknown means Rirei refused to guess. No provider
           credentials are read or stored.
         </p>
+      </div>
+    </div>
+
+    <div id="profileModal" class="modal" hidden>
+      <div class="modal-panel profile-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">Session profile</p>
+            <h2 id="profileTitle">Agent</h2>
+          </div>
+          <button id="profileClose" aria-label="Close profile">Close</button>
+        </div>
+        <p id="profileStatus" class="profile-status">Loading capabilities…</p>
+        <div class="profile-fields">
+          <label>
+            <span>Model</span>
+            <select id="profileModel"></select>
+          </label>
+          <label id="profileCustomRow" hidden>
+            <span>Custom model ID</span>
+            <input id="profileCustomModel" placeholder="provider-model-id" />
+          </label>
+          <label>
+            <span>Effort</span>
+            <select id="profileEffort"></select>
+          </label>
+        </div>
+        <div id="profilePreview" class="profile-preview"></div>
+        <p class="profile-note">
+          Auto uses the provider default. Rirei only passes documented flags and
+          never changes your global provider configuration.
+        </p>
+        <div class="profile-actions">
+          <button id="profileReset">Reset to Auto</button>
+          <button id="profileSave" class="primary">Save profile</button>
+        </div>
       </div>
     </div>
 

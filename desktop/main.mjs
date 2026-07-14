@@ -39,6 +39,17 @@ function validProject(project) {
   );
 }
 
+function validSelection(value, maxLength = 120) {
+  return (
+    value === undefined ||
+    (typeof value === 'string' &&
+      value.length > 0 &&
+      value.length <= maxLength &&
+      !value.startsWith('-') &&
+      !value.includes('\0'))
+  );
+}
+
 function runCli(project, command, args = []) {
   return new Promise((resolve) => {
     const child = spawn(nodePath(), [cliPath(), command, ...args], {
@@ -68,7 +79,7 @@ function terminalSize(size) {
   };
 }
 
-function startTerminal(event, project, command, agent, size) {
+function startTerminal(event, project, command, agent, size, selection) {
   if (!existsSync(path.join(project, '.relay', 'config.json'))) {
     return {
       ok: false,
@@ -94,7 +105,15 @@ function startTerminal(event, project, command, agent, size) {
   const { cols, rows } = terminalSize(size);
   const child = spawn(
     '/usr/bin/python3',
-    [path.join(here, 'pty_bridge.py'), nodePath(), cliPath(), command, agent],
+    [
+      path.join(here, 'pty_bridge.py'),
+      nodePath(),
+      cliPath(),
+      command,
+      agent,
+      ...(selection.model ? ['--model', selection.model] : []),
+      ...(selection.effort ? ['--effort', selection.effort] : []),
+    ],
     {
       cwd: project,
       env: {
@@ -180,12 +199,25 @@ function registerIpc() {
       return { ok: false, output: 'Could not read structured task status.' };
     }
   });
+  ipcMain.handle('relay:agent-catalog', async (_event, request) => {
+    if (!request || !validProject(request.project))
+      return { ok: false, output: 'Invalid project.' };
+    const result = await runCli(request.project, 'agents', ['--json']);
+    if (!result.ok) return result;
+    try {
+      return { ok: true, data: JSON.parse(result.output) };
+    } catch {
+      return { ok: false, output: 'Could not read agent capabilities.' };
+    }
+  });
   ipcMain.handle('relay:interactive', (event, request) => {
     if (
       !request ||
       !validProject(request.project) ||
       !['run', 'switch'].includes(request.command) ||
-      !agents.has(request.agent)
+      !agents.has(request.agent) ||
+      !validSelection(request.model) ||
+      !validSelection(request.effort, 20)
     )
       return { ok: false, output: 'Invalid interactive command.' };
     return startTerminal(
@@ -194,6 +226,7 @@ function registerIpc() {
       request.command,
       request.agent,
       request.size,
+      { model: request.model, effort: request.effort },
     );
   });
   ipcMain.on('relay:terminal-input', (event, data) => {

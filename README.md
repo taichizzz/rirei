@@ -51,7 +51,15 @@ Open `Relay Launcher.app`, choose a Git repository, and Relay will initialize it
 
 Its task dashboard shows live task status, current agent, Git branch and changes, latest
 checkpoint/test, remaining work, decisions, and blockers from structured `relay status --json`
-output.
+output. A durable agent-session timeline shows every launch for the task, including the
+provider, session model/effort overrides, start and end times, duration, and classified exit
+result. Active sessions update when the dashboard refreshes, and historical sessions remain
+available after the agent exits or the task completes.
+
+Each agent row also has a persistent session-profile picker. Claude exposes verified aliases
+and effort levels, Codex loads its live model catalog and model-specific reasoning levels,
+and Antigravity offers a catalog verified against `agy models`. Auto always preserves the provider's
+default, and custom model IDs are supported without changing global provider configuration.
 
 After installing development dependencies, use `npm run desktop:dev` or build DMG and ZIP artifacts with `npm run desktop:build`. The existing AppleScript launcher remains available unchanged.
 

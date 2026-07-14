@@ -123,6 +123,7 @@ export async function launchAgent(
   state: RelayState,
   adapter: AgentAdapter,
   prompt: string,
+  selection: { model?: string; effort?: string } = {},
 ): Promise<{ result: ProcessResult; state: RelayState }> {
   const installation = await adapter.detectInstallation();
   if (installation.status !== 'ready')
@@ -134,6 +135,8 @@ export async function launchAgent(
     projectRoot: root,
     prompt,
     providerSettingsPath,
+    model: selection.model,
+    effort: selection.effort,
   });
   if (state.currentAgent)
     throw new Error(
@@ -141,7 +144,13 @@ export async function launchAgent(
     );
   const startedAt = new Date().toISOString();
   const runId = randomUUID();
-  const run = { id: runId, agent: adapter.id, startedAt };
+  const run = {
+    id: runId,
+    agent: adapter.id,
+    model: selection.model,
+    effort: selection.effort,
+    startedAt,
+  };
   const history = [...state.agentHistory, run];
   let next: RelayState = {
     ...state,
@@ -149,7 +158,12 @@ export async function launchAgent(
     agentHistory: history,
   };
   await writeState(root, next);
-  await appendEvent(root, 'agent_started', { agent: adapter.id });
+  await appendEvent(root, 'agent_started', {
+    runId,
+    agent: adapter.id,
+    model: selection.model ?? null,
+    effort: selection.effort ?? null,
+  });
   let spawnError: Error | undefined;
   let result: ProcessResult;
   try {
@@ -194,6 +208,7 @@ export async function launchAgent(
   };
   await writeState(root, next);
   await appendEvent(root, 'agent_ended', {
+    runId,
     agent: adapter.id,
     exitCode: result.exitCode,
     reason: classification.reason,

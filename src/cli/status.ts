@@ -37,6 +37,7 @@ export function statusCommand(): Command {
               },
               currentAgent: state.currentAgent ?? null,
               previousAgents,
+              agentHistory: state.agentHistory,
               latestTest: latestTest ?? null,
               latestCheckpoint: latestCheckpoint ?? null,
               completedWork: state.completedWork,

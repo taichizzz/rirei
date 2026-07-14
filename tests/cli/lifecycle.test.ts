@@ -85,6 +85,7 @@ describe('Relay lifecycle commands', () => {
       task: { title: 'Implement a reliable handoff', status: 'active' },
       git: { currentBranch: 'main', dirty: false, changedFiles: 0 },
       currentAgent: null,
+      agentHistory: [],
       remainingWork: [],
       decisions: [],
       blockers: [],
@@ -175,6 +176,52 @@ describe('Relay lifecycle commands', () => {
       exitReason: 'completed',
       exitCode: 0,
     });
+  });
+
+  it('exposes model and effort details in the durable session timeline', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Track agent sessions');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    const executable = path.join(bin, 'codex');
+    await writeFile(executable, '#!/bin/sh\nexit 0\n');
+    await chmod(executable, 0o700);
+    await relayWithEnv(
+      root,
+      { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+      'run',
+      'codex',
+      '--prompt',
+      'Continue safely',
+      '--model',
+      'gpt-5.2-codex',
+      '--effort',
+      'high',
+    );
+
+    const status = JSON.parse(
+      (await relay(root, 'status', '--json')).stdout,
+    ) as {
+      agentHistory: Array<Record<string, unknown>>;
+    };
+    expect(status.agentHistory).toHaveLength(1);
+    expect(status.agentHistory[0]).toMatchObject({
+      id: expect.any(String),
+      agent: 'codex',
+      model: 'gpt-5.2-codex',
+      effort: 'high',
+      startedAt: expect.any(String),
+      endedAt: expect.any(String),
+      exitCode: 0,
+      exitReason: 'completed',
+    });
+    const events = await readFile(`${root}/.relay/events.jsonl`, 'utf8');
+    expect(events).toContain('"type":"agent_started"');
+    expect(events).toContain('"model":"gpt-5.2-codex"');
+    expect(events).toContain('"effort":"high"');
+    expect(events).toContain('"type":"agent_ended"');
   });
 
   it('finishes with a final checkpoint without running tests by default', async () => {

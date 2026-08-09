@@ -2,12 +2,35 @@ node_modules/
 dist/
 coverage/
 release/
+.cache/
+.eslintcache
+.tmp/
 .DS_Store
+*.log
 *.pyc
 **/__pycache__/
 *.app/
-.relay/events.jsonl
-.relay/checkpoints/
-.relay/test-output/
-.relay/runtime/
-.relay/provider-usage/
+
+# Relay/Rirei state is machine-local and may contain paths, task text, and patches.
+.relay/
+
+# Local environment and editor state.
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Signing, notarization, and provisioning material.
+*.cer
+*.p12
+*.provisionprofile
+*.mobileprovision
+*.key
+*.pem
+notarization-output/
+
+# Private implementation roadmap.
+plan.md

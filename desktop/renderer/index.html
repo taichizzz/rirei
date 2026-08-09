@@ -14,8 +14,22 @@
   <body>
     <header class="bar">
       <div class="wordmark">
-        <span class="mark">R</span>
-        <span class="name">Rirei</span>
+        <svg
+          class="wordmark-logo"
+          viewBox="0 0 133 35"
+          role="img"
+          aria-labelledby="wordmark-title"
+        >
+          <title id="wordmark-title">Rirei</title>
+          <defs>
+            <path
+              id="wordmark-glyphs"
+              d="M0 3h16v4H5v7h11v4H5v14H0V3Zm16 4h5v7h-5V7Zm-5 11h5v4h3v5h3v5h-6v-5h-3v-5h-2v-4ZM28 3h21v4h-8v21h8v4H28v-4h8V7h-8V3Zm28 0h16v4H61v7h11v4H61v14h-5V3Zm16 4h5v7h-5V7Zm-5 11h5v4h3v5h3v5h-6v-5h-3v-5h-2v-4ZM84 3h21v4H89v7h13v4H89v10h16v4H84V3Zm28 0h21v4h-8v21h8v4h-21v-4h8V7h-8V3Z"
+            />
+          </defs>
+          <use class="wordmark-shadow" href="#wordmark-glyphs" y="3" />
+          <use class="wordmark-face" href="#wordmark-glyphs" />
+        </svg>
       </div>
       <button id="choose" class="project">
         <span>Project</span><strong id="projectName">Choose folder</strong>
@@ -50,6 +64,9 @@
             </span>
             <span>
               <button data-interactive="run" data-agent="claude">Run</button>
+              <button data-interactive="resume" data-agent="claude">
+                Resume
+              </button>
               <button data-interactive="switch" data-agent="claude">
                 Switch
               </button>
@@ -64,6 +81,9 @@
             </span>
             <span>
               <button data-interactive="run" data-agent="codex">Run</button>
+              <button data-interactive="resume" data-agent="codex">
+                Resume
+              </button>
               <button data-interactive="switch" data-agent="codex">
                 Switch
               </button>
@@ -116,12 +136,16 @@
           </div>
         </div>
         <div class="dashboard-actions">
+          <button id="historyOpen" aria-label="Search task history">
+            History
+          </button>
           <button id="timelineOpen" aria-label="Open agent session timeline">
             Sessions <span id="timelineCount">0</span>
           </button>
           <button id="dashboardRefresh" aria-label="Refresh dashboard">
             Refresh
           </button>
+          <button id="recoverRun" hidden>Recover stale run</button>
         </div>
       </div>
       <div class="dashboard-metrics">
@@ -129,7 +153,8 @@
         <div><span>Branch</span><strong id="dashboardBranch">—</strong></div>
         <div><span>Changes</span><strong id="dashboardChanges">—</strong></div>
         <div>
-          <span>Checkpoint</span><strong id="dashboardCheckpoint">—</strong>
+          <span>Checkpoint</span
+          ><button id="dashboardCheckpoint" disabled>—</button>
         </div>
         <div><span>Tests</span><strong id="dashboardTest">—</strong></div>
       </div>
@@ -157,11 +182,19 @@
 
     <section class="terminal-card">
       <div class="output-head">
-        <div>
-          <span id="signal"></span>
-          <p class="label">Terminal</p>
+        <div class="terminal-tabs" id="terminalTabs">
+          <button
+            id="addTerminalBtn"
+            class="tab-btn add-btn"
+            title="Launch new agent"
+            aria-label="Launch new agent"
+          >
+            +
+          </button>
         </div>
         <div class="terminal-actions">
+          <button id="openShell">Shell</button>
+          <button id="hiddenTerminals" hidden>Hidden (0)</button>
           <button id="showTerminal" hidden>Show terminal</button>
           <button id="stop" disabled>Stop</button
           ><button id="clear">Clear</button>
@@ -169,8 +202,90 @@
       </div>
       <pre id="output" tabindex="0">
 Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
-      <div id="terminal"></div>
+      <div id="terminalsContainer"></div>
     </section>
+
+    <div
+      id="closeTabModal"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="closeTabModalTitle"
+      hidden
+    >
+      <div class="modal-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">Running Agent</p>
+            <h2 id="closeTabModalTitle">Close running tab?</h2>
+          </div>
+        </div>
+        <p class="timeline-note">
+          This session is still running. Hidden sessions remain alive only while
+          Rirei is open.
+        </p>
+        <div class="profile-actions">
+          <button id="closeTabHide">Keep running and hide</button>
+          <button id="closeTabInterrupt" class="danger">Send interrupt</button>
+          <button id="closeTabCancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="launchDialogModal"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="launchDialogModalTitle"
+      hidden
+    >
+      <div class="modal-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">Launch Agent</p>
+            <h2 id="launchDialogModalTitle">New Session</h2>
+          </div>
+          <button id="launchDialogClose" aria-label="Close launch dialog">
+            Close
+          </button>
+        </div>
+        <div class="profile-fields">
+          <label>
+            <span>Provider</span>
+            <select id="launchProvider">
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+              <option value="gemini">Gemini</option>
+              <option value="antigravity">Antigravity</option>
+            </select>
+          </label>
+          <label>
+            <span>Workspace</span>
+            <select id="launchWorkspaceChoice">
+              <option value="__main">Main working tree</option>
+              <option value="__create">Create isolated workspace</option>
+            </select>
+          </label>
+          <label id="launchRoleRow" hidden>
+            <span>Workspace Role</span>
+            <select id="launchRole">
+              <option value="implement">Implement</option>
+              <option value="review">Review</option>
+              <option value="verify">Verify</option>
+              <option value="investigate">Investigate</option>
+            </select>
+          </label>
+          <label id="launchSlugRow" hidden>
+            <span>Workspace Slug (optional)</span>
+            <input id="launchSlug" placeholder="task-slug" />
+          </label>
+        </div>
+        <div class="profile-actions">
+          <button id="launchDialogRun" class="primary">Run Agent</button>
+        </div>
+      </div>
+    </div>
 
     <div id="timelineModal" class="modal" hidden>
       <div class="modal-panel timeline-panel">
@@ -215,6 +330,63 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
       </div>
     </div>
 
+    <div
+      id="historyModal"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="historyModalTitle"
+      hidden
+    >
+      <div class="modal-panel history-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">Project archive</p>
+            <h2 id="historyModalTitle">Task history</h2>
+          </div>
+          <button id="historyClose" aria-label="Close task history">
+            Close
+          </button>
+        </div>
+        <input
+          id="historySearch"
+          class="history-search"
+          placeholder="Search tasks, agents, models, outcomes…"
+        />
+        <p id="historyStatus" class="history-status"></p>
+        <ol id="historyList" class="history-list"></ol>
+      </div>
+    </div>
+
+    <div
+      id="checkpointModal"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="checkpointModalTitle"
+      hidden
+    >
+      <div class="modal-panel checkpoint-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">Saved Git state</p>
+            <h2 id="checkpointModalTitle">Checkpoint diff</h2>
+          </div>
+          <button id="checkpointClose" aria-label="Close checkpoint diff">
+            Close
+          </button>
+        </div>
+        <div class="checkpoint-layout">
+          <ol id="checkpointList" class="checkpoint-list"></ol>
+          <div class="checkpoint-detail">
+            <div id="checkpointMeta" class="checkpoint-meta"></div>
+            <div id="checkpointWarnings" class="checkpoint-warnings"></div>
+            <pre id="checkpointPatch" class="checkpoint-patch"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="profileModal" class="modal" hidden>
       <div class="modal-panel profile-panel">
         <div class="modal-head">
@@ -253,6 +425,6 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
 
     <script src="vendor/xterm.js"></script>
     <script src="vendor/addon-fit.js"></script>
-    <script src="renderer.js"></script>
+    <script type="module" src="renderer.js"></script>
   </body>
 </html>

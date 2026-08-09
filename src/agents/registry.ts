@@ -8,6 +8,7 @@ import {
   type AuthResult,
   type InstallationResult,
   type AgentRunContext,
+  type AgentResumeContext,
   type CommandSpec,
   type ProcessResult,
   type ModelOption,
@@ -23,6 +24,8 @@ class OfficialCliAdapter implements AgentAdapter {
     private readonly promptArgs: (context: AgentRunContext) => string[],
     private readonly models: () => Promise<ModelOption[]>,
     private readonly effortLevels: string[],
+    private readonly resumeArgs?: (context: AgentResumeContext) => string[],
+    readonly resumeCapabilities?: { supportsFork: boolean },
   ) {}
 
   detectInstallation(): Promise<InstallationResult> {
@@ -58,6 +61,28 @@ class OfficialCliAdapter implements AgentAdapter {
   async buildInteractiveCommand(
     context: AgentRunContext,
   ): Promise<CommandSpec> {
+    this.validateSelection(context);
+    return {
+      executable: this.executable,
+      args: this.promptArgs(context),
+    };
+  }
+  async buildResumeCommand(context: AgentResumeContext): Promise<CommandSpec> {
+    if (!this.resumeArgs || !this.resumeCapabilities)
+      throw new Error(`${this.displayName} does not support session resume.`);
+    if (context.fork && !this.resumeCapabilities.supportsFork)
+      throw new Error(`${this.displayName} does not support session forks.`);
+    if (context.resumeTargetKind === 'picker' && context.prompt)
+      throw new Error(
+        `${this.displayName} session pickers cannot accept an initial prompt; use --latest or --id.`,
+      );
+    this.validateSelection(context);
+    return {
+      executable: this.executable,
+      args: this.resumeArgs(context),
+    };
+  }
+  private validateSelection(context: AgentRunContext): void {
     if (
       context.model &&
       (context.model.length > 120 || context.model.startsWith('-'))
@@ -67,10 +92,6 @@ class OfficialCliAdapter implements AgentAdapter {
       throw new Error(
         `Unsupported effort for ${this.displayName}: ${context.effort}.`,
       );
-    return {
-      executable: this.executable,
-      args: this.promptArgs(context),
-    };
   }
   classifyExit(result: ProcessResult): Promise<{
     reason:
@@ -157,12 +178,30 @@ const agents: ReadonlyArray<AgentAdapter> = [
       ...(context.providerSettingsPath
         ? ['--settings', context.providerSettingsPath]
         : []),
+      ...(context.providerSessionId
+        ? ['--session-id', context.providerSessionId]
+        : []),
       ...(context.model ? ['--model', context.model] : []),
       ...(context.effort ? ['--effort', context.effort] : []),
-      context.prompt,
+      ...(context.prompt ? [context.prompt] : []),
     ],
     claudeModels,
     ['low', 'medium', 'high', 'xhigh', 'max'],
+    (context) => [
+      ...(context.providerSettingsPath
+        ? ['--settings', context.providerSettingsPath]
+        : []),
+      ...(context.model ? ['--model', context.model] : []),
+      ...(context.effort ? ['--effort', context.effort] : []),
+      ...(context.resumeTargetKind === 'latest'
+        ? ['--continue']
+        : context.resumeTargetKind === 'id'
+          ? ['--resume', context.resumeTargetValue!]
+          : ['--resume']),
+      ...(context.fork ? ['--fork-session'] : []),
+      ...(context.prompt ? [context.prompt] : []),
+    ],
+    { supportsFork: true },
   ),
   new OfficialCliAdapter(
     'codex',
@@ -173,10 +212,24 @@ const agents: ReadonlyArray<AgentAdapter> = [
       ...(context.effort
         ? ['--config', `model_reasoning_effort="${context.effort}"`]
         : []),
-      context.prompt,
+      ...(context.prompt ? [context.prompt] : []),
     ],
     codexModels,
     ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    (context) => [
+      'resume',
+      ...(context.model ? ['--model', context.model] : []),
+      ...(context.effort
+        ? ['--config', `model_reasoning_effort="${context.effort}"`]
+        : []),
+      ...(context.resumeTargetKind === 'latest'
+        ? ['--last']
+        : context.resumeTargetKind === 'id'
+          ? [context.resumeTargetValue!]
+          : []),
+      ...(context.prompt ? [context.prompt] : []),
+    ],
+    { supportsFork: false },
   ),
   // --prompt-interactive starts a real session; --prompt would run headless
   // and exit (and headless mode refuses to launch the first-run auth picker).
@@ -187,7 +240,7 @@ const agents: ReadonlyArray<AgentAdapter> = [
     (context) => [
       ...(context.model ? ['--model', context.model] : []),
       '--prompt-interactive',
-      context.prompt,
+      ...(context.prompt ? [context.prompt] : []),
     ],
     noModels,
     [],
@@ -203,7 +256,7 @@ const agents: ReadonlyArray<AgentAdapter> = [
     (context) => [
       ...(context.model ? ['--model', context.model] : []),
       '--prompt-interactive',
-      context.prompt,
+      ...(context.prompt ? [context.prompt] : []),
     ],
     antigravityModels,
     [],

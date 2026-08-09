@@ -8,8 +8,8 @@ export function checkpointCommand(): Command {
     )
     .option('-m, --message <message>', 'short checkpoint label')
     .action(async (options: { message?: string }) => {
-      const { root, state } = await taskContext();
-      const checkpoint = await createCheckpoint(root, state, options.message);
+      const { root } = await taskContext();
+      const checkpoint = await createCheckpoint(root, options.message);
       process.stdout.write(`Created checkpoint ${checkpoint.id}\n`);
     });
 }

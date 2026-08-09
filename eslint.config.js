@@ -5,7 +5,15 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    ignores: ['dist/', 'coverage/', 'release/', 'desktop/renderer/vendor/'],
+    ignores: [
+      'dist/',
+      'coverage/',
+      'release/',
+      'desktop/renderer/vendor/',
+      // Generated local Relay state (provider-usage collectors, checkpoints,
+      // runtime artifacts). Written at run time, never source.
+      '.relay/',
+    ],
   },
   {
     // Electron main/preload run in Node, not the browser or TS build.
@@ -13,6 +21,8 @@ export default tseslint.config(
     languageOptions: {
       globals: {
         process: 'readonly',
+        Buffer: 'readonly',
+        URL: 'readonly',
         module: 'writable',
         __dirname: 'readonly',
         console: 'readonly',

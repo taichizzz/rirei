@@ -5,7 +5,10 @@ import type { RelayState } from '../src/state/schema.js';
 function baseState(overrides: Partial<RelayState> = {}): RelayState {
   const now = '2026-07-12T00:00:00.000Z';
   return {
-    schemaVersion: 1,
+    schemaVersion: 3,
+    revision: 0,
+    recentOperations: [],
+    runs: [],
     sessionId: 'session-1',
     projectRoot: '/tmp/repo',
     task: {

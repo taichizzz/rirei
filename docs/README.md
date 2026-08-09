@@ -10,18 +10,20 @@ say so explicitly rather than describing aspirational behavior.
 
 ## Contents
 
-| Document                                                 | What it covers                                                                    |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [architecture.md](architecture.md)                       | Module layout, data flow, and how a command executes end to end.                  |
-| [cli-reference.md](cli-reference.md)                     | Every `relay` command, its options, and exact behavior.                           |
-| [configuration.md](configuration.md)                     | `.relay/config.json` schema, defaults, and which fields are honored vs. reserved. |
-| [state-and-events.md](state-and-events.md)               | The `RelayState` schema, atomic writes, and the append-only event log.            |
-| [checkpoints-and-handoff.md](checkpoints-and-handoff.md) | Checkpoint contents, size bounding, and the handoff format.                       |
-| [agents.md](agents.md)                                   | The adapter contract, executable/exit detection, and how to add an adapter.       |
-| [desktop.md](desktop.md)                                 | The Electron app, the integrated xterm.js terminal, and the PTY bridge.           |
-| [security.md](security.md)                               | Authentication boundary, Git safety rules, path policy, and secret handling.      |
-| [development.md](development.md)                         | Building, testing, linting, packaging, and the source tree.                       |
-| [changelog.md](changelog.md)                             | User-visible implementation and documentation changes.                            |
+| Document                                                 | What it covers                                                                     |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [architecture.md](architecture.md)                       | Module layout, data flow, and how a command executes end to end.                   |
+| [cli-reference.md](cli-reference.md)                     | Every `relay` command, its options, and exact behavior.                            |
+| [configuration.md](configuration.md)                     | `.relay/config.json` schema, defaults, and which fields are honored vs. reserved.  |
+| [state-and-events.md](state-and-events.md)               | The `RelayState` schema, migrations, atomic writes, and activity projection.       |
+| [checkpoints-and-handoff.md](checkpoints-and-handoff.md) | Checkpoint contents, size bounding, and the handoff format.                        |
+| [agents.md](agents.md)                                   | The adapter contract, executable/exit detection, and how to add an adapter.        |
+| [desktop.md](desktop.md)                                 | The Electron app, the integrated xterm.js terminal, and the PTY bridge.            |
+| [security.md](security.md)                               | Authentication boundary, Git safety rules, path policy, and secret handling.       |
+| [approval-protocol.md](approval-protocol.md)             | Versioned local permission-decision boundary and provider activation requirements. |
+| [development.md](development.md)                         | Building, testing, linting, packaging, and the source tree.                        |
+| [publication.md](publication.md)                         | Licensing, package checks, history cleanup, and release gates.                     |
+| [changelog.md](changelog.md)                             | User-visible implementation and documentation changes.                             |
 
 ## Quick orientation
 

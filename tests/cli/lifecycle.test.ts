@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { activityFilePath } from '../../src/state/activity.js';
 import { createRepository, removeRepository } from '../helpers.js';
 
 const execFileAsync = promisify(execFile);
@@ -60,7 +61,7 @@ describe('Relay lifecycle commands', () => {
     await expect(relay(root, 'init')).rejects.toThrow('refusing to overwrite');
   });
 
-  it('records a task baseline and event', async () => {
+  it('records a task baseline and publishes the global activity snapshot', async () => {
     const root = await createRepository();
     directories.push(root);
     await relay(root, 'init');
@@ -77,9 +78,12 @@ describe('Relay lifecycle commands', () => {
       status: 'active',
     });
     expect(state.git.dirtyAtStart).toBe(false);
-    await expect(
-      readFile(`${root}/.relay/events.jsonl`, 'utf8'),
-    ).resolves.toContain('task_started');
+    const activity = JSON.parse(await readFile(activityFilePath(), 'utf8')) as {
+      schemaVersion: number;
+      sessions: unknown[];
+    };
+    expect(activity).toMatchObject({ schemaVersion: 1, sessions: [] });
+    expect(activity).not.toHaveProperty('events');
     const status = await relay(root, 'status', '--json');
     expect(JSON.parse(status.stdout)).toMatchObject({
       task: { title: 'Implement a reliable handoff', status: 'active' },
@@ -217,11 +221,451 @@ describe('Relay lifecycle commands', () => {
       exitCode: 0,
       exitReason: 'completed',
     });
-    const events = await readFile(`${root}/.relay/events.jsonl`, 'utf8');
-    expect(events).toContain('"type":"agent_started"');
-    expect(events).toContain('"model":"gpt-5.2-codex"');
-    expect(events).toContain('"effort":"high"');
-    expect(events).toContain('"type":"agent_ended"');
+    const activity = await readFile(activityFilePath(), 'utf8');
+    expect(JSON.parse(activity)).toMatchObject({ schemaVersion: 1 });
+    expect(activity).not.toContain('gpt-5.2-codex');
+    expect(activity).not.toContain('high');
+  });
+
+  it('does not spawn a duplicate provider for a repeated operation ID', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Retry provider launch safely');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    const executable = path.join(bin, 'codex');
+    await writeFile(
+      executable,
+      '#!/bin/sh\nprintf "launch\\n" >> "$RELAY_FAKE_LOG"\n',
+    );
+    await chmod(executable, 0o700);
+    const log = path.join(root, 'operation-launches.log');
+    const env = {
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      RELAY_FAKE_LOG: log,
+    };
+
+    await relayWithEnv(
+      root,
+      env,
+      'run',
+      'codex',
+      '--prompt',
+      'Once',
+      '--operation-id',
+      'desktop-terminal-1',
+    );
+    await relayWithEnv(
+      root,
+      env,
+      'run',
+      'codex',
+      '--prompt',
+      'Once',
+      '--operation-id',
+      'desktop-terminal-1',
+    );
+
+    await expect(readFile(log, 'utf8')).resolves.toBe('launch\n');
+    const state = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as { agentHistory: Array<{ id?: string }> };
+    expect(state.agentHistory).toHaveLength(1);
+  });
+
+  it('assigns and persists a Claude session ID for a new launch', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Track Claude session identity');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    await writeFile(
+      path.join(bin, 'claude'),
+      '#!/bin/sh\nprintf "%s\\n" "$@" > "$RELAY_FAKE_LOG"\n',
+    );
+    await chmod(path.join(bin, 'claude'), 0o700);
+    const log = path.join(root, 'claude-args.log');
+    await relayWithEnv(
+      root,
+      {
+        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        RELAY_FAKE_LOG: log,
+      },
+      'run',
+      'claude',
+      '--prompt',
+      'Start here',
+    );
+
+    const state = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as {
+      currentRunId?: string;
+      agentHistory: Array<{
+        launchMode?: string;
+        providerSessionId?: string;
+      }>;
+    };
+    const run = state.agentHistory.at(-1)!;
+    expect(run).toMatchObject({
+      launchMode: 'new',
+      providerSessionId: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      ),
+    });
+    expect(state.currentRunId).toBeUndefined();
+    const args = (await readFile(log, 'utf8')).trim().split('\n');
+    expect(args).toContain('--session-id');
+    expect(args[args.indexOf('--session-id') + 1]).toBe(run.providerSessionId);
+    expect(args.at(-1)).toBe('Start here');
+  });
+
+  it('launches Claude resume and fork commands and records their parent metadata', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Resume Claude safely');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    await writeFile(
+      path.join(bin, 'claude'),
+      '#!/bin/sh\nprintf "%s\\n" "$@" > "$RELAY_FAKE_LOG"\n',
+    );
+    await chmod(path.join(bin, 'claude'), 0o700);
+    const log = path.join(root, 'claude-resume-args.log');
+    const env = {
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      RELAY_FAKE_LOG: log,
+    };
+    await relayWithEnv(root, env, 'run', 'claude', '--prompt', 'First');
+    const firstState = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as {
+      agentHistory: Array<{ id: string; providerSessionId: string }>;
+    };
+    const firstRun = firstState.agentHistory.at(-1)!;
+    await relayWithEnv(
+      root,
+      env,
+      'resume',
+      'claude',
+      '--id',
+      firstRun.providerSessionId,
+      '--fork',
+      '--prompt',
+      'Try another path',
+    );
+
+    const args = (await readFile(log, 'utf8')).trim().split('\n');
+    expect(args).toEqual(
+      expect.arrayContaining([
+        '--resume',
+        firstRun.providerSessionId,
+        '--fork-session',
+        'Try another path',
+      ]),
+    );
+    expect(args).not.toContain('--session-id');
+    const state = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as { agentHistory: Array<Record<string, unknown>> };
+    expect(state.agentHistory.at(-1)).toMatchObject({
+      launchMode: 'fork',
+      resumeTargetKind: 'id',
+      resumeTargetValue: firstRun.providerSessionId,
+      parentRunId: firstRun.id,
+      exitReason: 'completed',
+    });
+    expect(state.agentHistory.at(-1)).not.toHaveProperty('providerSessionId');
+
+    await relayWithEnv(root, env, 'resume', 'claude', '--latest');
+    const latestState = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as { agentHistory: Array<Record<string, unknown>> };
+    expect(latestState.agentHistory.at(-1)).toMatchObject({
+      launchMode: 'resume',
+      resumeTargetKind: 'latest',
+    });
+    expect(latestState.agentHistory.at(-1)).not.toHaveProperty('parentRunId');
+    expect(latestState.agentHistory.at(-1)).not.toHaveProperty(
+      'providerSessionId',
+    );
+  });
+
+  it('runs Codex resume without injecting a handoff or empty prompt', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Resume Codex safely');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    await writeFile(
+      path.join(bin, 'codex'),
+      '#!/bin/sh\nprintf "%s\\n" "$@" > "$RELAY_FAKE_LOG"\n',
+    );
+    await chmod(path.join(bin, 'codex'), 0o700);
+    const log = path.join(root, 'codex-resume-args.log');
+    await relayWithEnv(
+      root,
+      {
+        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        RELAY_FAKE_LOG: log,
+      },
+      'resume',
+      'codex',
+      '--latest',
+    );
+
+    await expect(readFile(log, 'utf8')).resolves.toBe('resume\n--last\n');
+    const state = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as { agentHistory: Array<Record<string, unknown>> };
+    expect(state.agentHistory.at(-1)).toMatchObject({
+      agent: 'codex',
+      launchMode: 'resume',
+      resumeTargetKind: 'latest',
+      exitReason: 'completed',
+    });
+  });
+
+  it('validates resume targets and rejects Codex forks before launch', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Validate resume input');
+    await expect(
+      relay(root, 'resume', 'claude', '--latest', '--picker'),
+    ).rejects.toThrow('Choose only one');
+    await expect(
+      relay(root, 'resume', 'codex', '--latest', '--fork'),
+    ).rejects.toThrow('Codex session forks are not supported');
+  });
+
+  it('archives replaced completed state and searches current plus task metadata history', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Archived title\nOriginal searchable phrase');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    await writeFile(path.join(bin, 'codex'), '#!/bin/sh\nexit 0\n');
+    await chmod(path.join(bin, 'codex'), 0o700);
+    await relayWithEnv(
+      root,
+      { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+      'run',
+      'codex',
+      '--prompt',
+      'Work',
+      '--model',
+      'history-model',
+      '--effort',
+      'high',
+    );
+    await relay(root, 'finish');
+    const completed = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as { sessionId: string; checkpoints: Array<{ id: string }> };
+    await relay(root, 'start', 'Current searchable task', '--allow-dirty');
+
+    await expect(
+      readFile(
+        `${root}/.relay/tasks/${completed.sessionId}/state.json`,
+        'utf8',
+      ),
+    ).resolves.toContain('Archived title');
+    const all = JSON.parse(
+      (await relay(root, 'history', '--json')).stdout,
+    ) as Array<{
+      sessionId: string;
+      current: boolean;
+    }>;
+    expect(all).toHaveLength(2);
+    expect(all).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: completed.sessionId,
+          current: false,
+        }),
+        expect.objectContaining({ current: true }),
+      ]),
+    );
+    for (const query of [
+      'Original searchable phrase',
+      'codex',
+      'history-model',
+      'high',
+      'completed',
+      completed.checkpoints[0]!.id,
+      'Final',
+    ]) {
+      const matches = JSON.parse(
+        (await relay(root, 'history', query, '--json')).stdout,
+      ) as Array<{ sessionId: string }>;
+      expect(matches.map((entry) => entry.sessionId)).toContain(
+        completed.sessionId,
+      );
+    }
+    const current = JSON.parse(
+      (await relay(root, 'history', 'Current searchable task', '--json'))
+        .stdout,
+    ) as Array<{ current: boolean }>;
+    expect(current).toEqual([expect.objectContaining({ current: true })]);
+  });
+
+  it('repairs stale history without a lease when replacing a completed task', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Wait for provider exit');
+    const statePath = `${root}/.relay/state.json`;
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as {
+      sessionId: string;
+      task: { status: string };
+      agentHistory: Array<Record<string, unknown>>;
+    };
+    state.task.status = 'completed';
+    state.agentHistory.push({
+      id: 'still-running',
+      agent: 'claude',
+      startedAt: '2026-07-21T00:00:00.000Z',
+    });
+    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    const oldSessionId = state.sessionId;
+    await expect(
+      relay(root, 'start', 'Safe replacement'),
+    ).resolves.toMatchObject({
+      stdout: expect.stringContaining('Started Relay task'),
+    });
+    const archived = JSON.parse(
+      await readFile(`${root}/.relay/tasks/${oldSessionId}/state.json`, 'utf8'),
+    ) as { agentHistory: Array<Record<string, unknown>> };
+    expect(archived.agentHistory.at(-1)).toMatchObject({
+      id: 'still-running',
+      endedAt: expect.any(String),
+      exitCode: null,
+      exitReason: 'interrupted',
+    });
+  });
+
+  it('does not replace a completed task while a run lease still owns a worktree', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Wait for lease recovery');
+    const statePath = `${root}/.relay/state.json`;
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as {
+      task: { status: string };
+      runs: Array<Record<string, unknown>>;
+      agentHistory: Array<Record<string, unknown>>;
+    };
+    state.task.status = 'completed';
+    state.agentHistory.push({
+      id: 'leased-run',
+      agent: 'claude',
+      startedAt: '2026-07-21T00:00:00.000Z',
+    });
+    state.runs.push({
+      runId: 'leased-run',
+      worktreePath: root,
+      projectRoot: root,
+      agent: 'claude',
+      launchMode: 'new',
+      controllerId: 'test',
+      startedAt: '2026-07-21T00:00:00.000Z',
+      lastSeenAt: '2026-07-21T00:00:00.000Z',
+      status: 'orphaned',
+    });
+    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    await expect(relay(root, 'start', 'Too soon')).rejects.toThrow(
+      'still owns a working tree',
+    );
+  });
+
+  it('requires forced stale-run recovery and marks only the matching run interrupted', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Recover stale state');
+    const statePath = `${root}/.relay/state.json`;
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as {
+      currentAgent?: string;
+      currentRunId?: string;
+      agentHistory: Array<Record<string, unknown>>;
+    };
+    state.currentAgent = 'codex';
+    state.currentRunId = 'stale-run';
+    state.agentHistory.push({
+      id: 'finished-run',
+      agent: 'claude',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      endedAt: '2026-01-01T00:01:00.000Z',
+      exitCode: 0,
+      exitReason: 'completed',
+    });
+    state.agentHistory.push({
+      id: 'stale-run',
+      agent: 'codex',
+      startedAt: '2026-01-01T00:02:00.000Z',
+      launchMode: 'resume',
+      resumeTargetKind: 'latest',
+    });
+    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+
+    await expect(relay(root, 'recover')).rejects.toThrow(
+      'cannot verify that the provider process has exited',
+    );
+    await expect(relay(root, 'recover', '--force')).resolves.toMatchObject({
+      stdout: expect.stringContaining('interrupted'),
+    });
+    const recovered = JSON.parse(await readFile(statePath, 'utf8')) as {
+      currentAgent?: string;
+      currentRunId?: string;
+      agentHistory: Array<Record<string, unknown>>;
+    };
+    expect(recovered.currentAgent).toBeUndefined();
+    expect(recovered.currentRunId).toBeUndefined();
+    expect(recovered.agentHistory[0]).toMatchObject({
+      id: 'finished-run',
+      exitReason: 'completed',
+    });
+    expect(recovered.agentHistory[1]).toMatchObject({
+      id: 'stale-run',
+      endedAt: expect.any(String),
+      exitCode: null,
+      exitReason: 'interrupted',
+    });
+  });
+
+  it('recovers unfinished legacy history without current run mirrors', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Recover legacy history');
+    const statePath = `${root}/.relay/state.json`;
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as {
+      agentHistory: Array<Record<string, unknown>>;
+    };
+    state.agentHistory.push({
+      id: 'legacy-unfinished',
+      agent: 'claude',
+      startedAt: '2026-01-01T00:00:00.000Z',
+    });
+    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+
+    await expect(relay(root, 'recover', '--force')).resolves.toMatchObject({
+      stdout: expect.stringContaining('interrupted'),
+    });
+    const recovered = JSON.parse(await readFile(statePath, 'utf8')) as {
+      agentHistory: Array<Record<string, unknown>>;
+    };
+    expect(recovered.agentHistory.at(-1)).toMatchObject({
+      id: 'legacy-unfinished',
+      endedAt: expect.any(String),
+      exitReason: 'interrupted',
+    });
   });
 
   it('finishes with a final checkpoint without running tests by default', async () => {
@@ -242,7 +686,7 @@ describe('Relay lifecycle commands', () => {
     expect(state.checkpoints).toHaveLength(1);
   });
 
-  it('preserves newer completion state when a running agent exits', async () => {
+  it('rejects finish while an agent owns a working tree', async () => {
     const root = await createRepository();
     directories.push(root);
     await relay(root, 'init');
@@ -267,8 +711,11 @@ describe('Relay lifecycle commands', () => {
       if (state.currentAgent === 'codex') break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    await relay(root, 'finish');
+    await expect(relay(root, 'finish')).rejects.toThrow(
+      /Cannot finish while a provider run/,
+    );
     await running;
+    await relay(root, 'finish');
     const state = JSON.parse(
       await readFile(`${root}/.relay/state.json`, 'utf8'),
     ) as {

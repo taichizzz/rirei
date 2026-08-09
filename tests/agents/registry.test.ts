@@ -84,4 +84,126 @@ describe('agent model and effort commands', () => {
       'max',
     ]);
   });
+
+  it('builds Claude latest, picker, exact, and fork resume commands', async () => {
+    await expect(
+      getAgent('claude').buildResumeCommand!({
+        ...context,
+        prompt: '',
+        resumeTargetKind: 'latest',
+        fork: false,
+      }),
+    ).resolves.toEqual({ executable: 'claude', args: ['--continue'] });
+    await expect(
+      getAgent('claude').buildResumeCommand!({
+        ...context,
+        prompt: '',
+        resumeTargetKind: 'picker',
+        fork: false,
+      }),
+    ).resolves.toEqual({ executable: 'claude', args: ['--resume'] });
+    await expect(
+      getAgent('claude').buildResumeCommand!({
+        ...context,
+        prompt: 'Check tests',
+        resumeTargetKind: 'id',
+        resumeTargetValue: 'claude-session',
+        fork: true,
+        model: 'opus',
+        effort: 'high',
+      }),
+    ).resolves.toEqual({
+      executable: 'claude',
+      args: [
+        '--model',
+        'opus',
+        '--effort',
+        'high',
+        '--resume',
+        'claude-session',
+        '--fork-session',
+        'Check tests',
+      ],
+    });
+  });
+
+  it('builds Codex picker, latest, and exact resume commands without empty prompts', async () => {
+    await expect(
+      getAgent('codex').buildResumeCommand!({
+        ...context,
+        prompt: '',
+        resumeTargetKind: 'picker',
+        fork: false,
+      }),
+    ).resolves.toEqual({ executable: 'codex', args: ['resume'] });
+    await expect(
+      getAgent('codex').buildResumeCommand!({
+        ...context,
+        prompt: '',
+        resumeTargetKind: 'latest',
+        fork: false,
+      }),
+    ).resolves.toEqual({
+      executable: 'codex',
+      args: ['resume', '--last'],
+    });
+    await expect(
+      getAgent('codex').buildResumeCommand!({
+        ...context,
+        prompt: 'Continue review',
+        resumeTargetKind: 'id',
+        resumeTargetValue: 'codex-session',
+        fork: false,
+        model: 'gpt-5.6-sol',
+        effort: 'xhigh',
+      }),
+    ).resolves.toEqual({
+      executable: 'codex',
+      args: [
+        'resume',
+        '--model',
+        'gpt-5.6-sol',
+        '--config',
+        'model_reasoning_effort="xhigh"',
+        'codex-session',
+        'Continue review',
+      ],
+    });
+  });
+
+  it('rejects Codex forks and does not expose resume for other providers', async () => {
+    await expect(
+      getAgent('codex').buildResumeCommand!({
+        ...context,
+        resumeTargetKind: 'latest',
+        fork: true,
+      }),
+    ).rejects.toThrow('does not support session forks');
+    await expect(
+      getAgent('codex').buildResumeCommand!({
+        ...context,
+        prompt: 'Misread as a session ID',
+        resumeTargetKind: 'picker',
+        fork: false,
+      }),
+    ).rejects.toThrow('pickers cannot accept an initial prompt');
+    expect(getAgent('gemini').resumeCapabilities).toBeUndefined();
+    expect(getAgent('antigravity').resumeCapabilities).toBeUndefined();
+  });
+
+  it('includes a Relay-assigned Claude session ID on new commands', async () => {
+    await expect(
+      getAgent('claude').buildInteractiveCommand({
+        ...context,
+        providerSessionId: '2aebf21b-40e5-41a9-832f-098b367513f6',
+      }),
+    ).resolves.toEqual({
+      executable: 'claude',
+      args: [
+        '--session-id',
+        '2aebf21b-40e5-41a9-832f-098b367513f6',
+        'Continue safely',
+      ],
+    });
+  });
 });

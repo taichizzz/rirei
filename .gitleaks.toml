@@ -1,0 +1,8 @@
+title = "Rirei gitleaks configuration"
+
+[allowlist]
+description = "Synthetic credentials used only to test activity redaction"
+regexes = [
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''sk-proj-1234567890''',
+]

@@ -40,28 +40,20 @@ body {
 }
 .wordmark {
   display: flex;
-  align-items: baseline;
-  gap: 9px;
+  align-items: center;
   padding-left: 72px; /* clear the macOS traffic lights */
 }
-.mark {
-  color: var(--accent);
-  font:
-    600 13px Georgia,
-    serif;
-  border: 1px solid var(--accent);
-  border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  display: inline-grid;
-  place-items: center;
-  align-self: center;
+.wordmark-logo {
+  display: block;
+  width: 126px;
+  height: auto;
+  overflow: visible;
 }
-.name {
-  font:
-    400 15px Georgia,
-    serif;
-  letter-spacing: 0.01em;
+.wordmark-face {
+  fill: var(--accent);
+}
+.wordmark-shadow {
+  fill: #314a20;
 }
 .project {
   display: flex;
@@ -294,7 +286,9 @@ textarea:focus {
   gap: 10px;
 }
 #dashboardRefresh,
-#timelineOpen {
+#timelineOpen,
+#historyOpen,
+#recoverRun {
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -302,7 +296,9 @@ textarea:focus {
   cursor: pointer;
 }
 #dashboardRefresh:hover,
-#timelineOpen:hover {
+#timelineOpen:hover,
+#historyOpen:hover,
+#recoverRun:hover {
   color: var(--accent);
 }
 #timelineOpen span {
@@ -367,6 +363,24 @@ textarea:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
   font: 500 11px var(--mono);
+}
+#dashboardCheckpoint {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 11px var(--mono);
+  cursor: pointer;
+}
+#dashboardCheckpoint:not(:disabled):hover {
+  color: var(--accent);
 }
 .dashboard-memory {
   display: grid;
@@ -469,7 +483,7 @@ textarea:focus {
   border-radius: 6px;
   padding: 14px 16px;
 }
-#terminal {
+#terminalsContainer {
   display: none;
   flex: 1;
   min-height: 0;
@@ -478,13 +492,13 @@ textarea:focus {
   border-radius: 6px;
   padding: 10px 4px 8px 12px;
 }
-.terminal-card.live #terminal {
+.terminal-card.live #terminalsContainer {
   display: block;
 }
 .terminal-card.live #output {
   display: none;
 }
-#terminal .xterm {
+#terminalsContainer .xterm {
   height: 100%;
 }
 
@@ -525,7 +539,9 @@ textarea:focus {
 }
 #usageClose,
 #timelineClose,
-#profileClose {
+#profileClose,
+#historyClose,
+#checkpointClose {
   background: none;
   border: none;
   color: var(--muted);
@@ -535,8 +551,148 @@ textarea:focus {
 }
 #usageClose:hover,
 #timelineClose:hover,
-#profileClose:hover {
+#profileClose:hover,
+#historyClose:hover,
+#checkpointClose:hover {
   color: var(--text);
+}
+
+/* ---- task history ---- */
+.history-panel {
+  width: min(780px, 100%);
+}
+.history-search {
+  width: 100%;
+  margin: 12px 0 4px;
+}
+.history-status {
+  color: var(--muted);
+  font: 10px var(--mono);
+}
+.history-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.history-item {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #11120f;
+}
+.history-item-head,
+.history-run {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.history-item-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.history-task-status {
+  color: var(--accent);
+  font: 9px var(--mono);
+  text-transform: uppercase;
+}
+.history-item-meta {
+  margin: 5px 0 9px;
+  color: var(--muted);
+  font: 9px var(--mono);
+}
+.history-runs {
+  display: grid;
+  gap: 4px;
+}
+.history-run {
+  color: #b9b9b1;
+  font: 10px var(--mono);
+}
+.history-run button {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--accent);
+  padding: 3px 7px;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* ---- checkpoint diff ---- */
+.checkpoint-panel {
+  width: min(980px, 100%);
+  height: min(720px, 86vh);
+  overflow: hidden;
+}
+.checkpoint-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 12px;
+  height: calc(100% - 52px);
+  margin-top: 14px;
+}
+.checkpoint-list {
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.checkpoint-list button {
+  width: 100%;
+  overflow: hidden;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 9px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  font: 10px var(--mono);
+}
+.checkpoint-list button:hover,
+.checkpoint-list button.selected {
+  border-left-color: var(--accent);
+  background: #11120f;
+  color: var(--text);
+}
+.checkpoint-detail {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.checkpoint-meta,
+.checkpoint-warnings {
+  white-space: pre-wrap;
+  font: 10px/1.5 var(--mono);
+}
+.checkpoint-meta {
+  color: var(--text);
+}
+.checkpoint-warnings {
+  margin-top: 6px;
+  color: #e3b55b;
+}
+.checkpoint-patch {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 10px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #050505;
+  color: #b9b9b1;
+  padding: 12px;
+  white-space: pre;
+  font: 10.5px/1.55 var(--mono);
 }
 
 /* ---- agent session timeline ---- */
@@ -956,4 +1112,90 @@ textarea:focus {
   * {
     transition: none !important;
   }
+}
+
+.terminal-tabs {
+  display: flex;
+  flex-direction: row;
+  overflow-x: auto;
+  border-bottom: 1px solid #333;
+  margin-bottom: 8px;
+}
+
+.terminal-tab {
+  display: flex;
+  border-right: 1px solid #333;
+}
+
+.tab-btn {
+  background: transparent;
+  color: #888;
+  border: none;
+  border: none;
+  padding: 4px 12px;
+  font-family: 'SFMono-Regular', Menlo, monospace;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-btn:hover {
+  background: #111;
+  color: #ccc;
+}
+
+.tab-btn.active {
+  color: #fff;
+  background: #222;
+}
+
+.tab-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+}
+
+.tab-indicator.running,
+.tab-indicator.starting {
+  background: #a9ef72; /* Green status accent */
+}
+
+.tab-indicator.waiting {
+  background: #f1c40f;
+}
+
+.tab-indicator.completed {
+  background: #3498db;
+}
+
+.tab-indicator.failed {
+  background: #e74c3c;
+}
+
+.tab-close {
+  border: 0;
+  background: transparent;
+  color: #888;
+  padding: 0 8px;
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.tab-close:hover {
+  color: #fff;
+  opacity: 1;
+}
+
+.add-btn {
+  font-size: 16px;
+  padding: 4px 16px;
+}
+
+.terminal-instance {
+  width: 100%;
+  height: 100%;
 }

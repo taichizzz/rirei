@@ -1,25 +1,51 @@
 {
-  "name": "relay-cli",
+  "name": "@taichizzz/rirei",
   "version": "0.1.0",
   "private": true,
-  "description": "Durable handoffs between officially installed coding-agent CLIs.",
+  "description": "Local orchestration and durable handoffs for officially installed coding-agent CLIs.",
+  "license": "MIT",
+  "author": "taichizzz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taichizzz/rirei.git"
+  },
+  "homepage": "https://github.com/taichizzz/rirei#readme",
+  "bugs": {
+    "url": "https://github.com/taichizzz/rirei/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "coding-agents",
+    "orchestration",
+    "terminal",
+    "worktrees"
+  ],
   "type": "module",
-  "main": "desktop/main.mjs",
+  "main": "dist/index.cjs",
   "bin": {
     "relay": "dist/index.cjs"
   },
   "engines": {
     "node": ">=22"
   },
+  "files": [
+    "dist/index.cjs",
+    "LICENSE",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/index.cjs && chmod +x dist/index.cjs",
     "check": "tsc --noEmit -p tsconfig.json",
     "dev": "tsx src/index.ts",
-    "desktop:dev": "npm run build && electron .",
+    "desktop:dev": "npm run build && electron desktop/main.mjs",
     "desktop:build": "npm run build && electron-builder --mac",
-    "lint": "eslint .",
+    "lint": "eslint desktop src tests eslint.config.js",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
+    "verify": "npm run check && npm run lint && npm run format && npm test && npm run build",
+    "package:check": "node scripts/check-package.mjs",
+    "audit:production": "npm audit --omit=dev",
     "install:local": "npm run build && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/dist/index.cjs\" \"$HOME/.local/bin/relay\"",
     "launcher:build": "osacompile -o 'Relay Launcher.app' 'scripts/Relay Launcher.applescript'",
     "test": "vitest run"
@@ -29,34 +55,59 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@eslint/js": "^9.35.0",
+    "@eslint/js": "^9.39.5",
     "@types/node": "^22.15.3",
-    "electron": "^37.3.1",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
+    "electron": "^43.3.0",
     "electron-builder": "^26.0.12",
     "esbuild": "^0.28.1",
-    "eslint": "^9.35.0",
+    "eslint": "^9.39.5",
     "prettier": "^3.6.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.42.0",
+    "typescript-eslint": "^8.66.0",
     "vitest": "^3.2.4"
   },
   "build": {
     "appId": "dev.rirei.desktop",
     "productName": "Rirei",
+    "extraMetadata": {
+      "main": "desktop/main.mjs"
+    },
     "asar": true,
+    "asarUnpack": [
+      "desktop/pty_bridge.py"
+    ],
     "files": [
       "desktop/**/*",
       "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "Rirei terminal",
+        "schemes": [
+          "rirei"
+        ]
+      }
     ],
     "extraResources": [
       {
         "from": "dist/index.cjs",
         "to": "cli/index.cjs"
+      },
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "AppIcon.icns",
       "target": [
         "dmg",
         "zip"

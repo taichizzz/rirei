@@ -35,11 +35,15 @@ export function statusCommand(): Command {
                 dirty: git.dirty,
                 changedFiles: git.changedFiles,
               },
+              runs: state.runs,
               currentAgent: state.currentAgent ?? null,
+              currentRunId: state.currentRunId ?? null,
               previousAgents,
               agentHistory: state.agentHistory,
               latestTest: latestTest ?? null,
               latestCheckpoint: latestCheckpoint ?? null,
+              checkpointCount: state.checkpoints.length,
+              checkpoints: state.checkpoints,
               completedWork: state.completedWork,
               remainingWork: state.remainingWork,
               decisions: state.decisions,
@@ -56,6 +60,16 @@ export function statusCommand(): Command {
         `Task: ${state.task.title}`,
         `Status: ${state.task.status}`,
         `Current agent: ${state.currentAgent ?? 'None'}`,
+        `Active runs: ${
+          state.runs.length === 0
+            ? 'None'
+            : state.runs
+                .map(
+                  (lease) =>
+                    `${lease.agent} (${lease.status}) in ${lease.workspaceId ?? 'main working tree'}`,
+                )
+                .join('; ')
+        }`,
         `Previous agents: ${previousAgents.join(', ') || 'None'}`,
         `Starting commit: ${state.git.startingCommit}`,
         `Current commit: ${git.commit}`,

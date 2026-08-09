@@ -1,6 +1,42 @@
-# Relay
+# Rirei
 
-Relay preserves provider-independent coding-task state while developers manually move work between officially installed coding-agent CLIs.
+Rirei is a local coding-agent orchestration harness. It runs officially installed provider
+CLIs in real terminals, gives concurrent agents isolated Git worktrees, and preserves a
+provider-independent task record so work can move between agents without copying credentials or
+raw conversations.
+
+`relay` is Rirei's scriptable orchestration engine and CLI. The Rirei desktop app is one
+frontend over that engine. A future TUI will be another frontend, not a separate product.
+
+Rirei is pre-release software. Review [Security](docs/security.md) and
+[Publication](docs/publication.md) before distributing builds.
+
+## What relaying means
+
+Rirei does not transfer a live conversation from one provider to another. It relays the work:
+
+1. `relay start` records the task and Git baseline.
+2. `relay run <provider>` launches that provider's official CLI in the selected working tree.
+3. Checkpoints save bounded local Git metadata and patches without committing anything.
+4. `relay switch <provider>` creates a checkpoint, renders a compact handoff from structured
+   task state and Git facts, and launches the next provider with that handoff.
+5. The new provider sees the same files plus the handoff summary. Authentication, hidden
+   reasoning, and provider conversation history stay with the original provider.
+
+This makes Rirei closer to a **local control plane and durable harness** than an AI agent itself.
+It does not choose architecture, write code, or call model APIs on its own.
+
+## Token and cost model
+
+Rirei itself consumes no model tokens and has no provider backend. The official CLI it launches
+uses your existing subscription or API billing exactly as if you launched it manually.
+
+The only additional model input is the prompt or handoff supplied at launch. Default handoffs
+are bounded to 24,000 characters, roughly a worst-case 6,000 input tokens using the common
+four-characters-per-token estimate; normal handoffs are usually smaller. Full checkpoint
+patches remain local and are not inserted into handoffs. Every additional provider launch still
+starts a model turn, so unnecessary switching can cost more than continuing an existing
+provider session.
 
 ## Documentation
 
@@ -9,12 +45,14 @@ Detailed docs live in [`docs/`](docs/README.md):
 - [Architecture](docs/architecture.md) — module layout and how a command executes end to end.
 - [CLI reference](docs/cli-reference.md) — every command, its options, and exact behavior.
 - [Configuration](docs/configuration.md) — `.relay/config.json` schema and which fields are honored.
-- [State and events](docs/state-and-events.md) — the `RelayState` schema, atomic writes, and the event log.
+- [State and activity](docs/state-and-events.md) — the `RelayState` schema, migrations, and sanitized activity projection.
 - [Checkpoints and handoff](docs/checkpoints-and-handoff.md) — snapshot contents and the handoff format.
 - [Agent adapters](docs/agents.md) — the adapter contract and exit classification.
 - [Desktop app](docs/desktop.md) — the Electron shell and the integrated xterm.js terminal.
 - [Security](docs/security.md) — auth boundary, Git safety, path policy, and secret handling.
 - [Development](docs/development.md) — build, test, lint, and packaging.
+- [Contributing](CONTRIBUTING.md) — development and safety expectations.
+- [License](LICENSE) — MIT license for this repository.
 
 ## Development
 
@@ -75,6 +113,18 @@ Relay does not authenticate with Claude Code, Codex, or Gemini, read their crede
 
 ## Local state
 
-`relay init` creates `.relay/` with restrictive local permissions. Generated event logs, checkpoints, and captured test output belong in `.gitignore`; future human-authored task and decision files can be committed deliberately. Relay never commits, pushes, resets, cleans, merges, or discards repository changes.
+`relay init` creates `.relay/` with restrictive local permissions. The complete `.relay/`
+directory is machine-local and Git-ignored because it can contain task text, local paths, and
+working-tree patches. Relay never commits, pushes, resets, cleans, merges, or discards
+repository changes.
 
 `relay checkpoint` stores Git metadata, porcelain status, a diff stat, and a bounded patch under `.relay/checkpoints/`. `relay handoff` intentionally omits the full patch. Agent commands launch the official CLI found on `PATH` with inherited terminal I/O. `relay finish` does not run tests unless `--run-tests` is supplied and `tests.command` is configured.
+
+## License
+
+Rirei is licensed under the [MIT License](LICENSE). Vendored dependencies and asset provenance
+are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[ASSET_PROVENANCE.md](ASSET_PROVENANCE.md).
+
+The separately maintained Rirei Notch fork is derived from Boring Notch and remains GPL-3.0;
+its source and license stay in that separate repository.

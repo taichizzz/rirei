@@ -2,7 +2,11 @@ import { Command } from 'commander';
 import { discoverRepository } from '../git/repository.js';
 import { readState } from '../state/store.js';
 import { summarizeUsage, type AgentUsage } from '../usage.js';
-import { readProviderPlanUsage } from '../plan-usage.js';
+import {
+  readProviderPlanUsage,
+  type PlanWindow,
+  type ProviderPlanUsage,
+} from '../plan-usage.js';
 
 function relativeTime(iso: string | null): string {
   if (!iso) return 'never';
@@ -39,13 +43,52 @@ function row(agent: AgentUsage): string {
   );
 }
 
+function planWindow(window: PlanWindow | undefined): string {
+  if (!window) return '-';
+  const value = `${Math.round(window.usedPercentage)}% used`;
+  return window.status === 'stale' ? `${value} (stale)` : value;
+}
+
+function planRow(plan: ProviderPlanUsage): string {
+  return (
+    plan.displayName.padEnd(15) +
+    plan.status.padEnd(11) +
+    planWindow(plan.fiveHour).padEnd(20) +
+    planWindow(plan.week)
+  );
+}
+
 export function usageCommand(): Command {
   return new Command('usage')
     .description('Show how much each agent has been used during this task')
     .option('--json', 'print machine-readable JSON')
-    .action(async (options: { json?: boolean }) => {
-      const root = await discoverRepository(process.cwd());
-      if (!root) throw new Error('Relay must be run inside a Git repository.');
+    .option('--plans-only', 'read provider plan usage without requiring a task')
+    .action(async (options: { json?: boolean; plansOnly?: boolean }) => {
+      const discoveredRoot = await discoverRepository(process.cwd());
+      const root = discoveredRoot ?? process.cwd();
+      if (options.plansOnly) {
+        const plans = await readProviderPlanUsage(root);
+        if (options.json) {
+          process.stdout.write(
+            `${JSON.stringify(
+              {
+                schemaVersion: 1,
+                task: { title: 'Provider plans', status: 'active' },
+                plans,
+              },
+              null,
+              2,
+            )}\n`,
+          );
+          return;
+        }
+        process.stdout.write(
+          `${['Provider plan usage', 'Provider       Status     5-hour              Weekly', ...plans.map(planRow)].join('\n')}\n`,
+        );
+        return;
+      }
+      if (!discoveredRoot)
+        throw new Error('Relay must be run inside a Git repository.');
       let state;
       try {
         state = await readState(root);
@@ -58,7 +101,7 @@ export function usageCommand(): Command {
       const plans = await readProviderPlanUsage(root);
       if (options.json) {
         process.stdout.write(
-          `${JSON.stringify({ ...summary, plans }, null, 2)}\n`,
+          `${JSON.stringify({ schemaVersion: 1, ...summary, plans }, null, 2)}\n`,
         );
         return;
       }
@@ -68,6 +111,10 @@ export function usageCommand(): Command {
         '',
         'Agent        Runs  Last 5h  Last 7d  Last          Last reason',
         ...summary.agents.map(row),
+        '',
+        'Provider plan usage',
+        'Provider       Status     5-hour              Weekly',
+        ...plans.map(planRow),
       ];
       process.stdout.write(`${lines.join('\n')}\n`);
     });

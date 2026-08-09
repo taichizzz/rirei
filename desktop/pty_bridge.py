@@ -7,6 +7,7 @@ import pty
 import select
 import signal
 import struct
+import subprocess
 import sys
 import termios
 
@@ -28,7 +29,6 @@ def set_winsize(master, rows, cols):
 
 
 def control_fd_open():
-    # The renderer sends resize messages on fd 3 when the app provides it.
     try:
         os.fstat(3)
     except OSError:
@@ -49,14 +49,41 @@ def main() -> int:
 
     set_winsize(master, rows, cols)
 
-    def forward_signal(signum, _frame):
+    def descendant_pids():
         try:
-            os.kill(pid, signum)
-        except ProcessLookupError:
-            pass
+            rows = subprocess.check_output(
+                ['ps', '-axo', 'pid=,ppid='], text=True
+            ).splitlines()
+            children = {}
+            for row in rows:
+                process_id, parent_id = (int(value) for value in row.split())
+                children.setdefault(parent_id, []).append(process_id)
+            result = []
+            pending = list(children.get(pid, []))
+            while pending:
+                process_id = pending.pop()
+                result.append(process_id)
+                pending.extend(children.get(process_id, []))
+            return result
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return []
 
-    signal.signal(signal.SIGINT, forward_signal)
-    signal.signal(signal.SIGTERM, forward_signal)
+    def forward_signal(signum):
+        targets = descendant_pids()
+        if os.environ.get('RELAY_SIGNAL_PROCESS_GROUP') == '1':
+            targets.insert(0, pid)
+        # Signal leaves first; managed agent sessions omit their Relay controller.
+        for process_id in reversed(targets):
+            try:
+                os.kill(process_id, signum)
+            except (OSError, ProcessLookupError):
+                pass
+
+    def handle_signal_forward(signum, _frame):
+        forward_signal(signum)
+
+    signal.signal(signal.SIGINT, handle_signal_forward)
+    signal.signal(signal.SIGTERM, handle_signal_forward)
 
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
@@ -93,18 +120,34 @@ def main() -> int:
                 control = None
             else:
                 control_buffer += chunk
+                if len(control_buffer) > 65536:
+                    control_buffer = b''
+                    continue
                 while b'\n' in control_buffer:
                     line, control_buffer = control_buffer.split(b'\n', 1)
                     if not line.strip():
                         continue
                     try:
                         message = json.loads(line)
-                        set_winsize(
-                            master,
-                            parse_size(message.get('rows'), rows),
-                            parse_size(message.get('cols'), cols),
-                        )
-                    except (ValueError, TypeError):
+                        action = message.get('action')
+
+                        # Fallback for old resize payload
+                        if action is None and ('cols' in message or 'rows' in message):
+                            action = 'resize'
+
+                        if action == 'resize':
+                            set_winsize(
+                                master,
+                                parse_size(message.get('rows'), rows),
+                                parse_size(message.get('cols'), cols),
+                            )
+                        elif action == 'interrupt':
+                            forward_signal(signal.SIGINT)
+                        elif action == 'terminate':
+                            forward_signal(signal.SIGTERM)
+                        elif action == 'kill':
+                            forward_signal(signal.SIGKILL)
+                    except (AttributeError, ValueError, TypeError):
                         pass
 
     _, status = os.waitpid(pid, 0)

@@ -4,7 +4,7 @@ import { inspectGitBaseline } from '../git/repository.js';
 import { relayPath } from '../safety/path-policy.js';
 import { appendEvent } from '../state/events.js';
 import { type RelayState } from '../state/schema.js';
-import { readState, writeState } from '../state/store.js';
+import { replaceState } from '../state/store.js';
 
 function titleFromRequest(request: string): string {
   return request.split(/\r?\n/, 1)[0]?.trim() || request;
@@ -23,20 +23,6 @@ export function startCommand(): Command {
         throw new Error('Relay is not initialized. Run relay init first.');
       }
 
-      try {
-        const existing = await readState(baseline.root);
-        if (
-          existing.task.status === 'active' ||
-          existing.task.status === 'blocked'
-        ) {
-          throw new Error(
-            'An active Relay task was found. Finish or cancel it before starting another task.',
-          );
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-
       if (baseline.dirty && !options.allowDirty) {
         throw new Error(
           'The working tree is dirty. Review it and rerun with --allow-dirty to record that baseline.',
@@ -44,35 +30,54 @@ export function startCommand(): Command {
       }
 
       const now = new Date().toISOString();
-      const state: RelayState = {
-        schemaVersion: 1,
-        sessionId: crypto.randomUUID(),
-        projectRoot: baseline.root,
-        task: {
-          title: titleFromRequest(task),
-          originalRequest: task,
-          requirements: [],
-          constraints: [],
-          status: 'active',
-          createdAt: now,
-          updatedAt: now,
-        },
-        git: {
-          startingCommit: baseline.commit,
-          currentCommit: baseline.commit,
-          startingBranch: baseline.branch,
-          currentBranch: baseline.branch,
-          dirtyAtStart: baseline.dirty,
-        },
-        agentHistory: [],
-        decisions: [],
-        completedWork: [],
-        remainingWork: [],
-        tests: [],
-        checkpoints: [],
-        blockers: [],
-      };
-      await writeState(baseline.root, state);
+      const state = await replaceState(baseline.root, (existing) => {
+        if (existing) {
+          if (
+            existing.task.status === 'active' ||
+            existing.task.status === 'blocked'
+          ) {
+            throw new Error(
+              'An active Relay task was found. Finish or cancel it before starting another task.',
+            );
+          }
+          if (existing.runs.length > 0)
+            throw new Error(
+              'A provider run still owns a working tree. Stop it or recover its orphaned lease before starting another task.',
+            );
+        }
+        const replacement: RelayState = {
+          schemaVersion: 3,
+          revision: 0,
+          recentOperations: [],
+          runs: [],
+          sessionId: crypto.randomUUID(),
+          projectRoot: baseline.root,
+          task: {
+            title: titleFromRequest(task),
+            originalRequest: task,
+            requirements: [],
+            constraints: [],
+            status: 'active',
+            createdAt: now,
+            updatedAt: now,
+          },
+          git: {
+            startingCommit: baseline.commit,
+            currentCommit: baseline.commit,
+            startingBranch: baseline.branch,
+            currentBranch: baseline.branch,
+            dirtyAtStart: baseline.dirty,
+          },
+          agentHistory: [],
+          decisions: [],
+          completedWork: [],
+          remainingWork: [],
+          tests: [],
+          checkpoints: [],
+          blockers: [],
+        };
+        return replacement;
+      });
       await appendEvent(baseline.root, 'task_started', {
         sessionId: state.sessionId,
         task: state.task.title,

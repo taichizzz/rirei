@@ -4,6 +4,86 @@ This file records user-visible changes made to Relay and its Rirei desktop app. 
 CLI command and `.relay/` state directory retain their existing names when the desktop app
 branding changes.
 
+## 2026-07-26
+
+### Multi-terminal UI and worktree integration
+
+- The desktop app now supports launching and running up to four concurrent terminal sessions in isolated Git worktree workspaces.
+- Replaced the single terminal and resize handlers with `TerminalTabsModel` and a robust multi-container terminal architecture.
+- Replaced the hard-coded Map in the Electron main process with a `TerminalManager` that validates leases, captures outputs into per-tab bounded buffers, and survives renderer reloads transparently.
+- Added a seamless launch dialog with integrated workspace creation options natively inside the Rirei desktop UI.
+
+## 2026-07-25
+
+### Multi-run leases
+
+- Replaced the single `currentAgent`/`currentRunId` pair with an authoritative `runs` array of
+  explicit run leases (schema version 3). Each lease records the run, agent, working tree,
+  workspace, controller, and status. `currentAgent`/`currentRunId` remain as derived mirrors so
+  existing frontends keep working.
+- Enforced the core concurrency invariant: **at most one writing run per working tree**. Several
+  agents may now run in one repository at the same time, as long as their worktrees differ.
+  Acquire and release are idempotent, so a retried launch or duplicate exit cannot double-record.
+- Added `relay run --workspace <id>`, which launches the provider with its working directory set
+  to that workspace's worktree instead of the main tree.
+- `relay workspace cleanup` now reports the active run holding a workspace and blocks cleanup
+  while a lease is held. `relay status` lists active runs.
+- Migrating a v2 state with an in-flight run produces an `orphaned` lease rather than a running
+  one: after an upgrade the owning process is gone, and Relay does not claim to know whether the
+  provider still runs.
+
+### Worktree workspaces
+
+- Added `relay workspace create`, which gives a concurrent agent an isolated Git branch and
+  linked worktree via `git worktree add -b rirei/<slug>-<role>-<id>`. This is Relay's first and
+  only Git-mutating command: it is previewed, additive, never touches the main working tree, and
+  never merges, resets, force-deletes, rebases, or pushes. Worktrees live outside the repository
+  under the Rirei data home (`~/.local/share/rirei/worktrees/`, overridable with
+  `RIREI_DATA_HOME`).
+- Added `relay workspace list` and `relay workspace cleanup <id>`. Cleanup is inspection-only:
+  it reports dirty/untracked files, commits ahead of base, and unpushed commits, then prints
+  copyable `git worktree remove` / `git branch -d` commands. Relay does not run them, and blocks
+  nothing destructively because it removes nothing.
+- Workspaces are recorded in a lock-protected `.relay/workspaces.json` registry; creation runs
+  under the repository writer lock and reports exactly what was created if a step fails.
+
+### State revision, writer lock, and schema migrations
+
+- Added a monotonic `revision` to persisted Relay state and a repository-scoped writer lock
+  (atomic `.relay/state.lock` directory) so concurrent terminals cannot clobber each other.
+  A lock left behind by a crashed process is reclaimed; a live lock makes the caller wait and
+  then fail loudly rather than overwrite.
+- Routed every read-modify-write through a single locked `updateState()` path with optional
+  `expectedRevision` optimistic-concurrency and `opId` idempotency guards. Launching an agent
+  now acquires a single run lease under the lock, and run finalization is idempotent, so a
+  retry or duplicate exit callback cannot double-record a run.
+- Added an ordered schema-migration chain. Older `state.json` files are upgraded on read
+  (bumping to schema version 2), the pre-migration file is backed up under `.relay/backups/`
+  before the first upgraded write, and a `schemaVersion` newer than the running build is
+  refused with an actionable message. Persistent schema versions stay separate from `--json`
+  API versions.
+- Abandoned state temp files are swept safely after validating their name and location.
+
+## 2026-07-21
+
+### Resume, history, usage, notifications, and checkpoints
+
+- Added native Claude and Codex session resume through provider pickers, latest-session
+  selection, exact IDs, and Claude session forks. New Claude runs receive a durable provider
+  session ID, while Relay continues to launch each resume in a fresh PTY.
+- Added project-scoped searchable task metadata history. Completed tasks are archived under
+  `.relay/tasks/` before a new task replaces them; prompts, responses, and terminal transcripts
+  are not indexed.
+- Moved sanitized Claude plan usage to `~/.relay/provider-usage/claude.json`, removed false
+  timer-based freshness, bounded Claude/Codex collection, and added per-window freshness.
+- Added in-app-lifetime native notifications for agent exits, task completion, manual
+  checkpoints, and critical usage thresholds, with fixed privacy-safe text and reset-cycle
+  deduplication.
+- Added a read-only checkpoint history and diff viewer plus safe `relay checkpoints` and
+  `relay checkpoint-diff` commands. Viewing saved artifacts never changes Git state.
+- Added `relay recover --force` for explicitly clearing abandoned run state after confirming
+  the provider process has stopped.
+
 ## 2026-07-14
 
 ### Agent session timeline
@@ -25,6 +105,11 @@ branding changes.
   persistence, backward compatibility, and the no-transcript privacy boundary.
 
 ## 2026-07-13
+
+### Application icon
+
+- Added `AppIcon.icns` as the Rirei macOS application and Dock icon through the app bundle.
+- Configured Electron Builder and the installed local bundle to use the same icon resource.
 
 ### Model and effort profiles
 

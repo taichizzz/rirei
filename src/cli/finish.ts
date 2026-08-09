@@ -3,7 +3,8 @@ import { Command } from 'commander';
 import { readConfig } from '../config/loader.js';
 import { createCheckpoint, taskContext } from '../lifecycle.js';
 import { appendEvent } from '../state/events.js';
-import { writeState } from '../state/store.js';
+import { activeLeases } from '../state/leases.js';
+import { updateState } from '../state/store.js';
 
 async function runConfiguredTest(
   root: string,
@@ -22,7 +23,10 @@ export function finishCommand(): Command {
     .option('--run-tests', 'run the configured test command before completing')
     .action(async (options: { runTests?: boolean }) => {
       const context = await taskContext();
-      let state = context.state;
+      if (activeLeases(context.state).length > 0)
+        throw new Error(
+          'Cannot finish while a provider run still owns a working tree. Stop it or recover the orphaned run first.',
+        );
       if (options.runTests) {
         const config = await readConfig(context.root);
         if (!config.tests.command)
@@ -35,38 +39,47 @@ export function finishCommand(): Command {
           config.tests.command,
         );
         const now = new Date().toISOString();
-        state = {
-          ...state,
+        const command = config.tests.command;
+        await updateState(context.root, (current) => ({
+          ...current,
           tests: [
-            ...state.tests,
+            ...current.tests,
             {
-              command: config.tests.command,
+              command,
               status: exitCode === 0 ? 'passed' : 'failed',
               exitCode,
               durationMs: Date.now() - started,
               createdAt: now,
             },
           ],
-          task: { ...state.task, updatedAt: now },
-        };
-        await writeState(context.root, state);
+          task: { ...current.task, updatedAt: now },
+        }));
         if (exitCode !== 0)
           throw new Error(
             `Configured tests failed with exit code ${exitCode ?? 'unknown'}.`,
           );
+        await appendEvent(context.root, 'test_run', {
+          command,
+          status: exitCode === 0 ? 'passed' : 'failed',
+          durationMs: Date.now() - started,
+        });
       }
-      const checkpoint = await createCheckpoint(context.root, state, 'Final');
+      const checkpoint = await createCheckpoint(context.root, 'Final');
       const now = new Date().toISOString();
-      const completed = {
-        ...checkpoint.state,
-        currentAgent: undefined,
-        task: {
-          ...checkpoint.state.task,
-          status: 'completed' as const,
-          updatedAt: now,
-        },
-      };
-      await writeState(context.root, completed);
+      await updateState(context.root, (current) => {
+        if (activeLeases(current).length > 0)
+          throw new Error(
+            'Cannot finish because a provider run started while the final checkpoint was being created.',
+          );
+        return {
+          ...current,
+          task: {
+            ...current.task,
+            status: 'completed' as const,
+            updatedAt: now,
+          },
+        };
+      });
       await appendEvent(context.root, 'task_completed', {
         checkpointId: checkpoint.id,
       });

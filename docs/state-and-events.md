@@ -1,14 +1,16 @@
 # State and events
 
 Relay's structured memory is `.relay/state.json`, validated by the Zod schema in
-`src/state/schema.ts`. A parallel append-only log, `.relay/events.jsonl`, records what
-happened and when.
+`src/state/schema.ts`. An atomic, bounded activity snapshot in Rirei's application-support
+directory provides sanitized session status for external UIs.
 
 ## `RelayState` schema
 
 ```ts
 interface RelayState {
-  schemaVersion: 1;
+  schemaVersion: 3;
+  revision: number;
+  recentOperations: OperationRecord[];
   sessionId: string; // crypto.randomUUID()
   projectRoot: string;
 
@@ -30,7 +32,9 @@ interface RelayState {
     dirtyAtStart: boolean;
   };
 
-  currentAgent?: string; // set while an agent is running, cleared after
+  runs: RunLease[]; // authoritative active provider ownership
+  currentAgent?: string; // compatibility mirror of the first active lease
+  currentRunId?: string;
   agentHistory: AgentRunRecord[];
   decisions: DecisionRecord[];
   completedWork: WorkItem[];
@@ -61,7 +65,7 @@ type TestResult = {
 type CheckpointRecord = { id: string; createdAt: string; path: string };
 type BlockerRecord = { description: string; createdAt: string };
 type AgentRunRecord = {
-  id?: string; // stable ID on new records; optional for schema-v1 compatibility
+  id?: string; // stable ID on new records; optional on migrated legacy records
   agent: string;
   model?: string; // explicit session override; absent means provider default
   effort?: string; // explicit session override; absent means provider default
@@ -69,8 +73,19 @@ type AgentRunRecord = {
   endedAt?: string;
   exitCode?: number | null;
   exitReason?: string;
+  launchMode?: 'new' | 'resume' | 'fork';
+  providerSessionId?: string;
+  terminalId?: string;
+  workspaceId?: string;
+  branchLabel?: string;
+  role?: 'implement' | 'review' | 'verify' | 'investigate';
 };
 ```
+
+`RunLease` records one active provider's run, controller, provider, selected worktree, launch
+mode, timestamps, and status. The authoritative concurrency invariant is at most one writing
+lease per working tree. Several agents may run concurrently only when they own different
+worktrees.
 
 Agent runs are appended in launch order and form the durable source for Rirei's session
 timeline. `model` and `effort` record only overrides Relay actually passed to the provider.
@@ -86,8 +101,9 @@ This preserves checkpoints, tests, and task-status changes written while the age
 
 ## Which fields are populated today
 
-- **Set automatically:** `sessionId`, `projectRoot`, `task.title/originalRequest/status/
-createdAt/updatedAt`, the full `git` baseline, `currentAgent`, `agentHistory`, `tests`
+- **Set automatically:** `revision`, `recentOperations`, `sessionId`, `projectRoot`,
+  `task.title/originalRequest/status/createdAt/updatedAt`, the full `git` baseline, `runs`,
+  compatibility mirrors, `agentHistory`, `tests`
   (via `finish --run-tests`), and `checkpoints`.
 - **Present but not yet populated by any command:** `task.requirements`, `task.constraints`,
   `decisions`, `completedWork`, `remainingWork`, and `blockers`. They are initialized to
@@ -99,9 +115,11 @@ createdAt/updatedAt`, the full `git` baseline, `currentAgent`, `agentHistory`, `
 
 `writeState()` (`src/state/store.ts`) never writes `state.json` in place:
 
-1. Validate the state against the schema.
-2. Write to a temporary file `.state.json.<uuid>.tmp` inside `.relay/` (`0600`).
-3. `rename()` the temp file over `state.json`.
+1. Acquire the repository-scoped writer lock.
+2. Validate the expected revision and optional idempotency operation ID.
+3. Validate the resulting state and increment its revision.
+4. Write to a temporary file `.state.json.<uuid>.tmp` inside `.relay/` (`0600`).
+5. `rename()` the temp file over `state.json`.
 
 Because `rename` is atomic on the same filesystem, an interrupted process leaves either the
 old complete file or the new complete file — never a truncated one. This is the property the
@@ -110,39 +128,41 @@ lifecycle test suite exercises.
 `readState()` reads and Zod-parses the file; a corrupted or hand-broken `state.json` fails
 loudly rather than loading partial data.
 
-## The event log
+## The activity feed
 
-`appendEvent(root, type, data)` (`src/state/events.ts`) appends one JSON object per line to
-`.relay/events.jsonl`:
+Relay writes one atomically replaced, cross-project activity snapshot to
+`~/Library/Application Support/Rirei/activity.json` on macOS. `RIREI_DATA_HOME` overrides the
+directory for tests and controlled deployments.
 
 ```json
 {
-  "type": "task_started",
-  "at": "2026-07-12T00:00:00.000Z",
-  "data": { "sessionId": "…", "task": "…", "dirtyAtStart": false }
+  "schemaVersion": 1,
+  "instanceId": "...",
+  "updatedAt": "2026-07-12T00:00:00.000Z",
+  "sessions": []
 }
 ```
 
-Event types emitted today:
+The validated `sessions` array aggregates active terminal-owned runs from registered projects
+and retains completed, cancelled, or failed terminal sessions for 30 seconds. Statuses and
+messages use a fixed Rirei vocabulary. Session counts and every public string are bounded.
 
-| Event                | Emitted by                                                          |
-| -------------------- | ------------------------------------------------------------------- |
-| `task_started`       | `relay start`                                                       |
-| `checkpoint_created` | `createCheckpoint` (via `checkpoint`, `switch`, `finish`)           |
-| `agent_started`      | `launchAgent`, with run ID, agent, and model/effort overrides       |
-| `agent_ended`        | `launchAgent`, with run ID, agent, exit code, and classified reason |
-| `task_completed`     | `relay finish`                                                      |
+The public snapshot never contains prompts, commands, responses, transcripts, terminal output,
+diffs, credentials, provider session IDs, models, effort settings, worktree paths, or project
+paths. Optional `activity.privacyMode` in `.relay/config.json` replaces project, task, and branch
+labels with generic values.
 
-The log is append-only and intended for debugging, auditability, and reconstructing what
-happened. It is safe to git-ignore.
+Publication uses a separate global writer lock, mode `0700` parent directory, mode `0600`
+files, and unique temporary-file replacement. It is a derivative projection: an activity I/O
+failure cannot roll back or invalidate authoritative Relay state.
 
-`agent_started` writes `model: null` and `effort: null` when Auto was selected. Both the
-start and end events share the run ID stored on `AgentRunRecord`, allowing event consumers to
-correlate the pair even when the same provider is launched repeatedly.
+## Migrations and recovery
 
-## Recovery notes
-
-- If `state.json` is corrupted, the event log preserves the sequence of task/agent/checkpoint
-  events, and each checkpoint directory has its own `metadata.json` snapshot.
-- There is no automatic migration layer yet; `schemaVersion` is fixed at `1`. Treat manual
-  edits carefully and re-run a command to confirm the file still validates.
+- If `state.json` is corrupted, each checkpoint directory has its own `metadata.json` snapshot.
+- Ordered migrations upgrade v1 to v2 (revision/idempotency) and v2 to v3 (explicit run leases).
+- The pre-migration state is backed up under `.relay/backups/` before the upgraded state is
+  written.
+- A state file newer than this build supports is rejected with an upgrade message rather than
+  opened or downgraded.
+- Persistent state versions, activity schema versions, and JSON frontend contracts are separate
+  version namespaces.

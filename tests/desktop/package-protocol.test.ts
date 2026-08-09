@@ -1,0 +1,24 @@
+import { readFile } from 'node:fs/promises';
+import { describe, expect, test } from 'vitest';
+
+describe('packaged desktop protocol', () => {
+  test('registers the rirei scheme with electron-builder', async () => {
+    const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
+    expect(packageJson.build.protocols).toContainEqual({
+      name: 'Rirei terminal',
+      schemes: ['rirei'],
+    });
+    expect(packageJson.build.asarUnpack).toContain('desktop/pty_bridge.py');
+    expect(packageJson.build.extraResources).toEqual(
+      expect.arrayContaining([
+        { from: 'LICENSE', to: 'LICENSE' },
+        { from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
+      ]),
+    );
+    expect(packageJson.main).toBe('dist/index.cjs');
+    expect(packageJson.build.extraMetadata.main).toBe('desktop/main.mjs');
+    expect(packageJson.scripts['desktop:dev']).toContain(
+      'electron desktop/main.mjs',
+    );
+  });
+});

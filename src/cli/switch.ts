@@ -13,13 +13,22 @@ export function switchCommand(): Command {
     .argument('<agent>', 'claude, codex, gemini, or antigravity')
     .option('--model <model>', 'override the provider model for this session')
     .option('--effort <level>', 'override reasoning effort when supported')
+    .option('--operation-id <id>', 'idempotency key for this provider launch')
+    .option('--terminal-id <id>', 'terminal that owns this provider launch')
     .action(
-      async (agent: string, options: { model?: string; effort?: string }) => {
+      async (
+        agent: string,
+        options: {
+          model?: string;
+          effort?: string;
+          operationId?: string;
+          terminalId?: string;
+        },
+      ) => {
         if (!isAgentId(agent)) throw new Error(`Unknown agent: ${agent}.`);
         const context = await taskContext();
         const checkpoint = await createCheckpoint(
           context.root,
-          context.state,
           `Switch to ${agent}`,
         );
         const handoff = await renderHandoff(context.root, checkpoint.state);
@@ -31,7 +40,12 @@ export function switchCommand(): Command {
           checkpoint.state,
           getAgent(agent),
           handoff,
-          { model: options.model, effort: options.effort },
+          {
+            model: options.model,
+            effort: options.effort,
+            operationId: options.operationId,
+            terminalId: options.terminalId,
+          },
         );
         if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
       },

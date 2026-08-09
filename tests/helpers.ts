@@ -1,10 +1,21 @@
 import { execFile } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+const automaticDataHome = process.env.RIREI_DATA_HOME
+  ? undefined
+  : path.join(tmpdir(), `rirei-tests-${process.pid}`);
+if (automaticDataHome) {
+  process.env.RIREI_DATA_HOME = automaticDataHome;
+  process.once('exit', () =>
+    rmSync(automaticDataHome, { recursive: true, force: true }),
+  );
+}
 
 export async function createRepository(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), 'relay-test-'));

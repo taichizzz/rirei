@@ -19,6 +19,11 @@ export const configSchema = z.object({
     captureOutput: z.boolean().default(true),
     maxStoredOutputBytes: z.number().int().positive().default(200_000),
   }),
+  activity: z
+    .object({
+      privacyMode: z.boolean().default(false),
+    })
+    .default({ privacyMode: false }),
 });
 
 export type RelayConfig = z.infer<typeof configSchema>;
@@ -40,5 +45,8 @@ export const defaultConfig: RelayConfig = configSchema.parse({
     timeoutSeconds: 600,
     captureOutput: true,
     maxStoredOutputBytes: 200_000,
+  },
+  activity: {
+    privacyMode: false,
   },
 });

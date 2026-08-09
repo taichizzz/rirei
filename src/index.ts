@@ -11,6 +11,12 @@ import { runCommand } from './cli/run.js';
 import { switchCommand } from './cli/switch.js';
 import { usageCommand } from './cli/usage.js';
 import { agentsCommand } from './cli/agents.js';
+import { historyCommand } from './cli/history.js';
+import { recoverCommand } from './cli/recover.js';
+import { resumeCommand } from './cli/resume.js';
+import { checkpointsCommand } from './cli/checkpoints.js';
+import { checkpointDiffCommand } from './cli/checkpoint-diff.js';
+import { workspaceCommand } from './cli/workspace.js';
 
 const program = new Command()
   .name('relay')
@@ -20,11 +26,17 @@ const program = new Command()
   .addCommand(startCommand())
   .addCommand(statusCommand())
   .addCommand(checkpointCommand())
+  .addCommand(checkpointsCommand())
+  .addCommand(checkpointDiffCommand())
   .addCommand(handoffCommand())
   .addCommand(runCommand())
+  .addCommand(resumeCommand())
   .addCommand(switchCommand())
+  .addCommand(workspaceCommand())
   .addCommand(usageCommand())
   .addCommand(agentsCommand())
+  .addCommand(historyCommand())
+  .addCommand(recoverCommand())
   .addCommand(finishCommand())
   .addCommand(doctorCommand());
 

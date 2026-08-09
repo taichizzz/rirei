@@ -24,6 +24,9 @@ invalid or manually corrupted config causes the loading command to fail with a s
     "timeoutSeconds": 600,
     "captureOutput": true,
     "maxStoredOutputBytes": 200000
+  },
+  "activity": {
+    "privacyMode": false
   }
 }
 ```
@@ -59,6 +62,12 @@ Guards against loading a config written by an incompatible future version.
 | `timeoutSeconds`       | int > 0, `600`    | Reserved — the finish test run has no timeout wired yet.              |
 | `captureOutput`        | bool, `true`      | Reserved — the finish run inherits stdio and does not capture output. |
 | `maxStoredOutputBytes` | int > 0, `200000` | Reserved — pairs with capture, not yet used.                          |
+
+### `activity`
+
+| Field         | Type / default | Honored today?                                                                  |
+| ------------- | -------------- | ------------------------------------------------------------------------------- |
+| `privacyMode` | bool, `false`  | **Yes** — replaces project, task, and branch labels with generic public values. |
 
 > "Reserved" fields are validated and persisted so the schema is stable, but no code path
 > reads them yet. They exist to keep the config format forward-compatible. When you wire one

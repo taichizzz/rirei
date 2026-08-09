@@ -23,8 +23,9 @@ Initialize Relay in the current repository.
 Notes / current limitations:
 
 - `init` does **not** probe for installed agent CLIs (use `relay doctor` for that).
-- `task.md`, `decisions.md`, `handoff.md`, and `events.jsonl` are **not** pre-created; they
-  appear when first written.
+- `task.md`, `decisions.md`, and `handoff.md` are **not** pre-created; they appear when first
+  written. The sanitized activity snapshot lives outside the repository and is published from
+  validated state mutations.
 
 ---
 
@@ -117,6 +118,10 @@ Launch an installed official CLI (`claude`, `codex`, `gemini`, or `antigravity`)
 overrides without changing global provider configuration. Unsupported effort values fail
 before launch.
 
+**Host options:** `--operation-id <id>` supplies an idempotency key, and `--terminal-id <id>`
+records the terminal that owns the run. Frontends should generate these; ordinary interactive
+CLI use can omit both.
+
 Behavior:
 
 - Validates the agent id.
@@ -134,8 +139,8 @@ model/effort selection.
 
 Checkpoint, preview a handoff, then launch another agent.
 
-**Options:** `--model <model>` and `--effort <level>` — use the same session overrides as
-`relay run` for the incoming agent.
+**Options:** `--model <model>`, `--effort <level>`, `--operation-id <id>`, and
+`--terminal-id <id>` use the same session controls as `relay run` for the incoming agent.
 
 Sequence:
 
@@ -146,6 +151,67 @@ Sequence:
 
 > Current limitation: `switch` records agent start/end events but does not append a distinct
 > `switch` event.
+
+---
+
+## `relay workspace`
+
+Manage isolated Git worktree workspaces so several agents can work in one repository without
+sharing a working tree. See [worktrees.md](worktrees.md) and the Git-safety section of
+[security.md](security.md).
+
+### `relay workspace create`
+
+Create a workspace: a new branch `rirei/<slug>-<role>-<id>` and a linked worktree stored under
+the Rirei data home. **This is the only Git-mutating Relay command** (`git worktree add -b`).
+It never touches the main working tree.
+
+**Options:** `--role <implement|review|verify|investigate>` (default `implement`),
+`--slug <slug>` (defaults to the task title), `--json`.
+
+Launch an agent inside the workspace with `relay run <agent> --workspace <id>`. Because each
+workspace is a separate working tree, several agents can run concurrently — Relay allows at most
+one writing run per working tree.
+
+### `relay workspace list`
+
+List the workspaces registered for this repository (`--json` for machine-readable output).
+
+### `relay workspace cleanup <workspaceId>`
+
+Inspect a workspace for safe cleanup and print copyable `git worktree remove` / `git branch -d`
+commands. **Relay removes nothing** — it reports the active run holding the workspace,
+dirty/untracked files, commits ahead of base, and unpushed commits, and marks cleanup blocked
+when removal would lose work. `--json` for machine-readable output.
+
+---
+
+## `relay resume <agent>`
+
+Resume a provider-owned Claude or Codex conversation in a new interactive PTY. Use exactly one
+of `--picker`, `--latest`, or `--id <value>`; picker is the default. Claude also supports
+`--fork`. An optional `--prompt`, `--model`, or `--effort` applies to the resumed launch. Relay
+records resume metadata but does not read provider conversation files. Frontends can also pass
+`--operation-id` and `--terminal-id`.
+
+## `relay history [query]`
+
+Search the current task and archived project task metadata. `--json` returns task, run,
+provider, model, effort, result, and checkpoint metadata. Before a completed/cancelled task is
+replaced, its state is archived under `.relay/tasks/<session-id>/state.json`.
+
+## `relay recover --force`
+
+Mark a recorded current run as interrupted and clear its active lock. Relay cannot prove that
+an external provider process has stopped, so explicit `--force` confirmation is required.
+Use `--run-id <id>` when several orphaned runs exist and `--reason <text>` to record why
+recovery is safe. Recovery events include the requester and reason.
+
+## `relay checkpoints` / `relay checkpoint-diff <id>`
+
+List retained checkpoints or read the selected checkpoint's saved bounded patch. Both support
+`--json`. The reader validates IDs and artifact paths, rejects symlinks, omits binary patch
+bodies, and never changes Git state.
 
 ---
 
@@ -162,8 +228,8 @@ launching agents itself. Agents that have never run are listed with zero runs.
 
 `--json` additionally includes a `plans` array with provider plan usage where a
 machine-readable source exists: Claude (sanitized `rate_limits` captured from Claude Code's
-status line into `.relay/provider-usage/claude.json`) and Codex (numeric `rate_limits`
-fields parsed from the newest local Codex session log). Providers without a verified source
+status line into `~/.relay/provider-usage/claude.json`) and Codex (numeric `rate_limits`
+fields parsed from bounded tails of recent local Codex session logs). Providers without a verified source
 report `status: "unknown"` instead of a guess. Captured values become `stale` after 15 minutes
 or after their reset time passes. No credentials are read; Codex rollout files are scanned
 locally for numeric rate-limit events only.

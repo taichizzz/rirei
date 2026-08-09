@@ -40,7 +40,9 @@ npm run dev -- status
 Before committing:
 
 ```sh
-npm run check && npm run lint && npm test
+npm run verify
+npm run audit:production
+npm run package:check
 ```
 
 ## Tests
@@ -49,12 +51,12 @@ Vitest suites live under `tests/`, mirroring `src/`:
 
 ```
 tests/
-├── cli/lifecycle.test.ts      # init → start → checkpoint → handoff → run → finish
-├── state/store.test.ts        # atomic writes, schema validation
-├── state/events.test.ts       # event log append
-├── safety/path-policy.test.ts # path confinement
-├── git/repository.test.ts     # snapshot/baseline against temp repos
-└── helpers.ts                 # temp Git repo fixtures
+├── application/               # shared session manager and fake process hosts
+├── cli/                       # lifecycle and structured CLI behavior
+├── desktop/                   # IPC models, deep links, activity, usage, approval protocol
+├── state/                     # locking, migrations, leases, publication, concurrency
+├── worktrees/                 # isolated workspace creation and cleanup inspection
+└── helpers.ts                 # temporary Git repository fixtures
 ```
 
 The lifecycle suite creates real temporary Git repositories, so tests exercise actual `git`
@@ -91,6 +93,11 @@ self-contained artifact.
 - `files`: `desktop/**/*` and `package.json` (this includes `renderer/vendor/`).
 - `extraResources`: copies `dist/index.cjs` to `cli/index.cjs`, exactly matching `cliPath()`.
 - `mac.target`: `dmg` and `zip`.
+
+The npm source package is deliberately smaller than the desktop bundle. The top-level `files`
+allowlist includes only the bundled CLI and required license/readme files. `npm run
+package:check` fails if local state, source trees, tests, desktop assets, private keys, or local
+user paths enter that tarball.
 
 ## Keeping docs in sync
 

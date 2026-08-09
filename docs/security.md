@@ -15,23 +15,46 @@ Relay does **not**:
 - attempt to bypass provider usage limits.
 
 Each official CLI owns its authentication, billing, rate limits, model availability, and
-permissions. Relay only launches the executable and passes a prompt argument. This is why
+permissions. Relay launches the executable with explicit argument arrays and, where documented,
+a generated session-only settings file for sanitized usage collection. This is why
 `detectAuthentication()` returns `unknown` rather than `ready` — Relay refuses to inspect
 credentials, so it cannot assert they are valid. See [agents.md](agents.md).
 
 Relay switches to a _separately authenticated_ provider when one is unavailable; it is not a
 way around any provider's limits.
 
+Permission approval is not active in the current release. Its future local command channel
+is specified in [approval-protocol.md](approval-protocol.md): loopback-only, bearer
+authenticated, terminal-owned, expiring, one-shot, and fail-closed. Commands and paths needed
+for an informed approval remain transient and never enter the public activity snapshot or
+durable Relay state.
+
 ## Git safety
 
-Relay treats Git as shared project memory but never mutates it. It does not:
+Relay treats Git as shared project memory. It performs **exactly one** kind of Git mutation,
+and only through an explicit, previewed user action. Distinguish three categories:
 
-commit · push · merge · reset · rebase · clean · force-checkout · discard uncommitted changes ·
-create branches or worktrees.
+1. **Read-only inspection** — the default. `rev-parse`, `status`, `branch --show-current`,
+   `diff`, `worktree list`, `show-ref`, `rev-list --count` in `src/git/repository.ts`. These
+   never write to the repository, and every read-only command (`status`, `checkpoint`,
+   `handoff`, cleanup inspection) stays in this category.
+2. **User-approved workspace creation** — `relay workspace create` runs a single mutating
+   command, `git worktree add -b <rirei/…branch> <path> <base-commit>` (`addWorktree`), to
+   give a concurrent agent an isolated branch and linked worktree. It is previewed, additive,
+   and never touches the main working tree.
+3. **Explicit manual cleanup** — `relay workspace cleanup <id>` **inspects** a worktree and
+   prints copyable `git worktree remove` / `git branch -d` commands. Relay does not run them;
+   removal stays in the user's hands in this release.
 
-Enforcement is structural: the only Git commands Relay runs are read-only inspections in
-`src/git/repository.ts` (`rev-parse`, `status`, `branch --show-current`, `diff`). There is no
-code path that writes to the repository.
+Operations Relay still **never** performs, automatically or otherwise:
+
+commit · push · merge · reset · rebase · clean · force-checkout · force-delete ·
+discard uncommitted changes · delete a worktree or branch.
+
+Worktrees are stored outside the repository (under the Rirei data home, default
+`~/.local/share/rirei/worktrees/`), so a linked worktree never nests inside `.git` or appears
+in the main repository's status. The repository key that namespaces them is a stable directory
+key derived from the canonical root and remote — never a security boundary.
 
 Supporting behaviors:
 
@@ -60,9 +83,14 @@ path. Checkpoint pruning also deletes only paths resolved through this policy.
 ## Local state permissions
 
 - `.relay/` and its subdirectories are created with mode `0700`.
-- `state.json`, `config.json`, event log, and checkpoint files are written `0600`.
+- `state.json`, `config.json`, activity source files, and checkpoint files are written `0600`.
 - State writes are atomic (temp file + `rename`) so interruption cannot corrupt state — see
   [state-and-events.md](state-and-events.md).
+- Authoritative task-state mutations and task replacement are serialized by a
+  repository-scoped writer lock. State carries a monotonic `revision`, and guarded operations
+  can supply an operation ID or expected revision to reject retries and stale writes.
+  Migrations back up the pre-migration file before the first upgraded write, and a
+  newer-than-supported `schemaVersion` is refused rather than opened.
 
 ## Subprocess hygiene
 
@@ -72,6 +100,10 @@ path. Checkpoint pruning also deletes only paths resolved through this policy.
   yourself in `config.json`.)
 - Interactive agents inherit stdio (CLI) or run under a PTY (desktop); Relay does not capture
   or persist the full terminal session by default.
+- Searchable history contains Relay task/run metadata only. It does not index provider
+  conversations or terminal output.
+- Claude usage collection stores only sanitized percentages, reset epochs, and a capture time
+  under `~/.relay/provider-usage/`; it does not read credentials or make provider API calls.
 - The desktop app runs its renderer with `contextIsolation: true`, `nodeIntegration: false`,
   and `sandbox: true`, exposing only a small `window.relay` bridge. See [desktop.md](desktop.md).
 
@@ -89,8 +121,10 @@ credential files, not raw conversations.
 
 ## What belongs in version control
 
-- **Ignore:** generated event logs, checkpoints, captured output — anything under
-  `.relay/checkpoints/`, `.relay/test-output/`, and `.relay/events.jsonl`.
-- **Optionally commit later:** human-authored task and decision files, deliberately.
+- **Ignore:** the complete generated `.relay/` directory and the global sanitized Rirei
+  activity snapshot. `.relay/` may contain local paths, task text, run metadata, checkpoints,
+  patches, and captured test output.
+- **Optionally commit later:** separately designed human-authored project files that do not
+  share the generated `.relay/` namespace.
 
 `relay init` prints this guidance when it sets up the directory.

@@ -23,6 +23,7 @@ interface AgentAdapter {
   getEffortLevels(model?: string): Promise<string[]>;
 
   buildInteractiveCommand(ctx: AgentRunContext): Promise<CommandSpec>;
+  buildResumeCommand?(ctx: AgentResumeContext): Promise<CommandSpec>;
   buildNonInteractiveCommand?(ctx: AgentRunContext): Promise<CommandSpec>; // optional
 
   classifyExit(result: ProcessResult): Promise<{
@@ -39,6 +40,7 @@ interface AgentRunContext {
   projectRoot: string;
   prompt: string;
   providerSettingsPath?: string;
+  providerSessionId?: string;
   model?: string;
   effort?: string;
 }
@@ -60,8 +62,12 @@ interface ProcessResult {
 ```
 completed | user_cancelled | usage_limit | rate_limit | authentication_error |
 permission_error | command_not_found | provider_unavailable | context_limit |
-network_error | unknown_failure
+network_error | interrupted | unknown_failure
 ```
+
+Claude and Codex expose provider-specific resume builders. Relay records whether a launch is
+new, resumed, or forked, but the provider CLI remains responsible for loading conversation
+state. A resume always starts a new process and PTY; Relay does not reattach an old terminal.
 
 ## The registered agents
 

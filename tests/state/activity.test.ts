@@ -25,6 +25,7 @@ import {
   selectActivityUsage,
   stopActivityHeartbeat,
   syncActivity,
+  type RireiActivitySnapshotV1,
 } from '../../src/state/activity.js';
 import type { RelayState, RunLease } from '../../src/state/schema.js';
 import { readState, updateState, writeState } from '../../src/state/store.js';
@@ -34,6 +35,19 @@ const sandboxes: string[] = [];
 const projectRoots: string[] = [];
 const originalDataHome = process.env.RIREI_DATA_HOME;
 const originalProviderUsageHome = process.env.RIREI_PROVIDER_USAGE_HOME;
+
+async function waitForActivity(
+  predicate: (snapshot: RireiActivitySnapshotV1 | undefined) => boolean,
+  timeoutMs = 2_000,
+): Promise<RireiActivitySnapshotV1> {
+  const deadline = process.hrtime.bigint() + BigInt(timeoutMs) * 1_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    const snapshot = await readActivity();
+    if (snapshot && predicate(snapshot)) return snapshot;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Timed out waiting for the activity heartbeat.');
+}
 
 async function sandbox(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'rirei-activity-'));
@@ -457,21 +471,21 @@ describe('global activity snapshot', () => {
     const initial = await syncActivity(root, state);
 
     await vi.advanceTimersByTimeAsync(5_000);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    const heartbeat = await readActivity();
-    expect(heartbeat?.updatedAt).not.toBe(initial.updatedAt);
-    expect(heartbeat?.sessions[0]?.updatedAt).not.toBe(
+    const heartbeat = await waitForActivity(
+      (snapshot) => snapshot.updatedAt !== initial.updatedAt,
+    );
+    expect(heartbeat.sessions[0]?.updatedAt).not.toBe(
       initial.sessions[0]?.updatedAt,
     );
 
     const inactive = { ...state, runs: [] };
     await writeState(root, inactive);
     await vi.advanceTimersByTimeAsync(5_000);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    const cleaned = await readActivity();
-    expect(cleaned?.sessions).toEqual([]);
+    const cleaned = await waitForActivity(
+      (snapshot) => snapshot.sessions.length === 0,
+    );
     await vi.advanceTimersByTimeAsync(10_000);
-    expect((await readActivity())?.updatedAt).toBe(cleaned?.updatedAt);
+    expect((await readActivity())?.updatedAt).toBe(cleaned.updatedAt);
   });
 
   it('retains only recent terminal-owned completed, cancelled, and failed runs', async () => {
@@ -604,8 +618,9 @@ describe('global activity snapshot', () => {
     }));
     process.env.RIREI_DATA_HOME = validDataHome;
     await vi.advanceTimersByTimeAsync(5_000);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-
-    expect((await readActivity())?.sessions[0]?.runId).toBe('run-1');
+    const retried = await waitForActivity(
+      (snapshot) => snapshot.sessions[0]?.runId === 'run-1',
+    );
+    expect(retried.sessions[0]?.runId).toBe('run-1');
   });
 });

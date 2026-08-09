@@ -1,6 +1,6 @@
 # Architecture
 
-Relay is a TypeScript CLI (bundled with esbuild, run on Node.js 22+) plus an optional
+Relay is a TypeScript CLI (bundled with esbuild, run on Node.js 22.12+) plus an optional
 Electron desktop shell that wraps the same CLI. This document explains the module layout
 and how a command flows from invocation to state on disk.
 

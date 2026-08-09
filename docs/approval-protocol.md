@@ -4,7 +4,7 @@ Rirei permission approval is intentionally split into two independent boundaries
 
 1. A provider adapter captures a structured pending request from an official provider hook
    or protocol.
-2. A trusted local companion, such as Rirei Notch, submits a human decision to Rirei.
+2. A trusted local companion submits a human decision to Rirei.
 
 This document specifies the second boundary. The channel is not activated yet, and no
 provider hooks are installed by the current release.

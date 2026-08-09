@@ -4,7 +4,7 @@ Rirei is MIT-licensed source, but publishing safely requires more than adding `L
 
 ## Preflight
 
-Run from a clean clone with Node.js 22:
+Run from a clean clone with Node.js 22.12 or newer:
 
 ```sh
 npm ci
@@ -40,7 +40,5 @@ Do not assume a normal deletion commit removes previously published personal dat
 - Source publication does not imply that unsigned desktop binaries are production-ready.
 - Developer ID signing, hardened runtime review, notarization, stapling, checksums, and a clean
   macOS installation test remain required for a desktop binary release.
-- The Rirei Notch fork is GPL-3.0 and must be published from its separate repository with the
-  complete corresponding source for any distributed binary.
 - Provider names are descriptive compatibility references. Rirei is not affiliated with or
   endorsed by those providers.

@@ -7,3 +7,9 @@ updates:
     groups:
       development-dependencies:
         dependency-type: development
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: '@xterm/xterm'
+      - dependency-name: '@xterm/addon-fit'

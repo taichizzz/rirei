@@ -56,7 +56,7 @@ Detailed docs live in [`docs/`](docs/README.md):
 
 ## Development
 
-Requires Node.js 22 or newer.
+Requires Node.js 22.12 or newer.
 
 ```sh
 npm install
@@ -125,6 +125,3 @@ repository changes.
 Rirei is licensed under the [MIT License](LICENSE). Vendored dependencies and asset provenance
 are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
 [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md).
-
-The separately maintained Rirei Notch fork is derived from Boring Notch and remains GPL-3.0;
-its source and license stay in that separate repository.

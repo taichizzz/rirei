@@ -41,7 +41,3 @@ SOFTWARE.
 Claude, Codex, Gemini, Antigravity, GitHub, and other product names are trademarks of their
 respective owners. Rirei is an independent project and is not endorsed by, sponsored by, or
 affiliated with those providers.
-
-The separately maintained Rirei Notch fork derives from Boring Notch and is distributed under
-GPL-3.0 from its own source repository. No Boring Notch source is included in this MIT
-repository.

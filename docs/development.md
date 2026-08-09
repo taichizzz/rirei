@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 22 or newer (`engines.node >= 22`).
+- Node.js 22.12 or newer (`engines.node >= 22.12.0`).
 - `git` on `PATH`.
 - macOS with `/usr/bin/python3` for the desktop integrated terminal (system Python is fine).
 

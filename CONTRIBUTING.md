@@ -5,7 +5,7 @@ or UI changes in an issue before implementation.
 
 ## Development
 
-Requirements: Node.js 22+, npm, Git, and macOS for Electron/PTy-specific verification.
+Requirements: Node.js 22.12+, npm, Git, and macOS for Electron/PTy-specific verification.
 
 ```sh
 npm ci

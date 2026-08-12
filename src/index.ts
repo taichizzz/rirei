@@ -17,6 +17,7 @@ import { resumeCommand } from './cli/resume.js';
 import { checkpointsCommand } from './cli/checkpoints.js';
 import { checkpointDiffCommand } from './cli/checkpoint-diff.js';
 import { workspaceCommand } from './cli/workspace.js';
+import { noteCommand } from './cli/note.js';
 
 const program = new Command()
   .name('relay')
@@ -28,6 +29,7 @@ const program = new Command()
   .addCommand(checkpointCommand())
   .addCommand(checkpointsCommand())
   .addCommand(checkpointDiffCommand())
+  .addCommand(noteCommand())
   .addCommand(handoffCommand())
   .addCommand(runCommand())
   .addCommand(resumeCommand())

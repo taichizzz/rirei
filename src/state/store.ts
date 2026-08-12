@@ -294,7 +294,7 @@ export async function readArchivedStates(
       )
         continue;
       const contents = await readFile(statePath, 'utf8');
-      states.push(relayStateSchema.parse(JSON.parse(contents)));
+      states.push(migrateState(JSON.parse(contents)));
     } catch {
       // A damaged archive must not hide otherwise readable task history.
     }

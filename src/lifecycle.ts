@@ -2,7 +2,17 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { SessionManager, type RunSelection } from './application/sessions.js';
 import { readConfig } from './config/loader.js';
-import { discoverRepository, inspectGitSnapshot } from './git/repository.js';
+import {
+  discoverRepository,
+  ensureRelayLocalExclusion,
+  inspectGitSnapshot,
+  type GitSnapshot,
+} from './git/repository.js';
+import {
+  buildHandoffCapsule,
+  renderCompactHandoff,
+  type RenderedHandoff,
+} from './handoff.js';
 import { relayPath } from './safety/path-policy.js';
 import { appendEvent } from './state/events.js';
 import type { RelayState } from './state/schema.js';
@@ -16,6 +26,7 @@ export async function taskContext(): Promise<{
 }> {
   const root = await discoverRepository(process.cwd());
   if (!root) throw new Error('Relay must be run inside a Git repository.');
+  await ensureRelayLocalExclusion(root);
   const state = await readState(root);
   if (state.task.status !== 'active' && state.task.status !== 'blocked')
     throw new Error(`Relay task is ${state.task.status}.`);
@@ -25,7 +36,7 @@ export async function taskContext(): Promise<{
 export async function createCheckpoint(
   root: string,
   label?: string,
-): Promise<{ id: string; state: RelayState }> {
+): Promise<{ id: string; state: RelayState; snapshot: GitSnapshot }> {
   const config = await readConfig(root);
   const snapshot = await inspectGitSnapshot(
     root,
@@ -46,6 +57,7 @@ export async function createCheckpoint(
       commit: snapshot.commit,
       branch: snapshot.branch,
       patchTruncated: snapshot.patchTruncated,
+      fingerprint: snapshot.fingerprint,
     };
     await Promise.all([
       writeFile(
@@ -90,7 +102,23 @@ export async function createCheckpoint(
     };
   });
   await appendEvent(root, 'checkpoint_created', { id, label: label ?? null });
-  return { id, state: next };
+  return { id, state: next, snapshot };
+}
+
+export async function renderHandoffDocument(
+  root: string,
+  state: RelayState,
+  worktreeRoot = root,
+  capturedSnapshot?: GitSnapshot,
+): Promise<RenderedHandoff> {
+  const config = await readConfig(root);
+  const snapshot =
+    capturedSnapshot ??
+    (await inspectGitSnapshot(worktreeRoot, config.checkpoint.maxPatchBytes));
+  return renderCompactHandoff(
+    buildHandoffCapsule(state, snapshot, config.handoff.maxChangedFiles),
+    config.handoff,
+  );
 }
 
 export async function renderHandoff(
@@ -98,30 +126,7 @@ export async function renderHandoff(
   state: RelayState,
   worktreeRoot = root,
 ): Promise<string> {
-  const config = await readConfig(root);
-  const snapshot = await inspectGitSnapshot(
-    worktreeRoot,
-    config.checkpoint.maxPatchBytes,
-  );
-  const lines = [
-    `# Relay handoff: ${state.task.title}`,
-    '',
-    state.task.originalRequest,
-    '',
-    `Status: ${state.task.status}`,
-    `Git: ${snapshot.branch} at ${snapshot.commit}`,
-    `Changed files:\n${snapshot.status || '(clean)'}`,
-    `Diff stat:\n${snapshot.diffStat || '(none)'}`,
-    `Completed:\n${state.completedWork.map((item) => `- ${item.description}`).join('\n') || '- None recorded'}`,
-    `Remaining:\n${state.remainingWork.map((item) => `- ${item.description}`).join('\n') || '- Refer to original request'}`,
-    `Decisions:\n${state.decisions.map((item) => `- ${item.summary}`).join('\n') || '- None recorded'}`,
-    `Tests:\n${state.tests.map((item) => `- ${item.status}: ${item.command}`).join('\n') || '- None recorded'}`,
-    'Continue from the current working tree. Do not discard existing changes.',
-  ];
-  const text = `${lines.join('\n')}\n`;
-  return text.length <= config.handoff.maxCharacters
-    ? text
-    : `${text.slice(0, config.handoff.maxCharacters - 28)}\n[Relay handoff truncated]\n`;
+  return (await renderHandoffDocument(root, state, worktreeRoot)).text;
 }
 
 export async function launchAgent(

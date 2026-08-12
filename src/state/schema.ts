@@ -42,6 +42,51 @@ const blockerSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+export const handoffNoteTypeSchema = z.enum([
+  'done',
+  'next',
+  'decision',
+  'rejected',
+  'blocker',
+  'question',
+]);
+export type HandoffNoteType = z.infer<typeof handoffNoteTypeSchema>;
+
+export const handoffNoteSchema = z
+  .object({
+    id: z.string().uuid(),
+    type: handoffNoteTypeSchema,
+    text: z.string().trim().min(1).max(500),
+    reason: z.string().trim().min(1).max(500).optional(),
+    createdAt: z.string().datetime(),
+    resolvedAt: z.string().datetime().optional(),
+    provenance: z.object({
+      source: z.enum(['user', 'agent']),
+      agent: z.string().trim().min(1).max(100).optional(),
+      recordedBy: z.literal('relay-cli'),
+    }),
+    git: z.object({
+      commit: z.string().min(1),
+      branch: z.string().min(1),
+      fingerprint: z.string().length(64),
+    }),
+  })
+  .superRefine((note, context) => {
+    if (note.provenance.source === 'agent' && !note.provenance.agent)
+      context.addIssue({
+        code: 'custom',
+        message: 'Agent-reported notes require an agent name.',
+        path: ['provenance', 'agent'],
+      });
+    if (note.provenance.source === 'user' && note.provenance.agent)
+      context.addIssue({
+        code: 'custom',
+        message: 'User-reported notes cannot claim an agent name.',
+        path: ['provenance', 'agent'],
+      });
+  });
+export type HandoffNote = z.infer<typeof handoffNoteSchema>;
+
 const operationRecordSchema = z.object({
   opId: z.string().min(1),
   at: z.string().datetime(),
@@ -109,7 +154,7 @@ const agentRunSchema = z.object({
   role: z.enum(['implement', 'review', 'verify', 'investigate']).optional(),
 });
 
-export const LATEST_STATE_SCHEMA = 3;
+export const LATEST_STATE_SCHEMA = 4;
 
 export const relayStateSchema = z.object({
   schemaVersion: z.literal(LATEST_STATE_SCHEMA),
@@ -149,6 +194,7 @@ export const relayStateSchema = z.object({
   tests: z.array(testResultSchema),
   checkpoints: z.array(checkpointSchema),
   blockers: z.array(blockerSchema),
+  notes: z.array(handoffNoteSchema).max(500),
 });
 
 export type RelayState = z.infer<typeof relayStateSchema>;

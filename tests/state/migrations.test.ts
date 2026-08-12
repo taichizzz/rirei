@@ -34,6 +34,7 @@ describe('state migrations', () => {
     expect(migrated.schemaVersion).toBe(LATEST_STATE_SCHEMA);
     expect(migrated.revision).toBe(0);
     expect(migrated.recentOperations).toEqual([]);
+    expect(migrated.notes).toEqual([]);
     expect(migrated.runs[0]).toMatchObject({
       agent: 'claude',
       status: 'orphaned',
@@ -49,6 +50,24 @@ describe('state migrations', () => {
     const first = migrateState(legacyV1());
     const second = migrateState(first);
     expect(second).toEqual(first);
+  });
+
+  it('adds an empty note log without inventing provenance for v3 records', () => {
+    const current = migrateState(legacyV1());
+    const legacyV3 = {
+      ...current,
+      schemaVersion: 3,
+      decisions: [
+        {
+          summary: 'Keep the old decision',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    } as Record<string, unknown>;
+    delete legacyV3.notes;
+    const migrated = migrateState(legacyV3);
+    expect(migrated.notes).toEqual([]);
+    expect(migrated.decisions).toHaveLength(1);
   });
 
   it('converts an in-flight v2 run into an orphaned lease', () => {

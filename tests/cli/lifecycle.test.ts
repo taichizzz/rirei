@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -44,6 +44,34 @@ async function relayWithEnv(
       env: { ...process.env, ...env },
     },
   );
+}
+
+async function relayWithInput(
+  cwd: string,
+  input: string,
+  ...args: string[]
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ['--import', tsxLoader, entrypoint, ...args],
+      { cwd, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      const result = {
+        stdout: Buffer.concat(stdout).toString('utf8'),
+        stderr: Buffer.concat(stderr).toString('utf8'),
+      };
+      if (code === 0) resolve(result);
+      else reject(new Error(result.stderr || result.stdout));
+    });
+    child.stdin.end(input);
+  });
 }
 
 afterEach(async () => {
@@ -109,6 +137,30 @@ describe('Relay lifecycle commands', () => {
     });
   });
 
+  it('repairs local exclusion before inspecting an older task baseline', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    const exclude = (
+      await execFileAsync(
+        'git',
+        ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'],
+        { cwd: root, encoding: 'utf8' },
+      )
+    ).stdout.trim();
+    const contents = await readFile(exclude, 'utf8');
+    await writeFile(exclude, contents.replace('/.relay/\n', ''));
+
+    await expect(
+      relay(root, 'start', 'Repair before baseline'),
+    ).resolves.toBeDefined();
+    const state = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as { git: { dirtyAtStart: boolean } };
+    expect(state.git.dirtyAtStart).toBe(false);
+    await expect(readFile(exclude, 'utf8')).resolves.toContain('/.relay/');
+  });
+
   it('creates a bounded checkpoint and a concise handoff without changing Git', async () => {
     const root = await createRepository();
     directories.push(root);
@@ -133,12 +185,313 @@ describe('Relay lifecycle commands', () => {
       readFile(path.join(checkpoint, 'changes.patch'), 'utf8'),
     ).resolves.toContain('# Changed');
     const handoff = await relay(root, 'handoff');
-    expect(handoff.stdout).toContain('Diff stat:');
+    expect(handoff.stdout).toContain('Task: Preserve current work');
+    expect(handoff.stdout).toMatch(/Git: main@[0-9a-f]{7}; dirty/);
+    expect(handoff.stdout).toContain(
+      'Inspect the working tree and preserve existing changes.',
+    );
     expect(handoff.stdout).not.toContain('diff --git');
     const after = await execFileAsync('git', ['status', '--porcelain=v1'], {
       cwd: root,
     });
     expect(after.stdout).toBe(before.stdout);
+  });
+
+  it('records provenance-aware notes and marks them stale when Git changes', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Finish OAuth refresh');
+    const decision = JSON.parse(
+      (
+        await relay(
+          root,
+          'note',
+          'decision',
+          'Store refresh tokens in Keychain',
+          '--reason',
+          'Avoid browser storage exposure',
+          '--json',
+        )
+      ).stdout,
+    ) as { note: { id: string } };
+    const rejected = JSON.parse(
+      (
+        await relay(
+          root,
+          'note',
+          'rejected',
+          'Use access tokens as sessions',
+          '--reason',
+          'They expire',
+          '--source',
+          'agent',
+          '--agent',
+          'claude',
+          '--json',
+        )
+      ).stdout,
+    ) as { note: { id: string } };
+    await relay(root, 'note', 'next', 'Fix the refresh endpoint');
+
+    const current = JSON.parse(
+      (await relay(root, 'handoff', '--json')).stdout,
+    ) as {
+      text: string;
+      capsule: { notes: Array<{ id: string; freshness: string }> };
+      budget: { usedCharacters: number; estimatedTokens: number };
+    };
+    expect(current.text).toContain('Task: Finish OAuth refresh');
+    expect(current.text).toMatch(/Git: main@[0-9a-f]{7}/);
+    expect(current.text).toContain(
+      'Avoid: Use access tokens as sessions — They expire',
+    );
+    expect(current.text).toContain('Next: Fix the refresh endpoint');
+    expect(current.capsule.notes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: rejected.note.id, freshness: 'current' }),
+      ]),
+    );
+    expect(current.budget.usedCharacters).toBeLessThanOrEqual(1_200);
+    expect(current.budget.estimatedTokens).toBeLessThanOrEqual(300);
+
+    const status = JSON.parse(
+      (await relay(root, 'status', '--json')).stdout,
+    ) as {
+      remainingWork: Array<{ description: string }>;
+      decisions: Array<{ summary: string }>;
+      rejectedApproaches: Array<{ id: string }>;
+    };
+    expect(status.remainingWork).toContainEqual({
+      description: 'Fix the refresh endpoint',
+      updatedAt: expect.any(String),
+    });
+    expect(status.decisions).toContainEqual(
+      expect.objectContaining({ summary: 'Store refresh tokens in Keychain' }),
+    );
+    expect(status.rejectedApproaches).toContainEqual(
+      expect.objectContaining({ id: rejected.note.id }),
+    );
+
+    await writeFile(`${root}/README.md`, '# Changed after note\n');
+    const changed = JSON.parse(
+      (await relay(root, 'handoff', '--json')).stdout,
+    ) as { capsule: { notes: Array<{ id: string; freshness: string }> } };
+    expect(changed.capsule.notes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: rejected.note.id, freshness: 'changed' }),
+      ]),
+    );
+
+    await relay(root, 'note', 'resolve', rejected.note.id);
+    const resolved = JSON.parse(
+      (await relay(root, 'handoff', '--json')).stdout,
+    ) as {
+      text: string;
+      capsule: { notes: Array<{ id: string; resolvedAt?: string }> };
+    };
+    expect(resolved.capsule.notes).toContainEqual(
+      expect.objectContaining({
+        id: rejected.note.id,
+        resolvedAt: expect.any(String),
+      }),
+    );
+    expect(resolved.text).not.toContain('Use access tokens as sessions');
+
+    await relay(root, 'note', 'resolve', decision.note.id);
+    const afterDecisionResolution = JSON.parse(
+      (await relay(root, 'status', '--json')).stdout,
+    ) as { decisions: Array<{ summary: string }> };
+    expect(afterDecisionResolution.decisions).toContainEqual(
+      expect.objectContaining({ summary: 'Store refresh tokens in Keychain' }),
+    );
+  });
+
+  it('rejects oversized or schema-expanded note imports without mutation', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Capture notes atomically');
+
+    await expect(
+      relayWithInput(
+        root,
+        'x'.repeat(16 * 1024 + 1),
+        'note',
+        'import',
+        '--stdin',
+        '--source',
+        'agent',
+        '--agent',
+        'antigravity',
+      ),
+    ).rejects.toThrow(/exceeds 16384 bytes/);
+    await expect(
+      relayWithInput(
+        root,
+        JSON.stringify({
+          schemaVersion: 1,
+          notes: [
+            {
+              type: 'next',
+              text: 'Continue',
+              provenance: { source: 'agent' },
+            },
+          ],
+        }),
+        'note',
+        'import',
+        '--stdin',
+        '--source',
+        'agent',
+        '--agent',
+        'antigravity',
+      ),
+    ).rejects.toThrow(/only accept type, text, and reason/);
+    const state = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as { notes: unknown[] };
+    expect(state.notes).toHaveLength(0);
+  });
+
+  it('keeps Unicode handoffs inside both configured budgets', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    const configPath = `${root}/.relay/config.json`;
+    const config = JSON.parse(await readFile(configPath, 'utf8')) as {
+      handoff: { maxCharacters: number; maxTokens: number };
+    };
+    config.handoff.maxCharacters = 248;
+    config.handoff.maxTokens = 62;
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    await relay(root, 'start', `Continue safely ${'🚀'.repeat(200)}`);
+
+    const handoff = JSON.parse(
+      (await relay(root, 'handoff', '--json')).stdout,
+    ) as {
+      text: string;
+      budget: {
+        maxCharacters: number;
+        usedCharacters: number;
+        estimatedTokens: number;
+      };
+    };
+    expect(handoff.budget.maxCharacters).toBe(248);
+    expect(handoff.budget.usedCharacters).toBeLessThanOrEqual(248);
+    expect(handoff.budget.estimatedTokens).toBeLessThanOrEqual(62);
+    expect(handoff.text).not.toContain('�');
+  });
+
+  it('reuses one verified Git snapshot when switching providers', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Switch with compact context');
+    await relay(root, 'note', 'blocker', 'Refresh endpoint returns 401');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    await writeFile(
+      path.join(bin, 'codex'),
+      '#!/bin/sh\nfor arg do last="$arg"; done\nprintf "%s" "$last" > "$RELAY_FAKE_LOG"\n',
+    );
+    await chmod(path.join(bin, 'codex'), 0o700);
+    const log = path.join(root, 'switch-prompt.log');
+    const result = await relayWithEnv(
+      root,
+      {
+        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        RELAY_FAKE_LOG: log,
+      },
+      'switch',
+      'codex',
+      '--yes',
+    );
+    expect(result.stdout).toContain('Estimated handoff:');
+    expect(result.stdout).toContain('Launching codex');
+    await expect(readFile(log, 'utf8')).resolves.toContain(
+      'Refresh endpoint returns 401',
+    );
+    const state = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    ) as { checkpoints: Array<{ path: string }> };
+    const metadata = JSON.parse(
+      await readFile(
+        path.join(
+          root,
+          '.relay',
+          state.checkpoints.at(-1)!.path,
+          'metadata.json',
+        ),
+        'utf8',
+      ),
+    ) as { fingerprint: string };
+    expect(metadata.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('requires explicit approval for a non-interactive switch', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Do not launch silently');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    await writeFile(
+      path.join(bin, 'codex'),
+      '#!/bin/sh\nprintf "launched" > "$RELAY_FAKE_LOG"\n',
+    );
+    await chmod(path.join(bin, 'codex'), 0o700);
+    const log = path.join(root, 'unapproved-launch.log');
+
+    await expect(
+      relayWithEnv(
+        root,
+        {
+          PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+          RELAY_FAKE_LOG: log,
+        },
+        'switch',
+        'codex',
+      ),
+    ).rejects.toThrow(/--yes/);
+    await expect(access(log)).rejects.toThrow();
+  });
+
+  it('keeps empty-context quality approval separate from launch approval', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Require continuation context');
+    const bin = path.join(root, 'fake-bin');
+    await mkdir(bin);
+    await writeFile(
+      path.join(bin, 'codex'),
+      '#!/bin/sh\nprintf "launched" > "$RELAY_FAKE_LOG"\n',
+    );
+    await chmod(path.join(bin, 'codex'), 0o700);
+    const log = path.join(root, 'empty-context-launch.log');
+    const env = {
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      RELAY_FAKE_LOG: log,
+    };
+
+    await expect(
+      relayWithEnv(root, env, 'switch', 'codex', '--yes'),
+    ).rejects.toThrow(/empty continuation context/);
+    await expect(access(log)).rejects.toThrow();
+    await expect(
+      relayWithEnv(
+        root,
+        env,
+        'switch',
+        'codex',
+        '--yes',
+        '--allow-empty-notes',
+      ),
+    ).resolves.toMatchObject({
+      stdout: expect.stringContaining('Launching codex'),
+    });
+    await expect(readFile(log, 'utf8')).resolves.toBe('launched');
   });
 
   it('runs a provider adapter from PATH and records its conservative result', async () => {

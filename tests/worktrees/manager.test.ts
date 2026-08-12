@@ -26,7 +26,7 @@ async function initTask(root: string): Promise<void> {
   await mkdir(relayPath(root), { recursive: true });
   const now = '2026-01-01T00:00:00.000Z';
   const state: RelayState = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -49,6 +49,7 @@ async function initTask(root: string): Promise<void> {
     tests: [],
     checkpoints: [],
     blockers: [],
+    notes: [],
   };
   await writeState(root, state);
 }

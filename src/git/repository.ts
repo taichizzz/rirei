@@ -1,7 +1,129 @@
 import { execFile } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
+import { lstat, open, rename, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
+import { RELAY_DIRECTORY } from '../safety/path-policy.js';
 
 const execFileAsync = promisify(execFile);
+
+export const RELAY_EXCLUDE_LINE = `/${RELAY_DIRECTORY}/`;
+export const GIT_EXCLUDE_ABSOLUTE_ARGS = [
+  'rev-parse',
+  '--path-format=absolute',
+  '--git-path',
+  'info/exclude',
+] as const;
+
+/** The repository-local exclude path for `root`, resolved through Git. */
+export async function gitExcludePath(root: string): Promise<string> {
+  const { stdout: rootOutput } = await execFileAsync(
+    'git',
+    ['rev-parse', '--path-format=absolute', '--show-toplevel'],
+    { cwd: root, encoding: 'utf8' },
+  );
+  const canonicalRoot = rootOutput.trim();
+  if (!canonicalRoot)
+    throw new Error('Could not resolve the canonical Git repository root.');
+
+  const [{ stdout: absoluteOutput }, { stdout: unresolvedOutput }] =
+    await Promise.all([
+      execFileAsync('git', [...GIT_EXCLUDE_ABSOLUTE_ARGS], {
+        cwd: canonicalRoot,
+        encoding: 'utf8',
+      }),
+      execFileAsync('git', ['rev-parse', '--git-path', 'info/exclude'], {
+        cwd: canonicalRoot,
+        encoding: 'utf8',
+      }),
+    ]);
+  const absolutePath = absoluteOutput.trim();
+  const unresolvedPath = unresolvedOutput.trim();
+  if (!absolutePath || !path.isAbsolute(absolutePath) || !unresolvedPath)
+    throw new Error('Could not resolve the repository-local exclude path.');
+
+  // Git's absolute form resolves a final symlink on some platforms. Use the
+  // unresolved spelling for no-follow validation and mutation.
+  return path.isAbsolute(unresolvedPath)
+    ? path.normalize(unresolvedPath)
+    : path.resolve(canonicalRoot, unresolvedPath);
+}
+
+/**
+ * Add `/.relay/` to the repository-local Git exclude file so Relay state never
+ * appears in ordinary Git status. This is the one local metadata mutation Relay
+ * performs; it never edits `.gitignore`, the index, remotes, or branches.
+ */
+export async function installRelayLocalExclusion(root: string): Promise<void> {
+  const excludePath = await gitExcludePath(root);
+  let contents = '';
+  let mode = 0o644;
+  let handle;
+  try {
+    handle = await open(
+      excludePath,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+    );
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP')
+      throw new Error(
+        `Refusing to follow a symlinked Git exclude file: ${excludePath}`,
+      );
+    if (code !== 'ENOENT') throw error;
+  }
+  if (handle) {
+    try {
+      const existing = await handle.stat();
+      if (!existing.isFile())
+        throw new Error(
+          `Git exclude path is not a regular file: ${excludePath}`,
+        );
+      mode = existing.mode & 0o7777;
+      contents = await handle.readFile('utf8');
+    } finally {
+      await handle.close();
+    }
+  }
+  const lines = contents.split('\n');
+  const body =
+    contents === '' ? [] : contents.endsWith('\n') ? lines.slice(0, -1) : lines;
+  if (body.includes(RELAY_EXCLUDE_LINE)) return;
+  const next = `${[...body, RELAY_EXCLUDE_LINE].join('\n')}\n`;
+  const temporaryPath = path.join(
+    path.dirname(excludePath),
+    `.exclude.relay-${process.pid}-${randomUUID()}`,
+  );
+  try {
+    await writeFile(temporaryPath, next, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode,
+    });
+    await rename(temporaryPath, excludePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EISDIR')
+      throw new Error(`Git exclude path is not a regular file: ${excludePath}`);
+    throw error;
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
+}
+
+/**
+ * Upgrade-repair path for repositories initialized before local exclusion:
+ * install the exclude only when Relay state already exists.
+ */
+export async function ensureRelayLocalExclusion(root: string): Promise<void> {
+  try {
+    await lstat(path.join(root, RELAY_DIRECTORY));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  await installRelayLocalExclusion(root);
+}
 
 export interface GitBaseline {
   root: string;
@@ -26,6 +148,8 @@ export interface GitSnapshot {
   status: string;
   diffStat: string;
   patch: string;
+  /** Hash of commit, branch, status, and the complete tracked/index patch. */
+  fingerprint: string;
 }
 
 export async function inspectGitSnapshot(
@@ -64,6 +188,15 @@ export async function inspectGitSnapshot(
     ]),
   ]);
   const bytes = Buffer.from(patch);
+  const fingerprint = createHash('sha256')
+    .update(baseline.commit)
+    .update('\0')
+    .update(baseline.branch)
+    .update('\0')
+    .update(status)
+    .update('\0')
+    .update(patch)
+    .digest('hex');
   const patchTruncated = bytes.length > maxPatchBytes;
   const marker = Buffer.from('\n[Relay patch truncated]\n');
   const boundedPatch = patchTruncated
@@ -79,6 +212,7 @@ export async function inspectGitSnapshot(
     diffStat,
     patch: boundedPatch.toString('utf8'),
     patchTruncated,
+    fingerprint,
   };
 }
 

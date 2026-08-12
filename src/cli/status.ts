@@ -19,6 +19,44 @@ export function statusCommand(): Command {
       const previousAgents = [
         ...new Set(state.agentHistory.map((record) => record.agent)),
       ];
+      const activeNotes = state.notes.filter((note) => !note.resolvedAt);
+      const completedWork = [
+        ...state.completedWork,
+        ...state.notes
+          .filter((note) => note.type === 'done')
+          .map((note) => ({
+            description: note.text,
+            updatedAt: note.createdAt,
+          })),
+      ];
+      const remainingWork = [
+        ...state.remainingWork,
+        ...activeNotes
+          .filter((note) => note.type === 'next')
+          .map((note) => ({
+            description: note.text,
+            updatedAt: note.createdAt,
+          })),
+      ];
+      const decisions = [
+        ...state.decisions,
+        ...state.notes
+          .filter((note) => note.type === 'decision')
+          .map((note) => ({
+            summary: note.text,
+            rationale: note.reason,
+            createdAt: note.createdAt,
+          })),
+      ];
+      const blockers = [
+        ...state.blockers,
+        ...activeNotes
+          .filter((note) => note.type === 'blocker')
+          .map((note) => ({
+            description: note.text,
+            createdAt: note.createdAt,
+          })),
+      ];
       if (options.json) {
         process.stdout.write(
           `${JSON.stringify(
@@ -44,10 +82,15 @@ export function statusCommand(): Command {
               latestCheckpoint: latestCheckpoint ?? null,
               checkpointCount: state.checkpoints.length,
               checkpoints: state.checkpoints,
-              completedWork: state.completedWork,
-              remainingWork: state.remainingWork,
-              decisions: state.decisions,
-              blockers: state.blockers,
+              completedWork,
+              remainingWork,
+              decisions,
+              blockers,
+              rejectedApproaches: activeNotes.filter(
+                (note) => note.type === 'rejected',
+              ),
+              questions: activeNotes.filter((note) => note.type === 'question'),
+              notes: state.notes,
             },
             null,
             2,
@@ -78,10 +121,12 @@ export function statusCommand(): Command {
         `Changed-file baseline: ${state.git.dirtyAtStart ? 'dirty' : 'clean'}`,
         `Latest test: ${latestTest ? `${latestTest.status} (${latestTest.command})` : 'None'}`,
         `Latest checkpoint: ${latestCheckpoint?.id ?? 'None'}`,
-        `Completed items: ${state.completedWork.length}`,
-        `Remaining items: ${state.remainingWork.length}`,
-        `Decisions: ${state.decisions.length}`,
-        `Blockers: ${state.blockers.length}`,
+        `Completed items: ${completedWork.length}`,
+        `Remaining items: ${remainingWork.length}`,
+        `Decisions: ${decisions.length}`,
+        `Blockers: ${blockers.length}`,
+        `Rejected approaches: ${activeNotes.filter((note) => note.type === 'rejected').length}`,
+        `Open questions: ${activeNotes.filter((note) => note.type === 'question').length}`,
       ];
       process.stdout.write(`${lines.join('\n')}\n`);
     });

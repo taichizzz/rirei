@@ -3,7 +3,10 @@ import { z } from 'zod';
 export const configSchema = z.object({
   schemaVersion: z.literal(1),
   handoff: z.object({
-    maxCharacters: z.number().int().positive().default(24_000),
+    maxCharacters: z.number().int().positive().default(4_000),
+    maxTokens: z.number().int().positive().default(1_000),
+    targetCharacters: z.number().int().positive().default(1_200),
+    targetTokens: z.number().int().positive().default(300),
     maxChangedFiles: z.number().int().positive().default(100),
     maxErrorLines: z.number().int().positive().default(200),
     includeFullDiff: z.boolean().default(false),
@@ -31,7 +34,10 @@ export type RelayConfig = z.infer<typeof configSchema>;
 export const defaultConfig: RelayConfig = configSchema.parse({
   schemaVersion: 1,
   handoff: {
-    maxCharacters: 24_000,
+    maxCharacters: 1_200,
+    maxTokens: 300,
+    targetCharacters: 1_200,
+    targetTokens: 300,
     maxChangedFiles: 100,
     maxErrorLines: 200,
     includeFullDiff: false,

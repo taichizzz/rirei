@@ -5,7 +5,7 @@ import type { RelayState } from '../src/state/schema.js';
 function baseState(overrides: Partial<RelayState> = {}): RelayState {
   const now = '2026-07-12T00:00:00.000Z';
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -32,6 +32,7 @@ function baseState(overrides: Partial<RelayState> = {}): RelayState {
     tests: [],
     checkpoints: [],
     blockers: [],
+    notes: [],
     ...overrides,
   };
 }

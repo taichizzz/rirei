@@ -19,6 +19,7 @@ const metadataSchema = z.object({
   commit: z.string().min(1),
   branch: z.string(),
   patchTruncated: z.boolean(),
+  fingerprint: z.string().length(64).optional(),
 });
 
 export interface CheckpointSummary {

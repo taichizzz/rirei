@@ -23,6 +23,7 @@ export interface TaskHistoryEntry {
     role?: 'implement' | 'review' | 'verify' | 'investigate';
   }>;
   checkpoints: Array<{ id: string; label?: string }>;
+  notes: RelayState['notes'];
 }
 
 function historyEntry(state: RelayState, current: boolean): TaskHistoryEntry {
@@ -51,6 +52,7 @@ function historyEntry(state: RelayState, current: boolean): TaskHistoryEntry {
       id: checkpoint.id,
       label: checkpoint.label,
     })),
+    notes: state.notes,
   };
 }
 
@@ -67,6 +69,12 @@ function matchesQuery(entry: TaskHistoryEntry, query: string): boolean {
     ...entry.checkpoints.flatMap((checkpoint) => [
       checkpoint.id,
       checkpoint.label,
+    ]),
+    ...entry.notes.flatMap((note) => [
+      note.type,
+      note.text,
+      note.reason,
+      note.provenance.agent,
     ]),
   ];
   const normalized = query.trim().toLocaleLowerCase();

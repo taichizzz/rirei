@@ -16,7 +16,7 @@ const directories: string[] = [];
 function state(root: string): RelayState {
   const now = '2026-01-01T00:00:00.000Z';
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -39,6 +39,7 @@ function state(root: string): RelayState {
     tests: [],
     checkpoints: [],
     blockers: [],
+    notes: [],
   };
 }
 
@@ -86,6 +87,31 @@ describe('state store', () => {
     );
   });
 
+  it('rejects contradictory handoff-note provenance', () => {
+    const invalid = state('/repo');
+    invalid.notes = [
+      {
+        id: 'd68b385a-e4c6-4cd6-9ea8-3b15ec329c4a',
+        type: 'decision',
+        text: 'Use PKCE',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        provenance: {
+          source: 'user',
+          agent: 'claude',
+          recordedBy: 'relay-cli',
+        },
+        git: {
+          commit: 'abc',
+          branch: 'main',
+          fingerprint: 'a'.repeat(64),
+        },
+      },
+    ];
+    expect(() => relayStateSchema.parse(invalid)).toThrow(
+      /User-reported notes cannot claim an agent name/,
+    );
+  });
+
   it('migrates schema-version-1 state to the current schema on read', async () => {
     const root = await createRepository();
     directories.push(root);
@@ -108,12 +134,13 @@ describe('state store', () => {
 
     const parsed = await readState(root);
     expect(parsed).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       revision: 0,
       recentOperations: [],
       runs: [{ agent: 'claude', status: 'orphaned' }],
       currentAgent: 'claude',
       agentHistory: [{ id: expect.any(String), agent: 'claude' }],
+      notes: [],
     });
   });
 
@@ -135,6 +162,28 @@ describe('state store', () => {
     ).mode;
     expect(directoryMode & 0o777).toBe(0o700);
     expect(fileMode & 0o777).toBe(0o600);
+  });
+
+  it('migrates older archived tasks instead of hiding them', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    const directory = relayPath(root, 'tasks', 'legacy-session');
+    await mkdir(directory, { recursive: true });
+    const legacy = {
+      ...state(root),
+      schemaVersion: 3,
+      sessionId: 'legacy-session',
+      task: { ...state(root).task, status: 'completed' },
+    } as Record<string, unknown>;
+    delete legacy.notes;
+    await writeFile(
+      relayPath(root, 'tasks', 'legacy-session', 'state.json'),
+      `${JSON.stringify(legacy)}\n`,
+    );
+
+    await expect(readArchivedStates(root)).resolves.toMatchObject([
+      { schemaVersion: 4, sessionId: 'legacy-session', notes: [] },
+    ]);
   });
 
   it('replaces tasks under one monotonic repository revision', async () => {

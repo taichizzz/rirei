@@ -2,7 +2,10 @@ import { access, constants, mkdir, stat } from 'node:fs/promises';
 import { Command } from 'commander';
 import { defaultConfig } from '../config/schema.js';
 import { writeConfig } from '../config/loader.js';
-import { discoverRepository } from '../git/repository.js';
+import {
+  discoverRepository,
+  installRelayLocalExclusion,
+} from '../git/repository.js';
 import { RELAY_DIRECTORY, relayPath } from '../safety/path-policy.js';
 
 export function initCommand(): Command {
@@ -13,6 +16,8 @@ export function initCommand(): Command {
       if (!projectRoot) {
         throw new Error('Relay must be initialized inside a Git repository.');
       }
+
+      await installRelayLocalExclusion(projectRoot);
 
       const directory = relayPath(projectRoot);
       try {

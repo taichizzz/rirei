@@ -8,7 +8,7 @@ directory provides sanitized session status for external UIs.
 
 ```ts
 interface RelayState {
-  schemaVersion: 3;
+  schemaVersion: 4;
   revision: number;
   recentOperations: OperationRecord[];
   sessionId: string; // crypto.randomUUID()
@@ -42,6 +42,7 @@ interface RelayState {
   tests: TestResult[];
   checkpoints: CheckpointRecord[];
   blockers: BlockerRecord[];
+  notes: HandoffNote[];
 }
 ```
 
@@ -80,6 +81,21 @@ type AgentRunRecord = {
   branchLabel?: string;
   role?: 'implement' | 'review' | 'verify' | 'investigate';
 };
+
+type HandoffNote = {
+  id: string;
+  type: 'done' | 'next' | 'decision' | 'rejected' | 'blocker' | 'question';
+  text: string;
+  reason?: string;
+  createdAt: string;
+  resolvedAt?: string;
+  provenance: {
+    source: 'user' | 'agent';
+    agent?: string;
+    recordedBy: 'relay-cli';
+  };
+  git: { commit: string; branch: string; fingerprint: string };
+};
 ```
 
 `RunLease` records one active provider's run, controller, provider, selected worktree, launch
@@ -104,7 +120,7 @@ This preserves checkpoints, tests, and task-status changes written while the age
 - **Set automatically:** `revision`, `recentOperations`, `sessionId`, `projectRoot`,
   `task.title/originalRequest/status/createdAt/updatedAt`, the full `git` baseline, `runs`,
   compatibility mirrors, `agentHistory`, `tests`
-  (via `finish --run-tests`), and `checkpoints`.
+  (via `finish --run-tests`), `checkpoints`, and notes submitted through `relay note`.
 - **Present but not yet populated by any command:** `task.requirements`, `task.constraints`,
   `decisions`, `completedWork`, `remainingWork`, and `blockers`. They are initialized to
   empty arrays and are surfaced by `status` (as counts) and by the handoff. Populating them
@@ -159,7 +175,9 @@ failure cannot roll back or invalidate authoritative Relay state.
 ## Migrations and recovery
 
 - If `state.json` is corrupted, each checkpoint directory has its own `metadata.json` snapshot.
-- Ordered migrations upgrade v1 to v2 (revision/idempotency) and v2 to v3 (explicit run leases).
+- Ordered migrations upgrade v1 to v2 (revision/idempotency), v2 to v3 (explicit run leases),
+  and v3 to v4 (provenance-aware handoff notes). Legacy arrays remain intact; migration does
+  not invent authorship or Git anchors for them.
 - The pre-migration state is backed up under `.relay/backups/` before the upgraded state is
   written.
 - A state file newer than this build supports is rejected with an upgrade message rather than

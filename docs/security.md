@@ -102,6 +102,13 @@ path. Checkpoint pruning also deletes only paths resolved through this policy.
   or persist the full terminal session by default.
 - Searchable history contains Relay task/run metadata only. It does not index provider
   conversations or terminal output.
+- Handoff notes contain only text explicitly submitted through `relay note` (including the
+  batch `relay note import` path); Relay does not derive them by reading provider
+  conversations. `user` and `agent` are declared provenance, and for imported batches
+  provenance always comes from trusted CLI options, never from the payload; unknown payload
+  fields are rejected. Git labels are
+  generated from machine-observed facts. Historical tests include their recorded time and
+  explicitly say that current freshness is unknown.
 - Claude usage collection stores only sanitized percentages, reset epochs, and a capture time
   under `~/.relay/provider-usage/`; it does not read credentials or make provider API calls.
 - The desktop app runs its renderer with `contextIsolation: true`, `nodeIntegration: false`,
@@ -118,6 +125,12 @@ credential files, not raw conversations.
 > A dedicated redaction pass over stored output (planned as `src/safety/redaction.ts` in the
 > original design) is **not yet implemented**. Until it exists, treat `.relay/checkpoints/`
 > as you would any local diff, keep it git-ignored, and don't check working-tree secrets in.
+
+`relay note` text can also contain anything the caller supplies, including secrets. Notes are
+stored under `.relay/` and never enter the sanitized activity snapshot, but unresolved notes
+selected for a handoff are sent to the receiving provider. Do not put secrets in notes.
+The Git fingerprint hashes commit, branch, status, and tracked/index patch data; it detects
+untracked path additions but not content-only changes to an already-untracked file.
 
 ## What belongs in version control
 

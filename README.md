@@ -1,15 +1,10 @@
 # Rirei
 
-Rirei is a local coding-agent orchestration harness. It runs officially installed provider
-CLIs in real terminals, gives concurrent agents isolated Git worktrees, and preserves a
-provider-independent task record so work can move between agents without copying credentials or
-raw conversations.
+Rirei is a local coding-agent orchestration harness. It runs officially installed provider CLIs in real terminals, gives concurrent agents isolated Git worktrees, and preserves a provider-independent task record so work can move between agents without copying credentials or raw conversations.
 
-`relay` is Rirei's scriptable orchestration engine and CLI. The Rirei desktop app is one
-frontend over that engine. A future TUI will be another frontend, not a separate product.
+`relay` is Rirei's scriptable orchestration engine and CLI. The Rirei desktop app is one frontend over that engine. A future TUI will be another frontend, not a separate product.
 
-Rirei is pre-release software. Review [Security](docs/security.md) and
-[Publication](docs/publication.md) before distributing builds.
+Rirei is pre-release software. Review [Security](docs/security.md) and [Publication](docs/publication.md) before distributing builds.
 
 ## What relaying means
 
@@ -25,21 +20,15 @@ Rirei does not transfer a live conversation from one provider to another. It rel
 6. The new provider sees the same files plus the handoff summary. Authentication, hidden
    reasoning, and provider conversation history stay with the original provider.
 
-This makes Rirei closer to a **local control plane and durable harness** than an AI agent itself.
-It does not choose architecture, write code, or call model APIs on its own.
+This makes Rirei closer to a **local control plane and durable harness** than an AI agent itself. It does not choose architecture, write code, or call model APIs on its own.
 
 ## Token and cost model
 
-Rirei itself consumes no model tokens and has no provider backend. The official CLI it launches
-uses your existing subscription or API billing exactly as if you launched it manually.
+Rirei itself consumes no model tokens and has no provider backend. The official CLI it launches uses your existing subscription or API billing exactly as if you launched it manually.
 
-The only additional model input is the prompt or handoff supplied at launch. Default handoffs
-are bounded to 1,200 characters and an estimated 300 input tokens using the common
-four-characters-per-token estimate, and the task request appears exactly once with no
-note-recording instruction. Full checkpoint
-patches remain local and are not inserted into handoffs. Every additional provider launch still
-starts a model turn, so unnecessary switching can cost more than continuing an existing
-provider session.
+The only additional model input is the prompt or handoff supplied at launch. Default handoffs are bounded to 1,200 characters and an estimated 300 input tokens using the common four-characters-per-token estimate, and the task request appears exactly once with no
+note-recording instruction. Full checkpoint patches remain local and are not inserted into handoffs. Every additional provider launch still
+starts a model turn, so unnecessary switching can cost more than continuing an existing provider session.
 
 ## Documentation
 
@@ -93,17 +82,10 @@ Open `Relay Launcher.app`, choose a Git repository, and Relay will initialize it
 
 **Rirei** is the macOS Electron app for the Relay CLI. Task-control commands (`init`, `start`, `status`, `doctor`, `checkpoint`, `handoff`, `finish`) run non-interactively and print their results in the app. Interactive agents (`run`/`switch` for `claude`, `codex`, `gemini`) launch inside an **integrated terminal** built on [xterm.js](https://xtermjs.org): the agent's full-screen TUI renders correctly and accepts keyboard input directly in the window.
 
-Its task dashboard shows live task status, current agent, Git branch and changes, latest
-checkpoint/test, remaining work, decisions, and blockers from structured `relay status --json`
-output. A durable agent-session timeline shows every launch for the task, including the
-provider, session model/effort overrides, start and end times, duration, and classified exit
-result. Active sessions update when the dashboard refreshes, and historical sessions remain
-available after the agent exits or the task completes.
+Its task dashboard shows live task status, current agent, Git branch and changes, latest checkpoint/test, remaining work, decisions, and blockers from structured `relay status --json` output. A durable agent-session timeline shows every launch for the task, including the
+provider, session model/effort overrides, start and end times, duration, and classified exit result. Active sessions update when the dashboard refreshes, and historical sessions remain available after the agent exits or the task completes.
 
-Each agent row also has a persistent session-profile picker. Claude exposes verified aliases
-and effort levels, Codex loads its live model catalog and model-specific reasoning levels,
-and Antigravity offers a catalog verified against `agy models`. Auto always preserves the provider's
-default, and custom model IDs are supported without changing global provider configuration.
+Each agent row also has a persistent session-profile picker. Claude exposes verified aliases and effort levels, Codex loads its live model catalog and model-specific reasoning levels, and Antigravity offers a catalog verified against `agy models`. Auto always preserves the provider's default, and custom model IDs are supported without changing global provider configuration.
 
 After installing development dependencies, use `npm run desktop:dev` or build DMG and ZIP artifacts with `npm run desktop:build`. The existing AppleScript launcher remains available unchanged.
 
@@ -119,15 +101,13 @@ Relay does not authenticate with Claude Code, Codex, or Gemini, read their crede
 
 ## Local state
 
-`relay init` creates `.relay/` with restrictive local permissions. The complete `.relay/`
-directory is machine-local and Git-ignored because it can contain task text, local paths, and
-working-tree patches. Relay never commits, pushes, resets, cleans, merges, or discards
+`relay init` creates `.relay/` with restrictive local permissions. The complete `.relay/` directory is machine-local and Git-ignored because it can contain task text, local paths, and working-tree patches. Relay never commits, pushes, resets, cleans, merges, or discards
 repository changes.
 
 `relay checkpoint` stores Git metadata, porcelain status, a diff stat, and a bounded patch under `.relay/checkpoints/`. `relay handoff` intentionally omits the full patch. Agent commands launch the official CLI found on `PATH` with inherited terminal I/O. `relay finish` does not run tests unless `--run-tests` is supplied and `tests.command` is configured.
 
 ## License
 
-Rirei is licensed under the [MIT License](LICENSE). Vendored dependencies and asset provenance
-are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[ASSET_PROVENANCE.md](ASSET_PROVENANCE.md).
+Rirei is licensed under the [MIT License](LICENSE).
+
+Vendored dependencies and asset provenance are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md).

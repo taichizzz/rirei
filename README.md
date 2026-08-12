@@ -108,6 +108,6 @@ repository changes.
 
 ## License
 
-Rirei is licensed under the [MIT License](LICENSE). 
+Rirei is licensed under the [MIT License](LICENSE).
 
 Vendored dependencies and asset provenance are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md).

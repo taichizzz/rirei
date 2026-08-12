@@ -1,6 +1,6 @@
 {
   "name": "@taichizzz/rirei",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": true,
   "description": "Local orchestration and durable handoffs for officially installed coding-agent CLIs.",
   "license": "MIT",

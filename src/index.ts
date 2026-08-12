@@ -22,7 +22,7 @@ import { noteCommand } from './cli/note.js';
 const program = new Command()
   .name('relay')
   .description('Durable coding-task handoffs between official agent CLIs')
-  .version('0.1.0-alpha.1')
+  .version('0.1.0-alpha.2')
   .addCommand(initCommand())
   .addCommand(startCommand())
   .addCommand(statusCommand())

@@ -1,0 +1,930 @@
+{
+  "schemaVersion": 1,
+  "mode": "execute",
+  "createdAt": "2026-08-11T04:07:15.938Z",
+  "taskCount": 5,
+  "providerCommandCount": 15,
+  "tasks": [
+    {
+      "taskId": "retry-after",
+      "title": "Retry-After parsing",
+      "order": ["baseline", "treatment"],
+      "capture": {
+        "validated": true,
+        "count": 3,
+        "noteTypes": ["done", "next", "rejected"]
+      },
+      "handoff": {
+        "characters": 844,
+        "estimatedTokens": 211,
+        "omissions": 0,
+        "notes": {
+          "count": 3,
+          "byType": {
+            "done": 1,
+            "rejected": 1,
+            "next": 1
+          },
+          "byProvenance": {
+            "agent:antigravity": 3
+          },
+          "byFreshness": {
+            "current": 3
+          }
+        },
+        "duplicateTaskOccurrences": 1,
+        "containsNoteInstruction": false
+      },
+      "predecessor": {
+        "command": {
+          "executable": "agy",
+          "model": "gemini-3.6-flash-low",
+          "policy": {
+            "output": "stream-json",
+            "sandbox": true,
+            "mode": "accept-edits",
+            "approval": "bypass-permissions-inside-disposable-sandbox"
+          }
+        },
+        "wallTimeMs": 53695,
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "metrics": {
+          "inputTokens": 45809,
+          "cachedInputTokens": 117957,
+          "outputTokens": 1740,
+          "reasoningTokens": 0,
+          "modelTurns": null,
+          "toolCalls": 7
+        },
+        "checkpointExitCode": 0,
+        "publicPhasePassed": true,
+        "hiddenWorkRemained": true
+      },
+      "conditions": {
+        "baseline": {
+          "condition": "baseline",
+          "prompt": {
+            "kind": "full-request-plus-inspection",
+            "characters": 601,
+            "sha256": "a61b99d26efa7ae2f899c6760167d6df7a212b9865dc3e9924242c945d313a06"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 72927,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 67133,
+            "cachedInputTokens": 55296,
+            "outputTokens": 2573,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 4
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 80
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 61
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 156
+            }
+          },
+          "changedLines": {
+            "additions": 57,
+            "deletions": 7,
+            "total": 64
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "12ccef18c84e3ab1fab96005390d6543e9eeaeb305f9ae1e327e4157893f6333"
+        },
+        "treatment": {
+          "condition": "treatment",
+          "prompt": {
+            "kind": "exact-handoff",
+            "characters": 844,
+            "sha256": "f0fd222198fcc2561ce6190dc67b1ff9721f05abc5108b3936f0f2a41ccbc5a1"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 80405,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 103058,
+            "cachedInputTokens": 86528,
+            "outputTokens": 2955,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 5
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 83
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 61
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 156
+            }
+          },
+          "changedLines": {
+            "additions": 52,
+            "deletions": 7,
+            "total": 59
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "12ccef18c84e3ab1fab96005390d6543e9eeaeb305f9ae1e327e4157893f6333"
+        }
+      }
+    },
+    {
+      "taskId": "deep-config-merge",
+      "title": "Security-conscious deep config merge",
+      "order": ["treatment", "baseline"],
+      "capture": {
+        "validated": true,
+        "count": 4,
+        "noteTypes": ["decision", "done", "next", "rejected"]
+      },
+      "handoff": {
+        "characters": 1089,
+        "estimatedTokens": 273,
+        "omissions": 0,
+        "notes": {
+          "count": 4,
+          "byType": {
+            "done": 1,
+            "rejected": 1,
+            "decision": 1,
+            "next": 1
+          },
+          "byProvenance": {
+            "agent:antigravity": 4
+          },
+          "byFreshness": {
+            "current": 4
+          }
+        },
+        "duplicateTaskOccurrences": 1,
+        "containsNoteInstruction": false
+      },
+      "predecessor": {
+        "command": {
+          "executable": "agy",
+          "model": "gemini-3.6-flash-low",
+          "policy": {
+            "output": "stream-json",
+            "sandbox": true,
+            "mode": "accept-edits",
+            "approval": "bypass-permissions-inside-disposable-sandbox"
+          }
+        },
+        "wallTimeMs": 18818,
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "metrics": {
+          "inputTokens": 45001,
+          "cachedInputTokens": 162653,
+          "outputTokens": 1903,
+          "reasoningTokens": 0,
+          "modelTurns": null,
+          "toolCalls": 9
+        },
+        "checkpointExitCode": 0,
+        "publicPhasePassed": true,
+        "hiddenWorkRemained": true
+      },
+      "conditions": {
+        "treatment": {
+          "condition": "treatment",
+          "prompt": {
+            "kind": "exact-handoff",
+            "characters": 1089,
+            "sha256": "377d9af7fef1867db70c587b913daf8914fbac6a46c763ced84a25b6016f5a1e"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 82662,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 83297,
+            "cachedInputTokens": 72448,
+            "outputTokens": 2162,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 4
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 82
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 61
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 183
+            }
+          },
+          "changedLines": {
+            "additions": 40,
+            "deletions": 27,
+            "total": 67
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "cfd351b8686ad0c6c40dac7e3a7179c1616841ab43ed72fc64508866848ccd39"
+        },
+        "baseline": {
+          "condition": "baseline",
+          "prompt": {
+            "kind": "full-request-plus-inspection",
+            "characters": 636,
+            "sha256": "a6943a6bf78742315444d8adf5e56c92875cb579cf2a9f3cf602d2074670a9f5"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 52438,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 66879,
+            "cachedInputTokens": 55296,
+            "outputTokens": 2199,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 3
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 83
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 61
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 155
+            }
+          },
+          "changedLines": {
+            "additions": 37,
+            "deletions": 27,
+            "total": 64
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "cfd351b8686ad0c6c40dac7e3a7179c1616841ab43ed72fc64508866848ccd39"
+        }
+      }
+    },
+    {
+      "taskId": "ttl-lru-cache",
+      "title": "TTL and LRU cache semantics",
+      "order": ["baseline", "treatment"],
+      "capture": {
+        "validated": true,
+        "count": 4,
+        "noteTypes": ["decision", "done", "next", "rejected"]
+      },
+      "handoff": {
+        "characters": 1072,
+        "estimatedTokens": 268,
+        "omissions": 0,
+        "notes": {
+          "count": 4,
+          "byType": {
+            "done": 1,
+            "rejected": 1,
+            "decision": 1,
+            "next": 1
+          },
+          "byProvenance": {
+            "agent:antigravity": 4
+          },
+          "byFreshness": {
+            "current": 4
+          }
+        },
+        "duplicateTaskOccurrences": 1,
+        "containsNoteInstruction": false
+      },
+      "predecessor": {
+        "command": {
+          "executable": "agy",
+          "model": "gemini-3.6-flash-low",
+          "policy": {
+            "output": "stream-json",
+            "sandbox": true,
+            "mode": "accept-edits",
+            "approval": "bypass-permissions-inside-disposable-sandbox"
+          }
+        },
+        "wallTimeMs": 21318,
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "metrics": {
+          "inputTokens": 34368,
+          "cachedInputTokens": 118043,
+          "outputTokens": 1799,
+          "reasoningTokens": 0,
+          "modelTurns": null,
+          "toolCalls": 6
+        },
+        "checkpointExitCode": 0,
+        "publicPhasePassed": true,
+        "hiddenWorkRemained": true
+      },
+      "conditions": {
+        "baseline": {
+          "condition": "baseline",
+          "prompt": {
+            "kind": "full-request-plus-inspection",
+            "characters": 674,
+            "sha256": "edc01227ee59adbe5d8ff3594951be3807273f5d45659a79df7d83ccc5f4f3d0"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 54269,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 78866,
+            "cachedInputTokens": 63232,
+            "outputTokens": 2305,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 4
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 82
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 61
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 154
+            }
+          },
+          "changedLines": {
+            "additions": 56,
+            "deletions": 5,
+            "total": 61
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "05087bb1e5d188fb7020dd4495175ad779c416b413f231d9710326d4dcca6652"
+        },
+        "treatment": {
+          "condition": "treatment",
+          "prompt": {
+            "kind": "exact-handoff",
+            "characters": 1072,
+            "sha256": "a56ccee87f53f6e849f972730f50ac58fbbd3f2aeab738db240986cf2787d72c"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 48969,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 83475,
+            "cachedInputTokens": 72448,
+            "outputTokens": 2030,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 4
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 82
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 61
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 154
+            }
+          },
+          "changedLines": {
+            "additions": 48,
+            "deletions": 5,
+            "total": 53
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "05087bb1e5d188fb7020dd4495175ad779c416b413f231d9710326d4dcca6652"
+        }
+      }
+    },
+    {
+      "taskId": "workspace-path",
+      "title": "Symlink-safe workspace path resolution",
+      "order": ["treatment", "baseline"],
+      "capture": {
+        "validated": true,
+        "count": 4,
+        "noteTypes": ["decision", "done", "next", "rejected"]
+      },
+      "handoff": {
+        "characters": 1091,
+        "estimatedTokens": 273,
+        "omissions": 0,
+        "notes": {
+          "count": 4,
+          "byType": {
+            "done": 1,
+            "rejected": 1,
+            "decision": 1,
+            "next": 1
+          },
+          "byProvenance": {
+            "agent:antigravity": 4
+          },
+          "byFreshness": {
+            "current": 4
+          }
+        },
+        "duplicateTaskOccurrences": 1,
+        "containsNoteInstruction": false
+      },
+      "predecessor": {
+        "command": {
+          "executable": "agy",
+          "model": "gemini-3.6-flash-low",
+          "policy": {
+            "output": "stream-json",
+            "sandbox": true,
+            "mode": "accept-edits",
+            "approval": "bypass-permissions-inside-disposable-sandbox"
+          }
+        },
+        "wallTimeMs": 51333,
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "metrics": {
+          "inputTokens": 46995,
+          "cachedInputTokens": 182947,
+          "outputTokens": 2084,
+          "reasoningTokens": 0,
+          "modelTurns": null,
+          "toolCalls": 10
+        },
+        "checkpointExitCode": 0,
+        "publicPhasePassed": true,
+        "hiddenWorkRemained": true
+      },
+      "conditions": {
+        "treatment": {
+          "condition": "treatment",
+          "prompt": {
+            "kind": "exact-handoff",
+            "characters": 1091,
+            "sha256": "bb1fbb21f1741dc61fde2564bcc157eba9332f2f7378f09d5c3bf002187d338e"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 61701,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 86114,
+            "cachedInputTokens": 73472,
+            "outputTokens": 2548,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 4
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 82
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 67
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 161
+            }
+          },
+          "changedLines": {
+            "additions": 53,
+            "deletions": 10,
+            "total": 63
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "ee589c09195e27d402e3b3b52687f49db47154603b226167f6b2773b895493e2"
+        },
+        "baseline": {
+          "condition": "baseline",
+          "prompt": {
+            "kind": "full-request-plus-inspection",
+            "characters": 686,
+            "sha256": "da46be1bcf8c2e5c61637e0d68bd1db9f1cc20928ef4c583731c825e26a16d2c"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 76522,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 98288,
+            "cachedInputTokens": 75264,
+            "outputTokens": 2868,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 5
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 86
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 67
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 187
+            }
+          },
+          "changedLines": {
+            "additions": 52,
+            "deletions": 9,
+            "total": 61
+          },
+          "rejectedApproachRepeated": true,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "ee589c09195e27d402e3b3b52687f49db47154603b226167f6b2773b895493e2"
+        }
+      }
+    },
+    {
+      "taskId": "event-reconciliation",
+      "title": "Event reconciliation with ordering constraints",
+      "order": ["baseline", "treatment"],
+      "capture": {
+        "validated": true,
+        "count": 4,
+        "noteTypes": ["decision", "done", "next", "rejected"]
+      },
+      "handoff": {
+        "characters": 1095,
+        "estimatedTokens": 274,
+        "omissions": 0,
+        "notes": {
+          "count": 4,
+          "byType": {
+            "done": 1,
+            "rejected": 1,
+            "decision": 1,
+            "next": 1
+          },
+          "byProvenance": {
+            "agent:antigravity": 4
+          },
+          "byFreshness": {
+            "current": 4
+          }
+        },
+        "duplicateTaskOccurrences": 1,
+        "containsNoteInstruction": false
+      },
+      "predecessor": {
+        "command": {
+          "executable": "agy",
+          "model": "gemini-3.6-flash-low",
+          "policy": {
+            "output": "stream-json",
+            "sandbox": true,
+            "mode": "accept-edits",
+            "approval": "bypass-permissions-inside-disposable-sandbox"
+          }
+        },
+        "wallTimeMs": 18790,
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "metrics": {
+          "inputTokens": 41389,
+          "cachedInputTokens": 126124,
+          "outputTokens": 2255,
+          "reasoningTokens": 0,
+          "modelTurns": null,
+          "toolCalls": 7
+        },
+        "checkpointExitCode": 0,
+        "publicPhasePassed": true,
+        "hiddenWorkRemained": true
+      },
+      "conditions": {
+        "baseline": {
+          "condition": "baseline",
+          "prompt": {
+            "kind": "full-request-plus-inspection",
+            "characters": 686,
+            "sha256": "b59d40c27d5fc8dd831101c9406627d06617b22afeecb66893d45b5953d40a44"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 60173,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 83279,
+            "cachedInputTokens": 72448,
+            "outputTokens": 2661,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 4
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 85
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 61
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 154
+            }
+          },
+          "changedLines": {
+            "additions": 122,
+            "deletions": 18,
+            "total": 140
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "22a2a9fc6b73fb226eb83548881855413e66f2f2c0a821dfdf3dfb3b44bc5aa5"
+        },
+        "treatment": {
+          "condition": "treatment",
+          "prompt": {
+            "kind": "exact-handoff",
+            "characters": 1095,
+            "sha256": "1b98eb75af49ece7e72176b51a9aa7b0ea49aee7da4b27523fe6dfc158edcb3c"
+          },
+          "command": {
+            "executable": "codex",
+            "model": "gpt-5.6-sol",
+            "policy": {
+              "ephemeral": true,
+              "ignoreUserConfig": true,
+              "sandbox": "workspace-write",
+              "webSearch": false
+            }
+          },
+          "wallTimeMs": 75116,
+          "exitCode": 0,
+          "signal": null,
+          "timedOut": false,
+          "metrics": {
+            "inputTokens": 78369,
+            "cachedInputTokens": 63232,
+            "outputTokens": 2522,
+            "reasoningTokens": null,
+            "modelTurns": 1,
+            "toolCalls": 4
+          },
+          "evaluation": {
+            "public": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 85
+            },
+            "hidden": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 61
+            },
+            "combined": {
+              "passed": true,
+              "exitCode": 0,
+              "signal": null,
+              "wallTimeMs": 154
+            }
+          },
+          "changedLines": {
+            "additions": 83,
+            "deletions": 12,
+            "total": 95
+          },
+          "rejectedApproachRepeated": false,
+          "relayStateAccessed": false,
+          "relayStatePresentBeforeSuccessor": false,
+          "relayPathInGitStatus": false,
+          "conditionFingerprintEqual": true,
+          "fingerprint": "22a2a9fc6b73fb226eb83548881855413e66f2f2c0a821dfdf3dfb3b44bc5aa5"
+        }
+      }
+    }
+  ],
+  "integrityVersion": "v2-pre-hardening",
+  "publication": {
+    "privatePathsRedacted": true,
+    "rawPromptsExcluded": true,
+    "rawProviderLogsExcluded": true,
+    "rawArtifacts": "retained only in the disposable run root"
+  }
+}

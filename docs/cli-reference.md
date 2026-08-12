@@ -3,7 +3,7 @@
 Every Relay command must run inside a Git repository. In development, invoke commands with
 `npm run dev -- <command>`; once installed, use the `relay` binary directly.
 
-Commands that operate on a task (`checkpoint`, `handoff`, `run`, `switch`, `finish`) first
+Commands that operate on a task (`note`, `checkpoint`, `handoff`, `run`, `switch`, `finish`) first
 call `taskContext()`, which requires an existing task whose status is `active` or `blocked`.
 If no task is active they exit with an error.
 
@@ -15,6 +15,10 @@ Initialize Relay in the current repository.
 
 - Discovers the repository root (`git rev-parse --show-toplevel`); errors if not in a repo.
 - **Refuses to overwrite** an existing `.relay/` directory.
+- Adds `/.relay/` to the repository-local Git exclude file (`git rev-parse
+--path-format=absolute --git-path info/exclude`) so ordinary `git status` stays clean; aborts if exclusion cannot be
+  installed. Existing exclude contents and modes are preserved, and the operation is
+  idempotent.
 - Creates `.relay/` (`0700`), plus `checkpoints/` and `test-output/` subdirectories.
 - Writes a default `.relay/config.json` (see [configuration.md](configuration.md)).
 - Prints guidance that generated logs/checkpoints/test output should be git-ignored, while
@@ -45,7 +49,7 @@ Behavior:
   printed.
 - Records: a `sessionId` (`crypto.randomUUID()`), the task title (first line of the
   request), the starting commit and branch, and empty arrays for requirements, constraints,
-  decisions, completed/remaining work, tests, checkpoints, and blockers.
+  decisions, completed/remaining work, tests, checkpoints, blockers, and handoff notes.
 - Appends a `task_started` event.
 
 ---
@@ -83,6 +87,58 @@ model list rather than guessing.
 
 ---
 
+## `relay note <type> <text>`
+
+Record a short, structured handoff fact. Types are `done`, `next`, `decision`, `rejected`,
+`blocker`, and `question`. `relay note resolve <id>` closes a note so future handoffs omit it.
+
+**Options:** `--reason <text>` adds a concise rationale or failure reason. `--source user|agent`
+declares who supplied the statement; agent reports also require `--agent <name>`. `--json`
+returns the complete stored record.
+
+Every note stores a Git commit, branch, and snapshot fingerprint. A handoff labels the note
+`changed` or `diverged` when the receiving working tree no longer matches that anchor. This is
+a freshness warning, not proof that the statement is false. Notes are stored locally under
+`.relay/`, but unresolved notes selected for a handoff are sent to the receiving provider.
+Do not record secrets. A task accepts at most 500 notes rather than silently discarding history.
+
+## `relay note import --stdin`
+
+Atomically import a machine-oriented batch of notes from a JSON payload on standard input.
+Intended for agents that finish a work phase and must hand off several facts reliably.
+
+**Options:** `--source user|agent` and `--agent <name>` follow the single-note rules; provenance
+always comes from these CLI options, never from the payload.
+
+Payload schema:
+
+```json
+{
+  "schemaVersion": 1,
+  "notes": [
+    {
+      "type": "next",
+      "text": "Implement IMF-fixdate parsing and clamp past dates."
+    },
+    {
+      "type": "rejected",
+      "text": "Do not use parseInt.",
+      "reason": "It accepts malformed numeric prefixes."
+    }
+  ]
+}
+```
+
+The payload is capped at 16 KiB and 20 notes. Every item is validated before any state is
+written; one invalid item rejects the entire batch. The whole batch shares one Git snapshot and
+one write transaction, and a changed task/session aborts the import. Unsupported note types
+fail with the canonical type list and guidance that unfinished work belongs in `next` and
+finished work belongs in `done`; ambiguous values are never silently remapped. Unknown top-level
+or note fields are rejected. In particular, payload-supplied provenance is invalid rather than
+trusted or silently retained.
+
+---
+
 ## `relay checkpoint`
 
 Capture the current working-tree state without modifying the repository.
@@ -100,9 +156,21 @@ commit/branch, prunes old checkpoints beyond `checkpoint.maxCount`, and appends 
 
 Print a concise, provider-independent handoff to **stdout**.
 
-The handoff is built from structured state (not the raw diff) and is truncated to
-`handoff.maxCharacters`. See [checkpoints-and-handoff.md](checkpoints-and-handoff.md) for
-the exact section layout.
+The default handoff is a compact continuation prompt: one `Task:` line, a short Git anchor
+(`Git: main@<7-char commit>; dirty` when the working tree has changes), and the safety line
+`Inspect the working tree and preserve existing changes.` Unresolved notes are added newest
+first in priority order: `next`, `blocker`, `rejected`, `decision`, `question`, then the latest
+failed test. Lower-priority items are omitted rather than truncated into fragments, and an
+`Omitted:` count is added when it fits. The rendered text is capped at the lower of
+`handoff.maxCharacters` and the effective `handoff.maxTokens` target (defaults: 1,200
+characters and 300 estimated tokens); the reported `estimatedTokens` is a deterministic
+provider-neutral estimate (`characters / 4`), never an exact provider count. The raw diff,
+`done` notes, passed tests, and changed-file lists stay in the structured capsule and are not
+sent to providers.
+
+**Option:** `--json` — print the versioned portable capsule, rendered text, freshness labels,
+budget/omission metadata, and content checks (task-occurrence count and note-instruction
+detection).
 
 > Current limitation: `handoff` prints to stdout only; it does not write `.relay/handoff.md`.
 
@@ -141,13 +209,23 @@ Checkpoint, preview a handoff, then launch another agent.
 
 **Options:** `--model <model>`, `--effort <level>`, `--operation-id <id>`, and
 `--terminal-id <id>` use the same session controls as `relay run` for the incoming agent.
+`--yes` is required for non-interactive launches and skips confirmation after the caller has
+reviewed the generated preview. `--allow-empty-notes` overrides the continuation gate and
+launches even when no unresolved continuation note exists.
 
 Sequence:
 
 1. Validate the agent id and load the active task.
 2. `createCheckpoint()` with the label `Switch to <agent>`.
-3. `renderHandoff()` and print the checkpoint id followed by the handoff preview.
-4. `launchAgent()` for the target CLI (records `agent_started` / `agent_ended`).
+3. Render from the checkpoint's exact Git snapshot and print the handoff plus estimated budget.
+4. If no unresolved `next`, `blocker`, `rejected`, `decision`, or `question` note exists, the
+   preview warns that the handoff contains only Git-recoverable context; non-interactive
+   launches fail at this point unless `--allow-empty-notes` is given.
+5. In an interactive terminal, ask the user to approve the launch unless `--yes` was supplied
+   (with the `(no continuation notes recorded)` suffix when the gate is the only concern).
+6. Recheck state and Git after approval; if either changed, refuse the stale preview.
+7. `launchAgent()` for the target CLI (records `agent_started` / `agent_ended`). A cancellation
+   or refusal keeps the checkpoint but launches nothing.
 
 > Current limitation: `switch` records agent start/end events but does not append a distinct
 > `switch` event.

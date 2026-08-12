@@ -10,7 +10,10 @@ invalid or manually corrupted config causes the loading command to fail with a s
 {
   "schemaVersion": 1,
   "handoff": {
-    "maxCharacters": 24000,
+    "maxCharacters": 1200,
+    "maxTokens": 300,
+    "targetCharacters": 1200,
+    "targetTokens": 300,
     "maxChangedFiles": 100,
     "maxErrorLines": 200,
     "includeFullDiff": false
@@ -39,12 +42,19 @@ Guards against loading a config written by an incompatible future version.
 
 ### `handoff`
 
-| Field             | Type / default   | Honored today?                                                                                       |
-| ----------------- | ---------------- | ---------------------------------------------------------------------------------------------------- |
-| `maxCharacters`   | int > 0, `24000` | **Yes** — `renderHandoff` truncates output to this length with a `[Relay handoff truncated]` marker. |
-| `maxChangedFiles` | int > 0, `100`   | Reserved — not yet enforced in the handoff.                                                          |
-| `maxErrorLines`   | int > 0, `200`   | Reserved — no error-log section is emitted yet.                                                      |
-| `includeFullDiff` | bool, `false`    | Reserved — the handoff always excludes the full diff regardless of this flag.                        |
+| Field              | Type / default  | Honored today?                                                                                                                                                                                                                 |
+| ------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxCharacters`    | int > 0, `1200` | **Yes** — hard character ceiling for the rendered handoff.                                                                                                                                                                     |
+| `maxTokens`        | int > 0, `300`  | **Yes** — estimated at four characters per token; the lower of both configured ceilings wins.                                                                                                                                  |
+| `targetCharacters` | int > 0, `1200` | **Yes** — defaulted target ceiling; the effective ceiling is the minimum of `maxCharacters`, `targetCharacters`, and `maxTokens * 4`. Older configs without these fields adopt the 1,200/300 contract without being rewritten. |
+| `targetTokens`     | int > 0, `300`  | **Yes** — defaulted target ceiling paired with `targetCharacters`.                                                                                                                                                             |
+| `maxChangedFiles`  | int > 0, `100`  | **Yes** — limits verified changed-file entries in the capsule.                                                                                                                                                                 |
+| `maxErrorLines`    | int > 0, `200`  | Reserved — no error-log section is emitted yet.                                                                                                                                                                                |
+| `includeFullDiff`  | bool, `false`   | Reserved — full diffs stay local; the receiving agent inspects the working tree instead.                                                                                                                                       |
+
+> The reported `estimatedTokens` is a deterministic provider-neutral estimate, never an exact
+> provider token count. Lower user-configured ceilings are always preserved; adding target
+> fields never raises them.
 
 ### `checkpoint`
 

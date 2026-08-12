@@ -4,6 +4,57 @@ This file records user-visible changes made to Relay and its Rirei desktop app. 
 CLI command and `.relay/` state directory retain their existing names when the desktop app
 branding changes.
 
+## 2026-08-10
+
+### Compact, evidence-labelled handoffs
+
+- Added schema-version-4 handoff notes for completed work, next actions, decisions, rejected
+  approaches, blockers, and questions, with declared user/agent provenance and Git anchors.
+- Added `relay note`, note resolution, status compatibility projections, and searchable task
+  history without exposing note text to the sanitized activity snapshot.
+- Replaced final-string truncation with priority-aware rendering under a 4,000-character and
+  estimated 1,000-token default budget. Full patches remain local.
+- Added a versioned JSON handoff capsule, Git freshness labels, changed-file limits, checkpoint
+  fingerprints, estimated token output, and interactive switch confirmation.
+
+## 2026-08-11
+
+### Handoff V2: compact prompts and reliable note capture
+
+- Rendered handoffs now use a compact default contract of at most 1,200 characters and 300
+  estimated tokens (200-300 or less in practice, never padded). The task request appears
+  exactly once; `done` notes, passed tests, changed-file lists, and full Git details stay in
+  the structured JSON capsule instead of the prompt.
+- Removed successor note-recording instructions from rendered handoffs; note capture is a
+  source-side lifecycle responsibility.
+- Added `relay note import --stdin` for atomic, schema-validated batch note capture (one Git
+  snapshot, one transaction, provenance only from CLI options, 16 KiB / 20-item bounds,
+  reject-all-on-any-invalid-item).
+- Unsupported note types now fail with the canonical type list and `next`/`done` guidance
+  instead of silent remapping.
+- `relay switch` now refuses non-interactive launches when no unresolved continuation note
+  exists, unless `--allow-empty-notes` is given; interactive previews state the gap explicitly.
+- `.relay/` is excluded from ordinary `git status` via the repository-local `info/exclude`
+  file, installed by `relay init` and repaired automatically for older initialized
+  repositories. Existing exclude contents and file modes are preserved; symlinked exclude
+  files are rejected; linked worktrees are supported.
+- Benchmark protocol V2 physically removes Relay state from successor repositories, validates
+  predecessor note capture before any successor call, and asserts repository equality and
+  prompt integrity before provider execution.
+- The first five-task V2 execution is preserved as pre-hardening historical evidence in
+  `benchmarks/handoff/reports/2026-08-11-v2.*`: 5/5 correct on both conditions and handoffs at
+  211-274 estimated tokens. It improved on V1 handoffs (benchmark-defined non-cached tokens
+  78,402 vs 132,270; wall time 348,853 ms vs 373,642 ms; 5/5 vs 4/5 correct) but did not reach
+  the predeclared >=20% reduction versus the strong full-request baseline in 3/5 tasks (2/5
+  reached it). The publication files redact private paths and state that a fresh run is required
+  after the full HEAD/index/diff and pre-call hash gates.
+- The final hardened five-task run is archived under
+  `benchmarks/handoff/reports/2026-08-12-v2.*`. Both conditions were correct on 5/5 tasks, all
+  15 calls completed without retry, all five captures and exact treatment prompt hashes passed,
+  and no successor exposed Relay state. Treatment was 10,835 ms faster overall but used 13,553
+  more benchmark-defined non-cached tokens; only 1/5 tasks reached the >=20% threshold, so the
+  predeclared decision rule did not pass.
+
 ## 2026-07-26
 
 ### Multi-terminal UI and worktree integration

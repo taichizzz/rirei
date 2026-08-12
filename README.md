@@ -17,10 +17,12 @@ Rirei does not transfer a live conversation from one provider to another. It rel
 
 1. `relay start` records the task and Git baseline.
 2. `relay run <provider>` launches that provider's official CLI in the selected working tree.
-3. Checkpoints save bounded local Git metadata and patches without committing anything.
-4. `relay switch <provider>` creates a checkpoint, renders a compact handoff from structured
-   task state and Git facts, and launches the next provider with that handoff.
-5. The new provider sees the same files plus the handoff summary. Authentication, hidden
+3. `relay note` records short decisions, failed approaches, blockers, questions, and next
+   actions with declared provenance and a Git freshness anchor.
+4. Checkpoints save bounded local Git metadata and patches without committing anything.
+5. `relay switch <provider>` creates a checkpoint, renders a compact handoff from structured
+   notes, verified Git facts, and timestamped test history, then launches after a preview.
+6. The new provider sees the same files plus the handoff summary. Authentication, hidden
    reasoning, and provider conversation history stay with the original provider.
 
 This makes Rirei closer to a **local control plane and durable harness** than an AI agent itself.
@@ -32,8 +34,9 @@ Rirei itself consumes no model tokens and has no provider backend. The official 
 uses your existing subscription or API billing exactly as if you launched it manually.
 
 The only additional model input is the prompt or handoff supplied at launch. Default handoffs
-are bounded to 24,000 characters, roughly a worst-case 6,000 input tokens using the common
-four-characters-per-token estimate; normal handoffs are usually smaller. Full checkpoint
+are bounded to 1,200 characters and an estimated 300 input tokens using the common
+four-characters-per-token estimate, and the task request appears exactly once with no
+note-recording instruction. Full checkpoint
 patches remain local and are not inserted into handoffs. Every additional provider launch still
 starts a model turn, so unnecessary switching can cost more than continuing an existing
 provider session.
@@ -64,6 +67,9 @@ npm run dev -- init
 npm run dev -- start "Add Google and GitHub OAuth login"
 npm run dev -- status
 npm run dev -- checkpoint --message "Before handoff"
+npm run dev -- note decision "Use PKCE" --reason "Required for public clients"
+npm run dev -- note rejected "Store tokens in localStorage" --reason "XSS exposure"
+npm run dev -- note next "Add refresh-token rotation tests"
 npm run dev -- handoff
 npm run dev -- run claude
 npm run dev -- switch codex

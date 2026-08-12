@@ -10,13 +10,14 @@ and how a command flows from invocation to state on disk.
 src/
 ├── index.ts              # Commander entrypoint; registers every command
 ├── lifecycle.ts          # Task context, checkpoints, handoffs, CLI launch wrapper
+├── handoff.ts            # Portable capsule and token-budgeted text renderer
 ├── application/
 │   └── sessions.ts       # Shared SessionManager: leases, process ownership, finalization
 ├── process/
 │   ├── process-host.ts   # Frontend-independent ProcessHost contract
 │   └── inherited-process-host.ts # Scriptable CLI implementation
 ├── cli/                  # One file per command; thin wrappers over lifecycle + state
-│   ├── init.ts  start.ts  status.ts  checkpoint.ts  handoff.ts
+│   ├── init.ts  start.ts  status.ts  note.ts  checkpoint.ts  handoff.ts
 │   └── run.ts   switch.ts finish.ts   doctor.ts
 ├── agents/
 │   ├── adapter.ts        # AgentAdapter interface and result types
@@ -30,6 +31,7 @@ src/
 │   ├── lock.ts           # repository writer lock
 │   ├── leases.ts         # one-writer-per-worktree invariants
 │   ├── migrations.ts     # ordered persistent state migrations
+│   ├── notes.ts          # note capture, resolution, and Git freshness
 │   ├── activity.ts       # global sanitized activity snapshot
 │   └── events.ts         # compatibility projection hook
 ├── git/
@@ -58,7 +60,7 @@ tests/                    # Vitest suites mirroring src/
    - `taskContext()` — discover the repo, load state, and assert the task is `active` or
      `blocked`. Used by `checkpoint`, `handoff`, `run`, `switch`, and `finish`.
    - `createCheckpoint()` — snapshot Git and write a bounded checkpoint directory.
-   - `renderHandoff()` — build the compact, provider-independent handoff text.
+   - `renderHandoffDocument()` — inspect Git and build the portable capsule plus compact text.
    - `launchAgent()` — compatibility wrapper that runs `SessionManager` with
      `InheritedProcessHost` and waits for completion.
 
@@ -84,7 +86,8 @@ switch.ts
         ├─ prune checkpoints beyond maxCount
         ├─ writeState()                # atomic temp-file + rename
         └─ appendEvent("checkpoint_created")
-  └─ renderHandoff(root, state)        # compact text from structured state
+  └─ renderHandoffDocument(...)        # capsule/text from the checkpoint's Git snapshot
+  └─ confirm launch in an interactive terminal
   └─ launchAgent(root, state, codexAdapter, handoff)
         └─ SessionManager.startRun(...)
          ├─ adapter.detectInstallation()  # must be "ready"
@@ -109,7 +112,7 @@ The same `createCheckpoint` / `renderHandoff` / `launchAgent` primitives back `r
 
 ## Persistence model
 
-- **`.relay/state.json`** — the single source of structured task state. Written atomically
+- **`.relay/state.json`** — the single source of structured task state and handoff notes. Written atomically
   (write to a temp file, then `rename` over the target) so an interrupted process never
   leaves a half-written file. See [state-and-events.md](state-and-events.md).
 - **`~/Library/Application Support/Rirei/activity.json`** — bounded, sanitized, cross-project session snapshot for read-only companion surfaces.
@@ -126,5 +129,8 @@ directories, `0600` for files).
   arrays (never shell string interpolation), not from an LLM.
 - **Conservative reporting.** When Relay cannot determine something safely (authentication
   status, exit reason), it reports `unknown` rather than guessing. See [agents.md](agents.md).
-- **Read-only on your repo.** Relay inspects Git but never mutates history or the working
-  tree. See [security.md](security.md).
+- **Read-only on your repo.** Relay inspects Git and never mutates history or the working
+  tree. The one local metadata mutation is adding `/.relay/` to the repository-local
+  `info/exclude` file so Relay state stays hidden from ordinary `git status`; it never edits
+  tracked files, the index, or remotes. See [security.md](security.md) and
+  [checkpoints-and-handoff.md](checkpoints-and-handoff.md).

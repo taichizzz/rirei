@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-11",
+  "taskCount": 5,
+  "actualModelCalls": {
+    "total": 15,
+    "antigravity": 5,
+    "codex": 10
+  },
+  "zeroModelPreflightFailures": 6,
+  "totals": {
+    "baselineNonCachedTokens": 117146,
+    "treatmentNonCachedTokens": 132270,
+    "tokenDelta": 15124,
+    "tokenDeltaPercent": 12.910385331125262,
+    "baselineWallTimeMs": 394708,
+    "treatmentWallTimeMs": 373642,
+    "wallTimeDeltaMs": -21066,
+    "wallTimeDeltaPercent": -5.337109964834764,
+    "baselineCorrect": 4,
+    "treatmentCorrect": 4,
+    "tasksMeetingThreshold": 2,
+    "decisionRulePassed": false
+  },
+  "tasks": [
+    {
+      "id": "retry-after",
+      "handoffEstimatedTokens": 437,
+      "baselineNonCachedTokens": 21562,
+      "treatmentNonCachedTokens": 27363,
+      "tokenDeltaPercent": 26.90381226231333,
+      "baselineWallTimeMs": 71808,
+      "treatmentWallTimeMs": 88968,
+      "baselinePassed": false,
+      "treatmentPassed": false
+    },
+    {
+      "id": "deep-config-merge",
+      "handoffEstimatedTokens": 535,
+      "baselineNonCachedTokens": 19197,
+      "treatmentNonCachedTokens": 23451,
+      "tokenDeltaPercent": 22.159712455071105,
+      "baselineWallTimeMs": 72320,
+      "treatmentWallTimeMs": 65162,
+      "baselinePassed": true,
+      "treatmentPassed": true
+    },
+    {
+      "id": "ttl-lru-cache",
+      "handoffEstimatedTokens": 579,
+      "baselineNonCachedTokens": 26271,
+      "treatmentNonCachedTokens": 19682,
+      "tokenDeltaPercent": -25.080887670815727,
+      "baselineWallTimeMs": 65866,
+      "treatmentWallTimeMs": 62242,
+      "baselinePassed": true,
+      "treatmentPassed": true
+    },
+    {
+      "id": "workspace-path",
+      "handoffEstimatedTokens": 366,
+      "baselineNonCachedTokens": 21910,
+      "treatmentNonCachedTokens": 21890,
+      "tokenDeltaPercent": -0.09128251939753537,
+      "baselineWallTimeMs": 88956,
+      "treatmentWallTimeMs": 92491,
+      "baselinePassed": true,
+      "treatmentPassed": true
+    },
+    {
+      "id": "event-reconciliation",
+      "handoffEstimatedTokens": 588,
+      "baselineNonCachedTokens": 28206,
+      "treatmentNonCachedTokens": 39884,
+      "tokenDeltaPercent": 41.40253846699284,
+      "baselineWallTimeMs": 95758,
+      "treatmentWallTimeMs": 64779,
+      "baselinePassed": true,
+      "treatmentPassed": true
+    }
+  ],
+  "limitations": [
+    "All baseline runs saw .relay in git status, and at least one read Relay files.",
+    "One Antigravity predecessor worked in its scratch directory, leaving no captured notes.",
+    "The Retry-After hidden edge was ambiguous and both conditions failed it.",
+    "Five synthetic tasks do not establish statistical significance."
+  ]
+}

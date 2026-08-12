@@ -1,0 +1,83 @@
+{
+  "tasks": [
+    {
+      "id": "retry-after",
+      "title": "Retry-After parsing",
+      "request": "Implement src/index.js without dependencies. Export MAX_TIMEOUT_MS, parseRetryAfter(value, nowMs = Date.now()), and retryDelay(response, nowMs). Accept nonnegative integer delay-seconds and IMF-fixdate HTTP dates; trim optional whitespace. Return milliseconds, clamp past dates to 0 and larger delays to MAX_TIMEOUT_MS, and return null for missing, malformed, signed, fractional, or non-string values. retryDelay reads response.headers.get('retry-after'). Do not mutate inputs. Pass npm test.",
+      "rejectedNoteNeedle": "parseInt",
+      "rejectedSourcePattern": "parseInt\\s*\\(",
+      "expectedNotes": {
+        "requiredTypes": ["done", "rejected", "next"],
+        "needles": {
+          "done": "header",
+          "rejected": "parseInt",
+          "next": "IMF-fixdate"
+        }
+      }
+    },
+    {
+      "id": "deep-config-merge",
+      "title": "Security-conscious deep config merge",
+      "request": "Implement mergeConfig(base, override) in src/index.js for JSON-like data without dependencies. Recursively merge own enumerable plain-object keys; override arrays and primitives replace base values; override undefined retains the base value. Return a deep independent copy and never mutate either input. Ignore __proto__, prototype, and constructor at every depth so merging cannot pollute prototypes. Treat null as a replacing primitive and only recurse into objects whose prototype is Object.prototype or null. Pass npm test.",
+      "rejectedNoteNeedle": "Object.assign",
+      "rejectedSourcePattern": "Object\\.assign\\s*\\(",
+      "expectedNotes": {
+        "requiredTypes": ["done", "rejected", "decision", "next"],
+        "needles": {
+          "done": "non-mutation",
+          "rejected": "Object.assign",
+          "decision": "prototype is Object.prototype or null",
+          "next": "every depth"
+        }
+      }
+    },
+    {
+      "id": "ttl-lru-cache",
+      "title": "TTL and LRU cache semantics",
+      "request": "Implement TtlLruCache in src/index.js without dependencies. The constructor takes maxEntries and an optional monotonic now() function. set(key, value, ttlMs) requires finite ttlMs >= 0, replaces an existing key, and evicts least-recently-used live entries over capacity. get refreshes recency and returns undefined when absent or expired; has checks liveness without refreshing recency; delete, clear, and size are supported. ttlMs 0 expires immediately, expired entries never count toward size or eviction, and maxEntries must be a positive integer. Pass npm test.",
+      "rejectedNoteNeedle": "setTimeout",
+      "rejectedSourcePattern": "setTimeout\\s*\\(",
+      "expectedNotes": {
+        "requiredTypes": ["done", "rejected", "decision", "next"],
+        "needles": {
+          "done": "Map-like",
+          "rejected": "setTimeout",
+          "decision": "lazy expiry",
+          "next": "eviction"
+        }
+      }
+    },
+    {
+      "id": "workspace-path",
+      "title": "Symlink-safe workspace path resolution",
+      "request": "Implement async resolveWorkspacePath(root, candidate) in src/index.js using only Node built-ins. Canonicalize an existing directory root. Candidate must be a nonempty relative path with no NUL, absolute form, or .. segment. Resolve existing components including symlinks and reject broken links, loops, non-directory intermediate components, or any path escaping the canonical root. Missing trailing components are allowed after a safe existing directory. Return the canonical absolute target and use path.relative boundary checks, not string-prefix containment. Pass npm test.",
+      "rejectedNoteNeedle": "startsWith",
+      "rejectedSourcePattern": "\\.startsWith\\s*\\(",
+      "expectedNotes": {
+        "requiredTypes": ["done", "rejected", "decision", "next"],
+        "needles": {
+          "done": "lexical",
+          "rejected": "startsWith",
+          "decision": "path.relative",
+          "next": "missing tails"
+        }
+      }
+    },
+    {
+      "id": "event-reconciliation",
+      "title": "Event reconciliation with ordering constraints",
+      "request": "Implement reconcileEvents(events) in src/index.js without dependencies. Validate an array of events with unique nonempty string id, nonnegative integer sequence, optional after array of unique known event ids, and any payload. Return a new deterministic topological ordering: every dependency precedes its dependent, and among currently ready events choose lower sequence then lexicographically lower id. Reject self-dependencies, unknown dependencies, duplicates, malformed events, and cycles with descriptive errors. Do not mutate events or their after arrays. Pass npm test.",
+      "rejectedNoteNeedle": "comparator sort",
+      "rejectedSourcePattern": "return\\s+\\[\\.\\.\\.events\\]\\.sort",
+      "expectedNotes": {
+        "requiredTypes": ["done", "rejected", "decision", "next"],
+        "needles": {
+          "done": "shape",
+          "rejected": "comparator sort",
+          "decision": "Kahn",
+          "next": "cycle"
+        }
+      }
+    }
+  ]
+}

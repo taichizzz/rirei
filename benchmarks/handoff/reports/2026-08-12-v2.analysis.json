@@ -1,0 +1,122 @@
+{
+  "pairs": [
+    {
+      "taskId": "retry-after",
+      "order": ["baseline", "treatment"],
+      "correctness": {
+        "baseline": true,
+        "treatment": true
+      },
+      "wallTimeDeltaMs": -525,
+      "timeReduction": 0.008326856889086267,
+      "nonCachedTokenDelta": -2716,
+      "tokenReduction": 0.1144398095478869,
+      "reachesTwentyPercent": false,
+      "misleadingHandoffFailure": false,
+      "captureNotes": 3,
+      "handoffTokens": 211,
+      "relayLeaks": "no"
+    },
+    {
+      "taskId": "deep-config-merge",
+      "order": ["treatment", "baseline"],
+      "correctness": {
+        "baseline": true,
+        "treatment": true
+      },
+      "wallTimeDeltaMs": 2620,
+      "timeReduction": -0.050201187967043495,
+      "nonCachedTokenDelta": 1458,
+      "tokenReduction": -0.10945945945945947,
+      "reachesTwentyPercent": false,
+      "misleadingHandoffFailure": false,
+      "captureNotes": 4,
+      "handoffTokens": 273,
+      "relayLeaks": "no"
+    },
+    {
+      "taskId": "ttl-lru-cache",
+      "order": ["baseline", "treatment"],
+      "correctness": {
+        "baseline": true,
+        "treatment": true
+      },
+      "wallTimeDeltaMs": 6459,
+      "timeReduction": -0.13311213239082498,
+      "nonCachedTokenDelta": 8217,
+      "tokenReduction": -0.6779143635013613,
+      "reachesTwentyPercent": false,
+      "misleadingHandoffFailure": false,
+      "captureNotes": 4,
+      "handoffTokens": 268,
+      "relayLeaks": "no"
+    },
+    {
+      "taskId": "workspace-path",
+      "order": ["treatment", "baseline"],
+      "correctness": {
+        "baseline": true,
+        "treatment": true
+      },
+      "wallTimeDeltaMs": -16749,
+      "timeReduction": 0.22478861897731847,
+      "nonCachedTokenDelta": -6001,
+      "tokenReduction": 0.2598060438133172,
+      "reachesTwentyPercent": true,
+      "misleadingHandoffFailure": false,
+      "captureNotes": 4,
+      "handoffTokens": 273,
+      "relayLeaks": "no"
+    },
+    {
+      "taskId": "event-reconciliation",
+      "order": ["baseline", "treatment"],
+      "correctness": {
+        "baseline": true,
+        "treatment": true
+      },
+      "wallTimeDeltaMs": -2640,
+      "timeReduction": 0.043243243243243246,
+      "nonCachedTokenDelta": 12595,
+      "tokenReduction": -0.8295462029901864,
+      "reachesTwentyPercent": false,
+      "misleadingHandoffFailure": false,
+      "captureNotes": 4,
+      "handoffTokens": 274,
+      "relayLeaks": "no"
+    }
+  ],
+  "summary": {
+    "taskCount": 5,
+    "successCounts": {
+      "baseline": 5,
+      "treatment": 5
+    },
+    "wallTimeDeltaMs": {
+      "mean": -2167,
+      "median": -525
+    },
+    "nonCachedTokenDelta": {
+      "mean": 2710.6,
+      "median": 1458
+    },
+    "totals": {
+      "wallTimeMs": {
+        "baseline": 299322,
+        "treatment": 288487,
+        "delta": -10835
+      },
+      "nonCachedTokens": {
+        "baseline": 87455,
+        "treatment": 101008
+      }
+    },
+    "improvedTasks": 1,
+    "decisionRule": {
+      "text": "Treatment must maintain correctness and reduce non-cached tokens or wall time by at least 20% on at least 3/5 tasks, with no misleading handoff-caused failure.",
+      "correctnessMaintained": true,
+      "handoffFailureReviewClear": true,
+      "passed": false
+    }
+  }
+}

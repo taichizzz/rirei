@@ -115,7 +115,7 @@ class FakeProcessHost implements ProcessHost {
 
 function initialState(root: string): RelayState {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -138,6 +138,7 @@ function initialState(root: string): RelayState {
     tests: [],
     checkpoints: [],
     blockers: [],
+    notes: [],
   };
 }
 

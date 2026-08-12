@@ -12,7 +12,7 @@ const directories: string[] = [];
 function seed(root: string): RelayState {
   const now = '2026-01-01T00:00:00.000Z';
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -35,6 +35,7 @@ function seed(root: string): RelayState {
     tests: [],
     checkpoints: [],
     blockers: [],
+    notes: [],
   };
 }
 
@@ -127,7 +128,7 @@ describe('updateState', () => {
     const backups = await readdir(relayPath(root, 'backups'));
     expect(backups.some((name) => name.startsWith('state.v1.'))).toBe(true);
     const migrated = await readState(root);
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.revision).toBe(1);
   });
 

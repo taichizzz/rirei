@@ -119,6 +119,13 @@ const migrations: Array<(state: RawState) => RawState> = [
       currentRunId: hasUnfinishedRun ? resolvedRunId : undefined,
     };
   },
+  // v3 -> v4: add the canonical, provenance-aware handoff note log. Legacy
+  // arrays remain intact because their authorship and Git anchors are unknown.
+  (state) => ({
+    ...state,
+    schemaVersion: 4,
+    notes: [],
+  }),
 ];
 
 export function readSchemaVersion(raw: unknown): number {

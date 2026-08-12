@@ -1,9 +1,13 @@
 import { access, constants } from 'node:fs/promises';
 import { Command } from 'commander';
-import { inspectGitBaseline } from '../git/repository.js';
+import {
+  discoverRepository,
+  ensureRelayLocalExclusion,
+  inspectGitBaseline,
+} from '../git/repository.js';
 import { relayPath } from '../safety/path-policy.js';
 import { appendEvent } from '../state/events.js';
-import { type RelayState } from '../state/schema.js';
+import { LATEST_STATE_SCHEMA, type RelayState } from '../state/schema.js';
 import { replaceState } from '../state/store.js';
 
 function titleFromRequest(request: string): string {
@@ -16,12 +20,16 @@ export function startCommand(): Command {
     .argument('<task>', 'original task request')
     .option('--allow-dirty', 'allow a task to begin with uncommitted changes')
     .action(async (task: string, options: { allowDirty?: boolean }) => {
-      const baseline = await inspectGitBaseline(process.cwd());
+      const projectRoot = await discoverRepository(process.cwd());
+      if (!projectRoot)
+        throw new Error('Relay must be run inside a Git repository.');
       try {
-        await access(relayPath(baseline.root, 'config.json'), constants.R_OK);
+        await access(relayPath(projectRoot, 'config.json'), constants.R_OK);
       } catch {
         throw new Error('Relay is not initialized. Run relay init first.');
       }
+      await ensureRelayLocalExclusion(projectRoot);
+      const baseline = await inspectGitBaseline(projectRoot);
 
       if (baseline.dirty && !options.allowDirty) {
         throw new Error(
@@ -46,7 +54,7 @@ export function startCommand(): Command {
             );
         }
         const replacement: RelayState = {
-          schemaVersion: 3,
+          schemaVersion: LATEST_STATE_SCHEMA,
           revision: 0,
           recentOperations: [],
           runs: [],
@@ -75,6 +83,7 @@ export function startCommand(): Command {
           tests: [],
           checkpoints: [],
           blockers: [],
+          notes: [],
         };
         return replacement;
       });

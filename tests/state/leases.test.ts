@@ -13,7 +13,7 @@ const NOW = '2026-01-01T00:00:00.000Z';
 
 function state(): RelayState {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -36,6 +36,7 @@ function state(): RelayState {
     tests: [],
     checkpoints: [],
     blockers: [],
+    notes: [],
   };
 }
 

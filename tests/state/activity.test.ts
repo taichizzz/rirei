@@ -67,7 +67,7 @@ async function project(
   await mkdir(relayPath(root), { recursive: true });
   const now = new Date().toISOString();
   const state: RelayState = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -94,6 +94,7 @@ async function project(
     tests: [],
     checkpoints: [],
     blockers: [],
+    notes: [],
     ...overrides,
   };
   await writeConfig(root, defaultConfig);
@@ -400,6 +401,24 @@ describe('global activity snapshot', () => {
         worktreePath: '/Users/private/source',
       }),
     ];
+    state.notes = [
+      {
+        id: 'd68b385a-e4c6-4cd6-9ea8-3b15ec329c4a',
+        type: 'blocker',
+        text: 'NOTE-SECRET',
+        createdAt: new Date().toISOString(),
+        provenance: {
+          source: 'agent',
+          agent: 'claude',
+          recordedBy: 'relay-cli',
+        },
+        git: {
+          commit: 'abc',
+          branch: 'main',
+          fingerprint: 'a'.repeat(64),
+        },
+      },
+    ];
     await writeState(root, state);
     await appendEvent(root, 'arbitrary', {
       prompt: 'PROMPT-SECRET',
@@ -428,6 +447,7 @@ describe('global activity snapshot', () => {
       'OUTPUT-SECRET',
       'DIFF-SECRET',
       'TOKEN-SECRET',
+      'NOTE-SECRET',
       'This prompt must never be projected',
     ])
       expect(json).not.toContain(secret);

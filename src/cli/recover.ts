@@ -1,6 +1,9 @@
 import { Command } from 'commander';
 import { recoverOrphanedRun } from '../application/sessions.js';
-import { discoverRepository } from '../git/repository.js';
+import {
+  discoverRepository,
+  ensureRelayLocalExclusion,
+} from '../git/repository.js';
 import { recoverStaleRun } from '../state/recovery.js';
 import { readState } from '../state/store.js';
 
@@ -22,6 +25,7 @@ export function recoverCommand(): Command {
         const projectRoot = await discoverRepository(process.cwd());
         if (!projectRoot)
           throw new Error('Relay must be run inside a Git repository.');
+        await ensureRelayLocalExclusion(projectRoot);
         const state = await readState(projectRoot);
         const orphaned = state.runs.filter((run) => run.status === 'orphaned');
         const target = options.runId

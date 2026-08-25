@@ -1,10 +1,6 @@
 import { access, constants } from 'node:fs/promises';
 import { Command } from 'commander';
-import {
-  conservativeAuthenticationStatus,
-  detectExecutable,
-  registeredAgents,
-} from '../agents/registry.js';
+import { detectExecutable, registeredAgents } from '../agents/registry.js';
 import { discoverRepository } from '../git/repository.js';
 import { relayPath } from '../safety/path-policy.js';
 
@@ -31,14 +27,19 @@ export function doctorCommand(): Command {
       );
       for (const agent of registeredAgents()) {
         const installation = await detectExecutable(agent.executable);
-        const authentication = conservativeAuthenticationStatus();
-        const installed = installation.status === 'ready' ? 'Yes' : 'No';
-        const auth =
-          installation.status === 'ready'
-            ? authentication.status
-            : 'unavailable';
+        const installed = installation.status === 'ready';
+        const authentication = installed
+          ? await agent.detectAuthentication()
+          : undefined;
         process.stdout.write(
-          `${agent.displayName.padEnd(8)}${installed.padEnd(17)}${auth.padEnd(16)}Unknown      Unknown\n`,
+          `${agent.displayName.padEnd(8)}${(installed ? 'Yes' : 'No').padEnd(17)}${(installed
+            ? (authentication?.status ?? 'unavailable')
+            : 'unavailable'
+          ).padEnd(
+            16,
+          )}${(agent.capabilities.interactive ? 'Yes' : 'No').padEnd(12)}${
+            agent.capabilities.headless ? 'Yes' : 'No'
+          }\n`,
         );
       }
     });

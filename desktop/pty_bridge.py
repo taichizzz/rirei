@@ -10,6 +10,11 @@ import struct
 import subprocess
 import sys
 import termios
+import time
+import uuid
+
+
+PROTOCOL_VERSION = 1
 
 
 def parse_size(value, fallback):
@@ -36,6 +41,14 @@ def control_fd_open():
     return 3
 
 
+def event_fd_open():
+    try:
+        os.fstat(4)
+    except OSError:
+        return None
+    return 4
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         return 2
@@ -49,7 +62,7 @@ def main() -> int:
 
     set_winsize(master, rows, cols)
 
-    def descendant_pids():
+    def process_children():
         try:
             rows = subprocess.check_output(
                 ['ps', '-axo', 'pid=,ppid='], text=True
@@ -58,21 +71,26 @@ def main() -> int:
             for row in rows:
                 process_id, parent_id = (int(value) for value in row.split())
                 children.setdefault(parent_id, []).append(process_id)
-            result = []
-            pending = list(children.get(pid, []))
-            while pending:
-                process_id = pending.pop()
-                result.append(process_id)
-                pending.extend(children.get(process_id, []))
-            return result
+            return children
         except (OSError, subprocess.SubprocessError, ValueError):
-            return []
+            return {}
+
+    def descendant_pids(children):
+        result = []
+        pending = list(children.get(pid, []))
+        while pending:
+            process_id = pending.pop()
+            result.append(process_id)
+            pending.extend(children.get(process_id, []))
+        return result
 
     def forward_signal(signum):
-        targets = descendant_pids()
+        children = process_children()
+        # A provider supervisor may have sidecars below the Relay CLI. Snapshot
+        # its complete descendant tree while leaving the CLI alive to finalize.
+        targets = descendant_pids(children)
         if os.environ.get('RELAY_SIGNAL_PROCESS_GROUP') == '1':
             targets.insert(0, pid)
-        # Signal leaves first; managed agent sessions omit their Relay controller.
         for process_id in reversed(targets):
             try:
                 os.kill(process_id, signum)
@@ -88,14 +106,43 @@ def main() -> int:
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
     control = control_fd_open()
+    events = event_fd_open()
     control_buffer = b''
+    bridge_id = str(uuid.uuid4())
+    parent_lost_at = None
+
+    def send_frame(frame_type, **fields):
+        if events is None:
+            return
+        payload = {'version': PROTOCOL_VERSION, 'type': frame_type, **fields}
+        try:
+            os.write(events, (json.dumps(payload) + '\n').encode('utf-8'))
+        except OSError:
+            pass
+
+    send_frame(
+        'ready',
+        bridgeId=bridge_id,
+        bridgePid=os.getpid(),
+        childPid=pid,
+    )
 
     inputs = [master, stdin]
     if control is not None:
         inputs.append(control)
 
     while True:
-        readable, _, _ = select.select(inputs, [], [])
+        readable, _, _ = select.select(inputs, [], [], 1.0)
+        if control is not None:
+            send_frame('heartbeat', bridgeId=bridge_id, childPid=pid)
+        elif parent_lost_at is not None:
+            elapsed = time.monotonic() - parent_lost_at
+            if elapsed >= 4:
+                forward_signal(signal.SIGKILL)
+            elif elapsed >= 2:
+                forward_signal(signal.SIGTERM)
+            elif elapsed >= 0:
+                forward_signal(signal.SIGINT)
         if master in readable:
             try:
                 data = os.read(master, 65536)
@@ -117,7 +164,13 @@ def main() -> int:
             chunk = os.read(control, 65536)
             if not chunk:
                 inputs.remove(control)
+                send_frame('parent_lost', bridgeId=bridge_id, childPid=pid)
+                try:
+                    os.kill(pid, signal.SIGHUP)
+                except (OSError, ProcessLookupError):
+                    pass
                 control = None
+                parent_lost_at = time.monotonic()
             else:
                 control_buffer += chunk
                 if len(control_buffer) > 65536:
@@ -129,11 +182,10 @@ def main() -> int:
                         continue
                     try:
                         message = json.loads(line)
+                        if message.get('version') != PROTOCOL_VERSION:
+                            send_frame('error', code='unsupported_protocol')
+                            continue
                         action = message.get('action')
-
-                        # Fallback for old resize payload
-                        if action is None and ('cols' in message or 'rows' in message):
-                            action = 'resize'
 
                         if action == 'resize':
                             set_winsize(
@@ -141,17 +193,36 @@ def main() -> int:
                                 parse_size(message.get('rows'), rows),
                                 parse_size(message.get('cols'), cols),
                             )
+                            send_frame('resize_ack', cols=message.get('cols'), rows=message.get('rows'))
                         elif action == 'interrupt':
-                            forward_signal(signal.SIGINT)
+                            try:
+                                intent = message.get('intent')
+                                os.kill(
+                                    pid,
+                                    signal.SIGUSR2
+                                    if intent == 'user_stop'
+                                    else signal.SIGHUP
+                                    if intent == 'renderer_failure'
+                                    else signal.SIGUSR1,
+                                )
+                            except (OSError, ProcessLookupError):
+                                pass
+                            forward_signal(
+                                signal.SIGTERM
+                                if intent == 'user_stop'
+                                else signal.SIGINT
+                            )
                         elif action == 'terminate':
                             forward_signal(signal.SIGTERM)
                         elif action == 'kill':
                             forward_signal(signal.SIGKILL)
                     except (AttributeError, ValueError, TypeError):
-                        pass
+                        send_frame('error', code='invalid_frame')
 
     _, status = os.waitpid(pid, 0)
-    return os.waitstatus_to_exitcode(status)
+    exit_code = os.waitstatus_to_exitcode(status)
+    send_frame('provider_exit', exitCode=exit_code, childPid=pid)
+    return exit_code
 
 
 if __name__ == '__main__':

@@ -1,9 +1,35 @@
 import { createHash } from 'node:crypto';
+import { hostname, uptime } from 'node:os';
+import { AGENT_EXIT_REASONS } from '../agents/adapter.js';
 import {
   LATEST_STATE_SCHEMA,
   relayStateSchema,
+  type ControllerIdentity,
   type RelayState,
 } from './schema.js';
+
+/** Derive a structured controller identity from a legacy `controllerId` string. */
+export function deriveControllerIdentity(
+  controllerId: string | undefined,
+  startedAt?: string,
+): ControllerIdentity {
+  void startedAt;
+  const value = typeof controllerId === 'string' ? controllerId : 'migrated';
+  const [kind, ...rest] = value.split(':');
+  const instanceId = rest.join(':') || 'migrated';
+  const parsedPid = Number.parseInt(instanceId, 10);
+  return {
+    kind:
+      kind === 'desktop' || kind === 'terminal' || kind === 'daemon'
+        ? kind === 'terminal'
+          ? 'desktop'
+          : kind
+        : 'cli',
+    instanceId,
+    ...(Number.isInteger(parsedPid) && parsedPid > 0 ? { pid: parsedPid } : {}),
+    bootId: `${hostname()}:${Math.round((Date.now() - uptime() * 1000) / 60_000)}`,
+  };
+}
 
 /**
  * Ordered, in-memory migrations for persisted Relay state. Each step upgrades a
@@ -126,6 +152,157 @@ const migrations: Array<(state: RawState) => RawState> = [
     schemaVersion: 4,
     notes: [],
   }),
+  // v4 -> v5: persist a durable, structured exit classification for closed runs
+  // so recovery and UI can distinguish a verified outcome from a best-effort
+  // guess. The legacy `exitReason` string is retained alongside it.
+  (state) => {
+    const history = Array.isArray(state.agentHistory) ? state.agentHistory : [];
+    return {
+      ...state,
+      schemaVersion: 5,
+      agentHistory: history.map((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+          return entry;
+        const record = entry as Record<string, unknown>;
+        if (!record.endedAt) return entry;
+        const exitCode =
+          typeof record.exitCode === 'number' ? record.exitCode : null;
+        const exitReason =
+          typeof record.exitReason === 'string' ? record.exitReason : undefined;
+        const reason =
+          exitReason &&
+          (AGENT_EXIT_REASONS as readonly string[]).includes(exitReason)
+            ? exitReason
+            : exitCode === 0
+              ? 'completed'
+              : 'unknown_failure';
+        const providerCode =
+          exitCode !== null
+            ? String(exitCode)
+            : reason === 'completed'
+              ? '0'
+              : undefined;
+        const existing =
+          record.exitClassification &&
+          typeof record.exitClassification === 'object' &&
+          !Array.isArray(record.exitClassification)
+            ? (record.exitClassification as Record<string, unknown>)
+            : undefined;
+        const existingReason =
+          typeof existing?.reason === 'string' &&
+          (AGENT_EXIT_REASONS as readonly string[]).includes(existing.reason)
+            ? existing.reason
+            : undefined;
+        const normalizedReason = existingReason ?? reason;
+        return {
+          ...record,
+          exitReason: normalizedReason,
+          exitClassification: existing ?? {
+            reason: normalizedReason,
+            confidence:
+              normalizedReason === 'completed' && exitCode === 0
+                ? 'high'
+                : 'medium',
+            source: 'fallback',
+            ...(providerCode ? { providerCode } : {}),
+          },
+        };
+      }),
+    };
+  },
+  // v5 -> v6: persist a structured, host-qualified controller identity on each
+  // lease alongside the legacy `controllerId` string. Pids are meaningless on
+  // their own: the same pid can be reused after a reboot or exist on another
+  // machine. The object carries host and pid so ownership is collision-proof.
+  (state) => {
+    const runs = Array.isArray(state.runs) ? state.runs : [];
+    return {
+      ...state,
+      schemaVersion: 6,
+      runs: runs.map((lease) => {
+        if (!lease || typeof lease !== 'object' || Array.isArray(lease))
+          return lease;
+        const record = lease as Record<string, unknown>;
+        if (record.controller) return lease;
+        return {
+          ...record,
+          controller: deriveControllerIdentity(
+            record.controllerId as string | undefined,
+            record.startedAt as string | undefined,
+          ),
+        };
+      }),
+    };
+  },
+  // v6 -> v7: boot-qualify controller identity and persist lifecycle evidence.
+  (state) => {
+    const runs = Array.isArray(state.runs) ? state.runs : [];
+    return {
+      ...state,
+      schemaVersion: 7,
+      runs: runs.map((lease) => {
+        if (!lease || typeof lease !== 'object' || Array.isArray(lease))
+          return lease;
+        const record = lease as Record<string, unknown>;
+        const old = record.controller as Record<string, unknown> | undefined;
+        const controller = old?.instanceId
+          ? old
+          : old?.id
+            ? {
+                kind: old.kind === 'terminal' ? 'desktop' : old.kind,
+                instanceId: old.id,
+                ...(typeof old.pid === 'number' ? { pid: old.pid } : {}),
+                bootId: `${String(old.host ?? hostname())}:${Math.round((Date.now() - uptime() * 1000) / 60_000)}`,
+              }
+            : deriveControllerIdentity(
+                record.controllerId as string | undefined,
+                record.startedAt as string | undefined,
+              );
+        return {
+          ...record,
+          controller,
+          controllerId: `${String(controller.kind)}:${String(controller.bootId)}:${String(controller.instanceId)}`,
+          lifecycleStatus:
+            typeof record.lifecycleStatus === 'string'
+              ? record.lifecycleStatus
+              : 'running',
+        };
+      }),
+    };
+  },
+  // v7 -> v8: make lifecycle and runtime explicit daemon observations. Legacy
+  // timestamps cannot distinguish active work from permission waits, so the
+  // migration starts the authoritative runtime at zero rather than guessing.
+  (state) => {
+    const runs = Array.isArray(state.runs) ? state.runs : [];
+    return {
+      ...state,
+      schemaVersion: 8,
+      runs: runs.map((lease) => {
+        if (!lease || typeof lease !== 'object' || Array.isArray(lease))
+          return lease;
+        const record = lease as Record<string, unknown>;
+        const status = record.status;
+        const lifecycleStatus =
+          status === 'starting'
+            ? 'starting'
+            : status === 'running'
+              ? 'working'
+              : status === 'waiting'
+                ? 'waiting_for_input'
+                : status === 'stopping'
+                  ? 'stopping'
+                  : 'orphaned';
+        return {
+          ...record,
+          lifecycleStatus,
+          ...(status === 'waiting' ? { attentionKind: 'unknown' } : {}),
+          activeRuntimeSeconds: 0,
+          runtimeSequence: 0,
+        };
+      }),
+    };
+  },
 ];
 
 export function readSchemaVersion(raw: unknown): number {

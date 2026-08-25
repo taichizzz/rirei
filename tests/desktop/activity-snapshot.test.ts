@@ -17,7 +17,7 @@ afterEach(async () => {
 function snapshot() {
   const now = '2026-08-02T00:00:00.000Z';
   return {
-    schemaVersion: 1,
+    schemaVersion: 3,
     instanceId: 'instance',
     updatedAt: now,
     sessions: [
@@ -31,10 +31,23 @@ function snapshot() {
         branchLabel: 'main',
         role: 'implement',
         status: 'working',
+        lifecycleState: 'working',
         message: 'Agent is working',
         startedAt: now,
         updatedAt: now,
+        activeRuntimeSeconds: 0,
         needsAttention: false,
+        usage: [
+          {
+            id: 'tokens',
+            kind: 'tokens',
+            unit: 'tokens',
+            window: { label: 'Session' },
+            used: 123,
+            status: 'available',
+            statusReason: 'live',
+          },
+        ],
       },
     ],
   };
@@ -54,10 +67,16 @@ describe('desktop activity snapshot boundary', () => {
     ).not.toBeNull();
   });
 
+  test('accepts OpenCode sessions with bounded structured usage', () => {
+    const value = snapshot();
+    value.sessions[0]!.agent = 'opencode';
+    expect(validateActivitySnapshot(value)).toEqual(value);
+  });
+
   test('rejects extra fields, future schemas, bad statuses, and oversized arrays', () => {
     expect(validateActivitySnapshot({ ...snapshot(), events: [] })).toBeNull();
     expect(
-      validateActivitySnapshot({ ...snapshot(), schemaVersion: 2 }),
+      validateActivitySnapshot({ ...snapshot(), schemaVersion: 4 }),
     ).toBeNull();
     expect(
       validateActivitySnapshot({

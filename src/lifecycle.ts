@@ -1,6 +1,11 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { SessionManager, type RunSelection } from './application/sessions.js';
+import {
+  buildControllerIdentity,
+  controllerIdFor,
+} from './application/controller.js';
+import { ControllerHeartbeat } from './application/heartbeat.js';
 import { readConfig } from './config/loader.js';
 import {
   discoverRepository,
@@ -136,16 +141,39 @@ export async function launchAgent(
   prompt: string,
   selection: RunSelection = {},
 ): Promise<{ result: ProcessResult; state: RelayState }> {
-  const manager = new SessionManager(new InheritedProcessHost());
-  const managed = await manager.startRun({
-    projectRoot: root,
-    state,
-    adapter,
-    prompt,
-    selection,
+  const controller = buildControllerIdentity({
+    terminalId: selection.terminalId,
   });
-  const completed = await managed.completion;
-  if (completed.result.exitCode === 127 && completed.result.stderr)
-    throw new Error(completed.result.stderr);
-  return { result: completed.result, state: completed.state };
+  const host = new InheritedProcessHost();
+  const manager = new SessionManager(host);
+  const userInterrupt = () => host.setTerminationIntent('user_interrupt');
+  const userStop = () => host.setTerminationIntent('user_stop');
+  const controllerLoss = () => host.setTerminationIntent('controller_loss');
+  process.on('SIGUSR1', userInterrupt);
+  process.on('SIGUSR2', userStop);
+  process.on('SIGHUP', controllerLoss);
+  const heartbeat = new ControllerHeartbeat(root, controllerIdFor(controller));
+  heartbeat.start();
+  try {
+    const managed = await manager.startRun({
+      projectRoot: root,
+      state,
+      adapter,
+      prompt,
+      selection,
+      controller,
+    });
+    const completed = await managed.completion;
+    if (completed.result.spawnErrorCode)
+      throw new Error(
+        `${adapter.displayName} could not start (${completed.result.spawnErrorCode}).`,
+      );
+    return { result: completed.result, state: completed.state };
+  } finally {
+    heartbeat.stop();
+    await heartbeat.orphanOwned().catch(() => undefined);
+    process.off('SIGUSR1', userInterrupt);
+    process.off('SIGUSR2', userStop);
+    process.off('SIGHUP', controllerLoss);
+  }
 }

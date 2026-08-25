@@ -8,7 +8,7 @@ implementations are in `src/agents/registry.ts`.
 ## The adapter contract
 
 ```ts
-type AgentId = 'claude' | 'codex' | 'gemini' | 'antigravity';
+type AgentId = 'claude' | 'codex' | 'gemini' | 'antigravity' | 'opencode';
 
 interface AgentAdapter {
   readonly id: AgentId;
@@ -26,7 +26,10 @@ interface AgentAdapter {
   buildResumeCommand?(ctx: AgentResumeContext): Promise<CommandSpec>;
   buildNonInteractiveCommand?(ctx: AgentRunContext): Promise<CommandSpec>; // optional
 
-  classifyExit(result: ProcessResult): Promise<{
+  classifyExit(
+    result: ProcessResult,
+    observations?: ProviderObservation[],
+  ): Promise<{
     reason: AgentExitReason;
     confidence: 'low' | 'medium' | 'high';
   }>;
@@ -65,14 +68,15 @@ permission_error | command_not_found | provider_unavailable | context_limit |
 network_error | interrupted | unknown_failure
 ```
 
-Claude and Codex expose provider-specific resume builders. Relay records whether a launch is
+Claude, Codex, and OpenCode expose provider-specific resume builders. Relay records whether a launch is
 new, resumed, or forked, but the provider CLI remains responsible for loading conversation
 state. A resume always starts a new process and PTY; Relay does not reattach an old terminal.
 
 ## The registered agents
 
-`OfficialCliAdapter` implements the contract generically; the registry constructs one per
-provider:
+`OfficialCliAdapter` implements the common official-CLI behavior. OpenCode uses a bespoke
+`OpenCodeAdapter` because its multi-provider auth scopes, model names, prompt flags, and
+resume/fork semantics are distinct:
 
 | id            | displayName | executable | Prompt passed as                   |
 | ------------- | ----------- | ---------- | ---------------------------------- |
@@ -80,6 +84,7 @@ provider:
 | `codex`       | Codex       | `codex`    | `[prompt]` (positional)            |
 | `gemini`      | Gemini      | `gemini`   | `["--prompt-interactive", prompt]` |
 | `antigravity` | Antigravity | `agy`      | `["--prompt-interactive", prompt]` |
+| `opencode`    | OpenCode    | `opencode` | `["--prompt", prompt]`             |
 
 ### Model and effort discovery
 
@@ -91,9 +96,31 @@ provider:
   so the background catalog is static and custom IDs cover newer variants. The names encode
   effort where applicable, so Relay does not pass a separate effort flag.
 - Gemini accepts `--model` but has no verified model-list or effort discovery path here.
+- OpenCode reads live `provider/model` lines from `opencode models` and detects configured
+  providers through `opencode auth list`. It has no fixed effort vocabulary, and auth status
+  is `configured` — Relay never claims the tokens are valid.
+- OpenCode resume targets are `--continue` (latest) and `--session <id>`; forks use `--fork`
+  alongside either. The adapter stays inert unless the `opencode` binary is installed — Relay
+  does not bundle it. Headless `opencode run` exists upstream, but this adapter (like every
+  other) does not implement non-interactive execution yet.
 
 `relay agents --json` exposes this metadata to Rirei. Adapter validation rejects model values
 that look like flags and effort values unsupported by the selected provider.
+
+### Structured lifecycle
+
+Desktop daemon launches provide a terminal-scoped lifecycle token and local reporter. Claude,
+Codex, and OpenCode advertise `structuredEvents: true`:
+
+- Claude uses generated official hooks for permission and user-question waits.
+- Codex keeps the native TUI but launches it through a capability-token-authenticated loopback
+  app-server supervisor with a passive status observer.
+- OpenCode keeps the native TUI and observes its random-password loopback SSE/REST API.
+
+These integrations report only `working`, `needs_permission`, or `waiting_for_input`. They do
+not answer requests, run commands, or synthesize terminal input. CLI launches outside the
+desktop daemon do not use the supervisors. Gemini and Antigravity retain conservative terminal
+fallback behavior and advertise no structured event capability.
 
 > Gemini's flag matters: `--prompt-interactive` (`-i`) starts a real interactive session
 > seeded with the prompt. Plain `--prompt` would run headless — it answers once and exits,
@@ -117,9 +144,10 @@ that look like flags and effort values unsupported by the selected provider.
 
 ### Authentication detection
 
-`detectAuthentication()` returns a **conservative** result: status `unknown` with the detail
-"Relay does not inspect provider credential files." Relay deliberately never reads provider
-credential files or tokens, so it cannot (and will not) claim `ready` from the outside. See
+Authentication discovery is adapter-owned and cached for 45 seconds. Claude uses
+`claude auth status --json`; Codex uses the bounded output of `codex login status`; OpenCode
+uses `opencode auth list` and reports backing scopes as `configured`, never remotely verified.
+Gemini and Antigravity remain `unknown`. Relay never reads credential files or tokens. See
 [security.md](security.md).
 
 ### Version detection
@@ -131,17 +159,25 @@ output, or `null` on any failure.
 
 `classifyExit()` today uses documented, machine-readable signals only:
 
-| Signal                                      | Reason              | Confidence |
-| ------------------------------------------- | ------------------- | ---------- |
-| `exitCode === 0`                            | `completed`         | high       |
-| `signal === "SIGINT"` or `exitCode === 130` | `user_cancelled`    | high       |
-| `exitCode === 127`                          | `command_not_found` | medium     |
-| anything else                               | `unknown_failure`   | low        |
+| Evidence                            | Reason                   | Confidence  |
+| ----------------------------------- | ------------------------ | ----------- |
+| explicit interrupt/stop intent      | `user_cancelled`         | high        |
+| spawn `ENOENT`                      | `command_not_found`      | high        |
+| other spawn failure                 | `provider_unavailable`   | high        |
+| exit code `0`                       | `completed`              | high        |
+| structured provider observation     | provider-specific reason | medium/high |
+| signal without explicit user intent | `interrupted`            | medium      |
+| generic nonzero exit                | `unknown_failure`        | low         |
 
-This is intentionally cautious: it **never** claims `usage_limit`, `rate_limit`, or
-`authentication_error` from a bare exit code, because doing so would risk falsely telling the
-user a limit was hit. The tradeoff is that Relay's headline "usage-limit-aware switching" is
-not yet realized — a rate-limited agent currently classifies as `unknown_failure`.
+This is intentionally cautious: it never claims `usage_limit`, `rate_limit`, or
+`authentication_error` from free-form TUI text or a bare exit code.
+
+`ProcessResult.observations` accepts at most 16 allow-listed `ProviderObservation` signals.
+When present, specific kinds (`rate_limit`, `usage_limit`,
+`authentication`, `network`) upgrade the outcome to `provider_event` at high confidence, and a
+bare `provider_error` yields `provider_unavailable` at medium confidence. Providers that emit
+these observations fulfill Relay's structured-events capability; providers that do not simply
+fall back to the conservative exit-code table.
 
 ### Non-interactive mode
 

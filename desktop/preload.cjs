@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('relay', {
     ipcRenderer.invoke('relay:workspace-create', request),
   terminalInput: (terminalId, data) =>
     ipcRenderer.send('relay:terminal-input', { terminalId, data }),
+  terminalAttention: (terminalId) =>
+    ipcRenderer.send('relay:terminal-attention', { terminalId }),
   resizeTerminal: (terminalId, size) =>
     ipcRenderer.send('relay:terminal-resize', { terminalId, size }),
   stopTerminal: (terminalId) =>
@@ -33,8 +35,8 @@ contextBridge.exposeInMainWorld('relay', {
     ipcRenderer.invoke('relay:terminal-hide', { terminalId }),
   showTerminalTab: (terminalId) =>
     ipcRenderer.invoke('relay:terminal-show', { terminalId }),
-  acknowledgeTerminalOutput: (terminalId, sequence) =>
-    ipcRenderer.send('relay:terminal-output-ack', { terminalId, sequence }),
+  acknowledgeTerminalOutput: (terminalId, cursor) =>
+    ipcRenderer.send('relay:terminal-output-ack', { terminalId, cursor }),
   terminalInventory: () => ipcRenderer.invoke('relay:terminal-inventory'),
   rendererReady: () => ipcRenderer.send('relay:renderer-ready'),
   onTerminalData: (callback) => {

@@ -71,6 +71,8 @@ export class TerminalManager {
       exitCode: null,
       signal: null,
       error: null,
+      bridge: null,
+      bridgeError: null,
       decoders: {
         stdout: new StringDecoder('utf8'),
         stderr: new StringDecoder('utf8'),
@@ -285,6 +287,8 @@ export class TerminalManager {
       exitCode: t.exitCode,
       signal: t.signal,
       error: t.error,
+      bridge: t.bridge,
+      bridgeError: t.bridgeError,
       buffer: t.buffer,
       sequence: t.sequence,
       outputSequence: t.outputSequence,

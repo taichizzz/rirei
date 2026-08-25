@@ -24,7 +24,7 @@ export class TerminalTabsModel {
       container,
       dispose,
       sequence: metadata.sequence || 0,
-      outputSequence: metadata.outputSequence || 0,
+      outputCursor: metadata.outputCursor ?? metadata.outputSequence ?? 0,
     });
     if (!this.activeId && !metadata.hidden) {
       this.activeId = id;
@@ -44,8 +44,8 @@ export class TerminalTabsModel {
 
   updateOutputSequence(id, sequence) {
     const terminal = this.terminals.get(id);
-    if (!terminal || sequence <= terminal.outputSequence) return false;
-    terminal.outputSequence = sequence;
+    if (!terminal || sequence <= terminal.outputCursor) return false;
+    terminal.outputCursor = sequence;
     return true;
   }
 
@@ -150,7 +150,6 @@ export class TerminalTabsModel {
       if (t) {
         if (item.sequence >= t.sequence) {
           t.sequence = item.sequence;
-          t.outputSequence = item.outputSequence ?? t.outputSequence;
           t.metadata = { ...t.metadata, ...item };
         }
       } else {

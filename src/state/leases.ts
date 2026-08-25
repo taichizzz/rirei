@@ -92,6 +92,7 @@ export function markLeaseOrphaned(
   state: RelayState,
   runId: string,
 ): RelayState {
+  const target = state.runs.find((lease) => lease.runId === runId);
   return withDerivedFields({
     ...state,
     runs: state.runs.map((lease) =>
@@ -99,9 +100,28 @@ export function markLeaseOrphaned(
         ? {
             ...lease,
             status: 'orphaned' as const,
+            lifecycleStatus: 'orphaned' as const,
+            attentionKind: 'unknown' as const,
             lastSeenAt: new Date().toISOString(),
           }
         : lease,
+    ),
+    agentHistory: state.agentHistory.map((run) =>
+      run.id === runId && !run.endedAt
+        ? {
+            ...run,
+            lifecycleStatus: 'orphaned' as const,
+            attentionKind: 'unknown' as const,
+            activeRuntimeSeconds: Math.max(
+              run.activeRuntimeSeconds ?? 0,
+              target?.activeRuntimeSeconds ?? 0,
+            ),
+            runtimeSequence: Math.max(
+              run.runtimeSequence ?? 0,
+              target?.runtimeSequence ?? 0,
+            ),
+          }
+        : run,
     ),
   });
 }

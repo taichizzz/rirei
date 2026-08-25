@@ -85,11 +85,11 @@ Open `Relay Launcher.app`, choose a Git repository, and Relay will initialize it
 Its task dashboard shows live task status, current agent, Git branch and changes, latest checkpoint/test, remaining work, decisions, and blockers from structured `relay status --json` output. A durable agent-session timeline shows every launch for the task, including the
 provider, session model/effort overrides, start and end times, duration, and classified exit result. Active sessions update when the dashboard refreshes, and historical sessions remain available after the agent exits or the task completes.
 
-Each agent row also has a persistent session-profile picker. Claude exposes verified aliases and effort levels, Codex loads its live model catalog and model-specific reasoning levels, and Antigravity offers a catalog verified against `agy models`. Auto always preserves the provider's default, and custom model IDs are supported without changing global provider configuration.
+Each agent row also has a persistent session-profile picker. Claude exposes verified aliases and effort levels, Codex loads its live model catalog and model-specific reasoning levels, Antigravity offers a catalog verified against `agy models`, and OpenCode reads live `provider/model` lines from `opencode models`. Auto always preserves the provider's default, and custom model IDs are supported without changing global provider configuration.
 
 After installing development dependencies, use `npm run desktop:dev` or build DMG and ZIP artifacts with `npm run desktop:build`. The existing AppleScript launcher remains available unchanged.
 
-Rirei's Usage panel reports provider plan usage when a supported machine-readable source is available. Claude and Codex show 5-hour and weekly remaining percentages and reset times; stale values are labeled explicitly. Gemini and Antigravity remain `Unknown` until a verified structured source exists. Rirei never invents percentages or reads provider credentials.
+Rirei's Usage panel reports provider plan usage when a supported machine-readable source is available. Claude and Codex show 5-hour and weekly remaining percentages and reset times; stale values are labeled explicitly. Gemini, Antigravity, and OpenCode remain `Unknown` until a verified structured source exists. Rirei never invents percentages or reads provider credentials.
 
 ### Integrated terminal internals
 

@@ -17,7 +17,7 @@ const directories: string[] = [];
 function state(root: string): RelayState {
   const now = '2026-01-01T00:00:00.000Z';
   return {
-    schemaVersion: 4,
+    schemaVersion: 8,
     revision: 0,
     recentOperations: [],
     runs: [],

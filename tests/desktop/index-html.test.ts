@@ -10,5 +10,9 @@ describe('index.html', () => {
       '<script type="module" src="renderer.js"></script>',
     );
     expect(htmlContent).toContain('<button id="openShell">Shell</button>');
+    expect(htmlContent).toContain(
+      'data-interactive="fork-latest" data-agent="opencode"',
+    );
+    expect(htmlContent).toContain('id="resumeRecovered"');
   });
 });

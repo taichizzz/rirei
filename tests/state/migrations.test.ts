@@ -90,7 +90,7 @@ describe('state migrations', () => {
       runId: 'run-9',
       agent: 'claude',
       status: 'orphaned',
-      controllerId: 'migrated',
+      controllerId: expect.stringMatching(/^cli:.+:migrated$/),
     });
     expect(migrated.revision).toBe(4);
   });
@@ -145,6 +145,126 @@ describe('state migrations', () => {
     expect(first.runs[0]?.runId).toBe(first.agentHistory[0]?.id);
     expect(second.runs[0]?.runId).toBe(first.runs[0]?.runId);
     expect(second.runs[0]?.lastSeenAt).toBe(first.runs[0]?.lastSeenAt);
+  });
+
+  it('derives a durable exit classification for closed legacy runs', () => {
+    const migrated = migrateState({
+      ...legacyV1(),
+      schemaVersion: 4,
+      revision: 0,
+      recentOperations: [],
+      runs: [],
+      currentAgent: undefined,
+      currentRunId: undefined,
+      notes: [],
+      agentHistory: [
+        {
+          agent: 'claude',
+          startedAt: '2026-01-01T00:00:00.000Z',
+          endedAt: '2026-01-01T00:01:00.000Z',
+          exitCode: 0,
+          exitReason: 'completed',
+        },
+        {
+          agent: 'codex',
+          startedAt: '2026-01-01T00:02:00.000Z',
+          endedAt: '2026-01-01T00:03:00.000Z',
+          exitCode: null,
+          exitReason: 'interrupted',
+        },
+        { agent: 'codex', startedAt: '2026-01-01T00:04:00.000Z' },
+      ],
+    });
+    expect(migrated.agentHistory[0]).toMatchObject({
+      exitReason: 'completed',
+      exitClassification: {
+        reason: 'completed',
+        confidence: 'high',
+        source: 'fallback',
+        providerCode: '0',
+      },
+    });
+    expect(migrated.agentHistory[1]).toMatchObject({
+      exitClassification: {
+        reason: 'interrupted',
+        confidence: 'medium',
+        source: 'fallback',
+      },
+    });
+    expect(migrated.agentHistory[2]).not.toHaveProperty('exitClassification');
+  });
+
+  it('derives a structured host-qualified controller for v5 leases', () => {
+    const migrated = migrateState({
+      ...legacyV1(),
+      schemaVersion: 5,
+      revision: 3,
+      recentOperations: [],
+      notes: [],
+      runs: [
+        {
+          runId: 'run-a',
+          worktreePath: '/tmp/project',
+          projectRoot: '/tmp/project',
+          agent: 'claude',
+          launchMode: 'new',
+          controllerId: 'cli:4242',
+          startedAt: '2026-01-01T00:00:00.000Z',
+          lastSeenAt: '2026-01-01T00:01:00.000Z',
+          status: 'running',
+        },
+        {
+          runId: 'run-b',
+          worktreePath: '/tmp/project',
+          projectRoot: '/tmp/project',
+          agent: 'codex',
+          launchMode: 'new',
+          controllerId: 'terminal:tab-9',
+          startedAt: '2026-01-01T00:00:00.000Z',
+          lastSeenAt: '2026-01-01T00:01:00.000Z',
+          status: 'running',
+        },
+        {
+          runId: 'run-c',
+          worktreePath: '/tmp/project',
+          projectRoot: '/tmp/project',
+          agent: 'codex',
+          launchMode: 'new',
+          controllerId: 'desktop:app-1',
+          startedAt: '2026-01-01T00:00:00.000Z',
+          lastSeenAt: '2026-01-01T00:01:00.000Z',
+          status: 'running',
+        },
+      ],
+    });
+    expect(migrated.schemaVersion).toBe(8);
+    expect(migrated.runs[0]?.controller).toMatchObject({
+      kind: 'cli',
+      instanceId: '4242',
+      pid: 4242,
+      bootId: expect.any(String),
+    });
+    expect(migrated.runs[0]?.controllerId).toMatch(/^cli:.+:4242$/);
+    expect(migrated.runs[1]?.controller).toMatchObject({
+      kind: 'desktop',
+      instanceId: 'tab-9',
+    });
+    expect(migrated.runs[2]?.controller).toMatchObject({
+      kind: 'desktop',
+      instanceId: 'app-1',
+    });
+  });
+
+  it('fills a host-qualified controller for leases without an id', () => {
+    const migrated = migrateState({
+      ...legacyV1(),
+      schemaVersion: 5,
+      revision: 0,
+      recentOperations: [],
+      notes: [],
+      runs: [],
+    });
+    expect(migrated.schemaVersion).toBe(8);
   });
 
   it('rejects a schema version newer than this build supports', () => {

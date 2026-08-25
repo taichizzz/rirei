@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification } from 'electron';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readValidatedActivitySnapshot } from './activity-snapshot.mjs';
@@ -8,19 +10,27 @@ import {
   DeepLinkIntentQueue,
   parseTerminalDeepLink,
   terminalDeepLinksFromArgv,
-  terminalOwnerWebContentsId,
 } from './deep-links.mjs';
 import { createUsageAlertPolicy } from './usage-alert-policy.mjs';
-import { TerminalManager } from './terminal-manager.mjs';
-import { terminalControlFrame } from './terminal-control.mjs';
+import { TerminalDaemonClient } from './terminal-daemon-client.mjs';
+import { listTerminalJournalProjects } from './terminal-journal.mjs';
 import { sanitizeWorkspaceList } from './workspace-projection.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const agents = new Set(['claude', 'codex', 'gemini', 'antigravity']);
-const terminalManager = new TerminalManager(4);
+const agents = new Set([
+  'claude',
+  'codex',
+  'gemini',
+  'antigravity',
+  'opencode',
+]);
+let terminalDaemon;
+const rendererTerminals = new Map();
+const terminalDeliveries = new Map();
 const deepLinkIntents = new DeepLinkIntentQueue();
 const readyRenderers = new Set();
 let appReady = false;
+let daemonReconnectTimer = null;
 
 const usageSubscriptions = new Map();
 const usageAlertPolicy = createUsageAlertPolicy();
@@ -31,6 +41,7 @@ const providerNames = Object.freeze({
   codex: 'Codex',
   gemini: 'Gemini',
   antigravity: 'Antigravity',
+  opencode: 'OpenCode',
 });
 const usageWindowNames = Object.freeze({
   fiveHour: '5-hour usage',
@@ -68,11 +79,50 @@ function ptyBridgePath() {
   throw new Error('The packaged PTY bridge is missing.');
 }
 
+function daemonEntryPath() {
+  const local = path.join(here, 'terminal-daemon.mjs');
+  if (!app.isPackaged || (!local.includes('.asar') && existsSync(local)))
+    return local;
+  const unpacked = path.join(
+    process.resourcesPath,
+    'app.asar.unpacked',
+    'desktop',
+    'terminal-daemon.mjs',
+  );
+  if (existsSync(unpacked)) return unpacked;
+  throw new Error('The packaged terminal daemon is missing.');
+}
+
+function daemonRuntimePaths() {
+  const userData = app.getPath('userData');
+  const hash = createHash('sha256').update(userData).digest('hex').slice(0, 16);
+  return {
+    descriptorPath: path.join(userData, 'terminal-daemon-v1.json'),
+    socketPath: path.join(
+      os.tmpdir(),
+      `rirei-${process.getuid?.() ?? 0}-${hash}`,
+      'pty-v1.sock',
+    ),
+  };
+}
+
 function nodePath() {
   for (const candidate of ['/usr/local/bin/node', '/opt/homebrew/bin/node']) {
     if (existsSync(candidate)) return candidate;
   }
   return 'node';
+}
+
+function providerPath() {
+  const values = [
+    path.join(app.getPath('home'), '.local', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    process.env.PATH,
+  ].filter(Boolean);
+  return values
+    .filter((value, index) => values.indexOf(value) === index)
+    .join(path.delimiter);
 }
 
 function loginShellPath() {
@@ -279,7 +329,12 @@ function sanitizeUsageWindow(value) {
 }
 
 function sanitizeUsage(value) {
-  if (!value || typeof value !== 'object' || !Array.isArray(value.plans))
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    value.schemaVersion !== 2 ||
+    !Array.isArray(value.plans)
+  )
     return null;
   const taskStatus = ['active', 'blocked', 'completed', 'cancelled'].includes(
     value.task?.status,
@@ -296,21 +351,84 @@ function sanitizeUsage(value) {
       !plan ||
       typeof plan !== 'object' ||
       !Object.hasOwn(providerNames, plan.id) ||
-      !['available', 'stale', 'unknown'].includes(plan.status)
+      !['available', 'stale', 'unknown', 'unsupported', 'error'].includes(
+        plan.status,
+      )
     )
       continue;
     const capturedAt = safeIso(plan.capturedAt);
     if (capturedAt === undefined) continue;
-    const available = plan.status === 'available';
+    const metrics = [];
+    for (const metric of Array.isArray(plan.metrics) ? plan.metrics : []) {
+      if (
+        !metric ||
+        typeof metric !== 'object' ||
+        typeof metric.id !== 'string' ||
+        metric.id.length < 1 ||
+        metric.id.length > 80 ||
+        !['quota', 'requests', 'tokens', 'credits', 'cost'].includes(
+          metric.kind,
+        ) ||
+        !['percent', 'requests', 'tokens', 'credits', 'currency'].includes(
+          metric.unit,
+        ) ||
+        !['available', 'stale'].includes(metric.status) ||
+        !['live', 'sample_stale', 'window_expired', 'invalid_capture'].includes(
+          metric.statusReason,
+        )
+      )
+        continue;
+      const numeric = {};
+      let valid = true;
+      for (const key of ['used', 'remaining', 'limit', 'retryAfterSeconds']) {
+        if (metric[key] === undefined) continue;
+        if (typeof metric[key] !== 'number' || !Number.isFinite(metric[key])) {
+          valid = false;
+          break;
+        }
+        numeric[key] = metric[key];
+      }
+      if (!valid) continue;
+      const resetsAt = safeIso(metric.resetsAt);
+      if (resetsAt === undefined) continue;
+      const window =
+        metric.window &&
+        typeof metric.window.label === 'string' &&
+        metric.window.label.length > 0 &&
+        metric.window.label.length <= 80
+          ? {
+              label: metric.window.label,
+              ...(Number.isInteger(metric.window.durationSeconds) &&
+              metric.window.durationSeconds > 0
+                ? { durationSeconds: metric.window.durationSeconds }
+                : {}),
+            }
+          : undefined;
+      metrics.push({
+        id: metric.id,
+        kind: metric.kind,
+        unit: metric.unit,
+        ...(window ? { window } : {}),
+        ...numeric,
+        resetsAt,
+        status: metric.status,
+        statusReason: metric.statusReason,
+      });
+    }
     const sanitized = {
       id: plan.id,
       displayName: providerNames[plan.id],
       status: plan.status,
       capturedAt,
-      source: available ? 'Provider usage' : 'Unavailable',
-      detail: available
-        ? 'Current provider rate-limit usage.'
-        : 'No current provider usage is available.',
+      source:
+        typeof plan.source === 'string' && plan.source.length <= 120
+          ? plan.source
+          : 'Unavailable',
+      detail:
+        typeof plan.detail === 'string' && plan.detail.length <= 300
+          ? plan.detail
+          : 'No current provider usage is available.',
+      metrics,
     };
     const fiveHour = sanitizeUsageWindow(plan.fiveHour);
     const week = sanitizeUsageWindow(plan.week);
@@ -318,7 +436,11 @@ function sanitizeUsage(value) {
     if (week) sanitized.week = week;
     plans.push(sanitized);
   }
-  return { task: { title: taskTitle, status: taskStatus }, plans };
+  return {
+    schemaVersion: 2,
+    task: { title: taskTitle, status: taskStatus },
+    plans,
+  };
 }
 
 function clearUsageSubscription(senderId) {
@@ -384,7 +506,50 @@ function setActiveProject(event, project) {
     polling: false,
   };
   usageSubscriptions.set(event.sender.id, subscription);
+  void reconcileProjectWithDaemon(project);
   void pollUsage(subscription);
+}
+
+function daemonReconciliationArgs() {
+  if (
+    !terminalDaemon?.connected ||
+    !terminalDaemon.daemonId ||
+    !terminalDaemon.daemonPid ||
+    !terminalDaemon.daemonBootId
+  )
+    return [];
+  const terminalIds = [...terminalDaemon.inventory.values()]
+    .filter((terminal) =>
+      ['starting', 'running', 'waiting', 'stopping'].includes(terminal.status),
+    )
+    .map((terminal) => terminal.id);
+  return [
+    '--daemon-id',
+    terminalDaemon.daemonId,
+    '--daemon-pid',
+    String(terminalDaemon.daemonPid),
+    '--daemon-boot-id',
+    terminalDaemon.daemonBootId,
+    ...(terminalIds.length > 0 ? ['--terminal-id', ...terminalIds] : []),
+  ];
+}
+
+function reconcileProjectWithDaemon(project) {
+  if (!validProjectDirectory(project)) return Promise.resolve();
+  return runCli(project, 'reconcile', daemonReconciliationArgs()).then(
+    () => undefined,
+  );
+}
+
+async function reconcileDaemonProjects() {
+  const projects = new Set(
+    [...(terminalDaemon?.inventory.values() ?? [])]
+      .map((terminal) => terminal.project)
+      .filter(validProjectDirectory),
+  );
+  for (const project of await listTerminalJournalProjects().catch(() => []))
+    if (validProjectDirectory(project)) projects.add(project);
+  for (const project of projects) await reconcileProjectWithDaemon(project);
 }
 
 function terminalSize(size) {
@@ -396,38 +561,126 @@ function terminalSize(size) {
   };
 }
 
-function safeStreamWrite(stream, data) {
-  if (!stream?.writable || stream.destroyed) return false;
-  try {
-    stream.write(data, () => undefined);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function terminalForProject(project) {
-  for (const t of terminalManager.terminals.values()) {
-    if (
-      t.project === project &&
-      (t.status === 'starting' ||
-        t.status === 'running' ||
-        t.status === 'waiting' ||
-        t.status === 'stopping')
-    )
-      return t;
-  }
-  return null;
+  return [...(terminalDaemon?.inventory.values() ?? [])].find(
+    (terminal) =>
+      terminal.project === project &&
+      ['starting', 'running', 'waiting', 'stopping'].includes(terminal.status),
+  );
 }
 
 function ownedTerminal(event, terminalId) {
   if (typeof terminalId !== 'string') return null;
-  return terminalManager.get(terminalId, event.sender.id);
+  return rendererTerminals.get(event.sender.id)?.has(terminalId)
+    ? terminalDaemon.inventory.get(terminalId)
+    : null;
+}
+
+function terminalOwnerId(terminalId) {
+  for (const [senderId, terminalIds] of rendererTerminals)
+    if (terminalIds.has(terminalId)) return senderId;
+  return null;
+}
+
+function deliveryKey(senderId, terminalId) {
+  return `${senderId}:${terminalId}`;
+}
+
+function finalTerminal(status) {
+  return ['completed', 'failed', 'cancelled', 'orphaned'].includes(status);
+}
+
+function publicRendererTerminal(
+  terminal,
+  outputCursor = terminal.oldestCursor ?? 0,
+) {
+  return {
+    id: terminal.id,
+    provider: terminal.provider,
+    workspaceId: terminal.workspaceId,
+    branchLabel: terminal.branchLabel,
+    projectLabel: terminal.projectLabel,
+    status: terminal.status,
+    lifecycleState: terminal.lifecycleState,
+    attentionKind: terminal.attentionKind,
+    activeRuntimeSeconds: terminal.activeRuntimeSeconds,
+    runtimeSequence: terminal.runtimeSequence,
+    hidden: terminal.hidden,
+    createdAt: terminal.createdAt,
+    lastActivityAt: terminal.lastActivityAt,
+    sequence: terminal.sequence,
+    outputCursor,
+    oldestCursor: terminal.oldestCursor,
+    nextCursor: terminal.nextCursor,
+    dimensions: terminal.dimensions,
+    bridge: terminal.bridge,
+    bridgeError: terminal.bridgeError,
+    exitCode: terminal.exitCode,
+    signal: terminal.signal,
+    error: terminal.error,
+    providerResult: terminal.providerResult,
+    bridgeStatus: terminal.bridgeStatus,
+  };
+}
+
+function normalizedStatus(terminal) {
+  return {
+    terminalId: terminal.id,
+    status: terminal.status,
+    lifecycleState: terminal.lifecycleState,
+    attentionKind: terminal.attentionKind,
+    activeRuntimeSeconds: terminal.activeRuntimeSeconds,
+    runtimeSequence: terminal.runtimeSequence,
+    sequence: terminal.sequence,
+    hidden: terminal.hidden,
+    dimensions: terminal.dimensions,
+    bridge: terminal.bridge,
+    bridgeError: terminal.bridgeError,
+  };
+}
+
+function normalizedExit(terminal) {
+  return {
+    terminalId: terminal.id,
+    status: terminal.status,
+    lifecycleState: terminal.lifecycleState,
+    attentionKind: terminal.attentionKind,
+    activeRuntimeSeconds: terminal.activeRuntimeSeconds,
+    runtimeSequence: terminal.runtimeSequence,
+    sequence: terminal.sequence,
+    code: terminal.exitCode,
+    signal: terminal.signal,
+    error: terminal.error,
+    providerResult: terminal.providerResult,
+    bridgeStatus: terminal.bridgeStatus,
+    bridgeError: terminal.bridgeError,
+    nextCursor: terminal.nextCursor,
+  };
+}
+
+function rendererSender(senderId) {
+  return BrowserWindow.getAllWindows().find(
+    (window) =>
+      !window.isDestroyed() &&
+      !window.webContents.isDestroyed() &&
+      window.webContents.id === senderId,
+  )?.webContents;
+}
+
+function resetRendererDeliveries(senderId) {
+  for (const key of terminalDeliveries.keys())
+    if (key.startsWith(`${senderId}:`)) terminalDeliveries.delete(key);
+}
+
+function releaseRenderer(senderId) {
+  readyRenderers.delete(senderId);
+  rendererTerminals.delete(senderId);
+  resetRendererDeliveries(senderId);
 }
 
 function getActiveTerminalClaims(project) {
   const leases = new Set();
-  for (const t of terminalManager.terminals.values()) {
+  for (const t of terminalDaemon?.inventory.values() ?? []) {
     if (
       t.project === project &&
       ['starting', 'running', 'waiting', 'stopping'].includes(t.status)
@@ -459,46 +712,164 @@ async function readWorkspaceProjection(project) {
   }
 }
 
-function escalateStop(child, managed) {
-  if (!child || managed.finalized || managed._stopTimers?.length > 0) return;
-  const control = child.stdio[3];
-
-  // 1. Interrupt
-  safeStreamWrite(control, terminalControlFrame('interrupt'));
-
-  // 2. Terminate after 2s
-  const terminateTimer = globalThis.setTimeout(() => {
-    if (!managed.finalized)
-      safeStreamWrite(child.stdio[3], terminalControlFrame('terminate'));
-  }, 2000);
-
-  // 3. Kill after 4s
-  const killTimer = globalThis.setTimeout(() => {
-    if (!managed.finalized)
-      safeStreamWrite(child.stdio[3], terminalControlFrame('kill'));
-  }, 4000);
-
-  managed._stopTimers = [terminateTimer, killTimer];
+function sendPendingExit(sender, terminalId, delivery) {
+  if (
+    !delivery.pendingExit ||
+    delivery.inFlight ||
+    delivery.cursor < delivery.pendingExit.nextCursor
+  )
+    return false;
+  const terminal = delivery.pendingExit;
+  delivery.pendingExit = null;
+  sender.send('relay:terminal-exit', normalizedExit(terminal));
+  return true;
 }
 
-function flushTerminalOutput(managed) {
-  const batch = terminalManager.takePendingOutput(managed.id);
-  if (batch && managed._send) {
-    managed._send('relay:terminal-data', {
-      terminalId: managed.id,
-      data: batch.data,
-      sequence: batch.sequence,
-    });
-    return;
-  }
+async function pumpTerminal(sender, terminalId) {
   if (
-    managed.pendingExit &&
-    !managed.awaitingOutputAck &&
-    managed.pendingOutputSize === 0
-  ) {
-    managed._send?.('relay:terminal-exit', managed.pendingExit);
-    managed.pendingExit = null;
+    sender.isDestroyed() ||
+    !readyRenderers.has(sender.id) ||
+    !rendererTerminals.get(sender.id)?.has(terminalId)
+  )
+    return;
+  const key = deliveryKey(sender.id, terminalId);
+  const delivery = terminalDeliveries.get(key);
+  if (!delivery || delivery.pumping || delivery.inFlight) return;
+  if (sendPendingExit(sender, terminalId, delivery)) return;
+  delivery.pumping = true;
+  try {
+    const batch = await terminalDaemon.attach(terminalId, delivery.cursor);
+    if (
+      terminalDeliveries.get(key) !== delivery ||
+      sender.isDestroyed() ||
+      !readyRenderers.has(sender.id)
+    )
+      return;
+    delivery.targetCursor = Math.max(delivery.targetCursor, batch.nextCursor);
+    if (!batch.data && !batch.truncated) {
+      sendPendingExit(sender, terminalId, delivery);
+      return;
+    }
+    delivery.inFlight = {
+      startCursor: batch.startCursor,
+      endCursor: batch.endCursor,
+    };
+    sender.send('relay:terminal-data', {
+      terminalId,
+      dataBase64: batch.data,
+      startCursor: batch.startCursor,
+      endCursor: batch.endCursor,
+      nextCursor: batch.nextCursor,
+      truncated: batch.truncated,
+    });
+  } catch (error) {
+    if (error?.code !== 'not_found' && error?.daemonCode !== 'not_found')
+      scheduleDaemonReconnect();
+  } finally {
+    delivery.pumping = false;
   }
+}
+
+function wakeTerminalOwners(terminalId, nextCursor) {
+  for (const [senderId, terminalIds] of rendererTerminals) {
+    if (!terminalIds.has(terminalId)) continue;
+    const delivery = terminalDeliveries.get(deliveryKey(senderId, terminalId));
+    if (delivery && Number.isSafeInteger(nextCursor))
+      delivery.targetCursor = Math.max(delivery.targetCursor, nextCursor);
+    const sender = rendererSender(senderId);
+    if (sender) void pumpTerminal(sender, terminalId);
+  }
+}
+
+function forwardTerminalStatus(terminal) {
+  for (const [senderId, terminalIds] of rendererTerminals) {
+    if (!terminalIds.has(terminal.id) || !readyRenderers.has(senderId))
+      continue;
+    rendererSender(senderId)?.send(
+      'relay:terminal-status',
+      normalizedStatus(terminal),
+    );
+  }
+}
+
+function queueTerminalExit(terminal) {
+  for (const [senderId, terminalIds] of rendererTerminals) {
+    if (!terminalIds.has(terminal.id)) continue;
+    const key = deliveryKey(senderId, terminal.id);
+    const delivery = terminalDeliveries.get(key);
+    if (!delivery) continue;
+    delivery.pendingExit = terminal;
+    delivery.targetCursor = Math.max(
+      delivery.targetCursor,
+      terminal.nextCursor,
+    );
+    const sender = rendererSender(senderId);
+    if (sender) {
+      const window = BrowserWindow.fromWebContents(sender);
+      if (terminal.provider !== 'shell') {
+        const success = terminal.status === 'completed';
+        showNativeNotification(
+          window,
+          success ? 'agent-success' : 'agent-failure',
+          { provider: terminal.provider },
+          success,
+        );
+      }
+      void pumpTerminal(sender, terminal.id);
+    }
+  }
+}
+
+function scheduleDaemonReconnect() {
+  if (daemonReconnectTimer || !terminalDaemon || terminalDaemon.connected)
+    return;
+  daemonReconnectTimer = globalThis.setTimeout(async () => {
+    daemonReconnectTimer = null;
+    try {
+      await terminalDaemon.connectOrStart();
+    } catch {
+      scheduleDaemonReconnect();
+    }
+  }, 250);
+}
+
+function wireTerminalDaemon() {
+  terminalDaemon.on('output_available', (event) =>
+    wakeTerminalOwners(event.terminalId, event.nextCursor),
+  );
+  for (const eventName of ['status', 'resized', 'interrupted', 'hidden'])
+    terminalDaemon.on(eventName, (event) => {
+      if (!event.terminal) return;
+      forwardTerminalStatus(event.terminal);
+    });
+  terminalDaemon.on('exit', (event) => {
+    if (event.terminal) queueTerminalExit(event.terminal);
+  });
+  terminalDaemon.on('forgotten', (event) => {
+    for (const terminalIds of rendererTerminals)
+      terminalIds[1].delete(event.terminalId);
+  });
+  terminalDaemon.on('connected', () => {
+    reconcileDaemonProjects();
+    for (const [senderId, terminalIds] of rendererTerminals) {
+      const sender = rendererSender(senderId);
+      if (!sender) continue;
+      for (const terminalId of terminalIds) {
+        const terminal = terminalDaemon.inventory.get(terminalId);
+        const delivery = terminalDeliveries.get(
+          deliveryKey(senderId, terminalId),
+        );
+        if (!terminal || !delivery) continue;
+        delivery.targetCursor = Math.max(
+          delivery.targetCursor,
+          terminal.nextCursor,
+        );
+        if (finalTerminal(terminal.status)) delivery.pendingExit = terminal;
+        void pumpTerminal(sender, terminalId);
+      }
+    }
+  });
+  terminalDaemon.on('disconnected', scheduleDaemonReconnect);
 }
 
 function terminalPreflight(project) {
@@ -518,167 +889,62 @@ function terminalPreflight(project) {
   return null;
 }
 
-function startTerminal(event, project, command, agent, size, selection) {
+async function startTerminal(event, project, command, agent, size, selection) {
   const shellSession = command === 'shell';
   if (!shellSession) {
     const preflight = terminalPreflight(project);
     if (preflight) return preflight;
   }
   const workspaceId = selection.workspace || 'default';
-
-  if (workspaceId !== 'default' && command !== 'run') {
+  if (workspaceId !== 'default' && command !== 'run' && command !== 'resume')
     return {
       ok: false,
       output: `The '${command}' command does not support workspace launches.`,
     };
-  }
-
-  let managed;
   try {
-    managed = terminalManager.reserveTerminal(
-      event.sender.id,
-      workspaceId,
-      selection.branchLabel ||
-        (workspaceId === 'default' ? 'main' : workspaceId),
+    const terminal = await terminalDaemon.start({
       project,
+      kind: shellSession ? 'shell' : 'agent',
+      command,
       agent,
-    );
-  } catch (err) {
-    return { ok: false, output: err.message };
-  }
-
-  const terminalId = managed.id;
-
-  const pathValue = [
-    path.join(app.getPath('home'), '.local', 'bin'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin',
-  ].join(':');
-  const { cols, rows } = terminalSize(size);
-  const bridgeCommand = shellSession
-    ? [loginShellPath(), '-l']
-    : [
-        nodePath(),
-        cliPath(),
-        command,
-        agent,
-        ...(command === 'resume'
-          ? selection.resumeTargetKind === 'latest'
-            ? ['--latest']
-            : selection.resumeTargetKind === 'id'
-              ? ['--id', selection.resumeTargetValue]
-              : ['--picker']
-          : []),
-        ...(command === 'resume' && selection.fork ? ['--fork'] : []),
-        ...(selection.model ? ['--model', selection.model] : []),
-        ...(selection.effort ? ['--effort', selection.effort] : []),
-        ...(selection.workspace ? ['--workspace', selection.workspace] : []),
-        '--operation-id',
-        terminalId,
-        '--terminal-id',
-        terminalId,
-      ];
-
-  let child;
-  try {
-    child = spawn('/usr/bin/python3', [ptyBridgePath(), ...bridgeCommand], {
-      cwd: project,
-      env: {
-        ...process.env,
-        PATH: pathValue,
-        RELAY_COLS: String(cols),
-        RELAY_ROWS: String(rows),
-        RELAY_SIGNAL_PROCESS_GROUP: shellSession ? '1' : '0',
-        TERM: process.env.TERM ?? 'xterm-256color',
-      },
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      workspaceId,
+      branchLabel:
+        selection.branchLabel ||
+        (workspaceId === 'default' ? 'main' : workspaceId),
+      model: selection.model,
+      effort: selection.effort,
+      resumeTargetKind: selection.resumeTargetKind,
+      resumeTargetValue: selection.resumeTargetValue,
+      fork: selection.fork === true,
+      shell: loginShellPath(),
+      size: terminalSize(size),
     });
-    if (!terminalManager.attachChild(terminalId, child)) {
-      child.kill();
-      throw new Error('Could not attach the terminal process.');
-    }
+    terminalDaemon.inventory.set(terminal.id, terminal);
+    if (!rendererTerminals.has(event.sender.id))
+      rendererTerminals.set(event.sender.id, new Set());
+    rendererTerminals.get(event.sender.id).add(terminal.id);
+    terminalDeliveries.set(deliveryKey(event.sender.id, terminal.id), {
+      cursor: terminal.oldestCursor ?? 0,
+      targetCursor: terminal.nextCursor ?? 0,
+      inFlight: null,
+      pumping: false,
+      pendingExit: finalTerminal(terminal.status) ? terminal : null,
+    });
+    void pumpTerminal(event.sender, terminal.id);
+    return {
+      ok: true,
+      terminalId: terminal.id,
+      terminal: publicRendererTerminal(terminal),
+      output: shellSession
+        ? 'Opened a shell terminal.'
+        : `Started ${agent} in the Relay terminal.`,
+    };
   } catch (error) {
-    terminalManager.cancelReservation(terminalId);
     return {
       ok: false,
       output: error instanceof Error ? error.message : String(error),
     };
   }
-  for (const stream of [
-    child.stdin,
-    child.stdout,
-    child.stderr,
-    child.stdio[3],
-  ])
-    stream?.on('error', () => undefined);
-  const window = BrowserWindow.fromWebContents(event.sender);
-
-  const send = (channel, payload) => {
-    if (!event.sender.isDestroyed()) event.sender.send(channel, payload);
-  };
-  managed._send = send;
-
-  const relayOutput = (stream) => (dataBuf) => {
-    if (managed.status === 'starting') {
-      const sequence = terminalManager.setStatus(terminalId, 'running');
-      send('relay:terminal-status', {
-        terminalId,
-        status: 'running',
-        sequence,
-      });
-    }
-    const res = terminalManager.appendOutput(terminalId, dataBuf, stream);
-    if (!res) return;
-    flushTerminalOutput(managed);
-  };
-
-  child.stdout.on('data', relayOutput('stdout'));
-  child.stderr.on('data', relayOutput('stderr'));
-
-  const finalize = (code, signal, error) => {
-    terminalManager.flushOutput(terminalId);
-    if (!terminalManager.finalize(terminalId, code, signal, error)) return;
-
-    if (managed._stopTimers) {
-      for (const t of managed._stopTimers) globalThis.clearTimeout(t);
-      managed._stopTimers = [];
-    }
-
-    managed.pendingExit = {
-      terminalId,
-      code,
-      signal,
-      error,
-      status: managed.status,
-      sequence: managed.sequence,
-    };
-    flushTerminalOutput(managed);
-
-    if (!shellSession) {
-      const success = managed.status === 'completed';
-      showNativeNotification(
-        window,
-        success ? 'agent-success' : 'agent-failure',
-        { provider: agent },
-        success,
-      );
-    }
-  };
-
-  child.once('error', (error) => finalize(null, null, error.message));
-  child.once('close', (code, signal) => finalize(code, signal, null));
-  const terminal = terminalManager
-    .inventory(event.sender.id)
-    .find((item) => item.id === terminalId);
-  return {
-    ok: true,
-    terminalId,
-    terminal,
-    output: shellSession
-      ? 'Opened a shell terminal.'
-      : `Started ${agent} in the Relay terminal.`,
-  };
 }
 
 function registerIpc() {
@@ -781,10 +1047,22 @@ function registerIpc() {
   ipcMain.handle('relay:dashboard', async (_event, request) => {
     if (!request || !validProject(request.project))
       return { ok: false, output: 'Invalid project.' };
+    const reconciliation = await runCli(request.project, 'reconcile', [
+      '--json',
+      ...daemonReconciliationArgs(),
+    ]);
     const result = await runCli(request.project, 'status', ['--json']);
     if (!result.ok) return result;
     try {
-      return { ok: true, data: JSON.parse(result.stdout) };
+      return {
+        ok: true,
+        data: {
+          ...JSON.parse(result.stdout),
+          reconciliation: reconciliation.ok
+            ? JSON.parse(reconciliation.stdout)
+            : [],
+        },
+      };
     } catch {
       return { ok: false, output: 'Could not read structured task status.' };
     }
@@ -821,21 +1099,36 @@ function registerIpc() {
     });
   });
   ipcMain.handle('relay:interactive', async (event, request) => {
+    let adapterCapabilities;
+    if (request?.command === 'resume' && agents.has(request.agent)) {
+      const catalogResult = await runCli(request.project, 'agents', ['--json']);
+      try {
+        adapterCapabilities = catalogResult.ok
+          ? JSON.parse(catalogResult.stdout).agents?.find(
+              (entry) => entry.id === request.agent,
+            )
+          : undefined;
+      } catch {
+        adapterCapabilities = undefined;
+      }
+    }
     if (
       !request ||
       !validProject(request.project) ||
       !['run', 'switch', 'resume'].includes(request.command) ||
       !agents.has(request.agent) ||
       (request.command === 'resume' &&
-        !['claude', 'codex'].includes(request.agent)) ||
-      (request.command === 'resume' &&
         !['latest', 'picker', 'id'].includes(request.resumeTargetKind)) ||
+      (request.command === 'resume' &&
+        !adapterCapabilities?.resumeCapabilities?.targets?.includes(
+          request.resumeTargetKind,
+        )) ||
       (request.resumeTargetKind === 'id' &&
         (typeof request.resumeTargetValue !== 'string' ||
           !validSelection(request.resumeTargetValue))) ||
       (request.command === 'resume' &&
-        request.agent === 'codex' &&
-        request.fork === true) ||
+        request.fork === true &&
+        adapterCapabilities?.resumeCapabilities?.supportsFork !== true) ||
       !validSelection(request.model) ||
       !validSelection(request.effort, 20) ||
       (request.workspace !== undefined &&
@@ -991,105 +1284,149 @@ function registerIpc() {
 
   ipcMain.on('relay:set-active-project', setActiveProject);
   ipcMain.on('relay:terminal-input', (event, request) => {
-    const child = ownedTerminal(event, request?.terminalId)?.child;
     if (
-      child?.stdin.writable &&
+      ownedTerminal(event, request?.terminalId) &&
       typeof request?.data === 'string' &&
       request.data.length <= 65_536
     )
-      safeStreamWrite(child.stdin, request.data);
+      void terminalDaemon
+        .write(request.terminalId, request.data)
+        .catch(scheduleDaemonReconnect);
   });
   ipcMain.on('relay:terminal-resize', (event, request) => {
-    const child = ownedTerminal(event, request?.terminalId)?.child;
-    const control = child?.stdio[3];
-    if (control?.writable) {
-      const { cols, rows } = terminalSize(request?.size);
-      safeStreamWrite(
-        control,
-        `${JSON.stringify({ action: 'resize', cols, rows })}\n`,
-      );
-    }
+    if (!ownedTerminal(event, request?.terminalId)) return;
+    void terminalDaemon
+      .resize(request.terminalId, terminalSize(request?.size))
+      .catch(scheduleDaemonReconnect);
   });
-
-  ipcMain.on('relay:terminal-output-ack', (event, request) => {
+  ipcMain.on('relay:terminal-attention', (event, request) => {
     const terminal = ownedTerminal(event, request?.terminalId);
     if (
       !terminal ||
-      !terminalManager.acknowledgeOutput(
-        terminal.id,
-        request?.sequence,
-        event.sender.id,
-      )
+      terminal.provider === 'shell' ||
+      finalTerminal(terminal.status)
     )
       return;
-    flushTerminalOutput(terminal);
+    void terminalDaemon
+      .setWaiting(terminal.id, 'input')
+      .catch(scheduleDaemonReconnect);
   });
-
-  ipcMain.handle('relay:terminal-stop', (event, request) => {
-    const t = ownedTerminal(event, request?.terminalId);
-    if (!t || !t.child)
+  ipcMain.on('relay:terminal-output-ack', (event, request) => {
+    const terminal = ownedTerminal(event, request?.terminalId);
+    const delivery = terminalDeliveries.get(
+      deliveryKey(event.sender.id, request?.terminalId),
+    );
+    if (!terminal || !delivery?.inFlight) return;
+    const cursor = request?.cursor ?? request?.sequence;
+    if (cursor !== delivery.inFlight.endCursor) return;
+    delivery.cursor = cursor;
+    delivery.inFlight = null;
+    void pumpTerminal(event.sender, terminal.id);
+  });
+  ipcMain.handle('relay:terminal-stop', async (event, request) => {
+    const terminal = ownedTerminal(event, request?.terminalId);
+    if (!terminal || finalTerminal(terminal.status))
       return { ok: false, output: 'No terminal session is running.' };
-    const sequence = terminalManager.setStatus(t.id, 'stopping');
-    t._send?.('relay:terminal-status', {
-      terminalId: t.id,
-      status: 'stopping',
-      sequence,
-    });
-    escalateStop(t.child, t);
-    return { ok: true, output: 'Stop escalation initiated.' };
+    try {
+      await terminalDaemon.stop(terminal.id);
+      return { ok: true, output: 'Stop escalation initiated.' };
+    } catch (error) {
+      scheduleDaemonReconnect();
+      return {
+        ok: false,
+        output: error instanceof Error ? error.message : String(error),
+      };
+    }
   });
-
-  ipcMain.handle('relay:terminal-inventory', (event) => {
-    return terminalManager.inventory(event.sender.id);
+  ipcMain.handle('relay:terminal-inventory', async (event) => {
+    const inventory = await terminalDaemon.refreshInventory();
+    if (!rendererTerminals.has(event.sender.id))
+      rendererTerminals.set(event.sender.id, new Set());
+    const owned = rendererTerminals.get(event.sender.id);
+    const available = [];
+    resetRendererDeliveries(event.sender.id);
+    for (const terminal of inventory) {
+      const ownerId = terminalOwnerId(terminal.id);
+      if (ownerId !== null && ownerId !== event.sender.id) continue;
+      owned.add(terminal.id);
+      const cursor = terminal.oldestCursor ?? 0;
+      terminalDeliveries.set(deliveryKey(event.sender.id, terminal.id), {
+        cursor,
+        targetCursor: terminal.nextCursor ?? cursor,
+        inFlight: null,
+        pumping: false,
+        pendingExit: finalTerminal(terminal.status) ? terminal : null,
+      });
+      available.push(publicRendererTerminal(terminal, cursor));
+    }
+    for (const terminalId of [...owned])
+      if (!available.some((terminal) => terminal.id === terminalId))
+        owned.delete(terminalId);
+    return available;
   });
-
   ipcMain.on('relay:renderer-ready', (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window || window.isDestroyed()) return;
     readyRenderers.add(event.sender.id);
+    for (const terminalId of rendererTerminals.get(event.sender.id) ?? [])
+      void pumpTerminal(event.sender, terminalId);
     flushDeepLinkIntents();
   });
-
-  ipcMain.handle('relay:terminal-close', (event, request) => {
-    return {
-      ok: terminalManager.remove(request?.terminalId, event.sender.id),
-    };
-  });
-
-  ipcMain.handle('relay:terminal-hide', (event, request) => {
-    const t = ownedTerminal(event, request?.terminalId);
-    if (t) {
-      terminalManager.setHidden(t.id, true, event.sender.id);
+  ipcMain.handle('relay:terminal-close', async (event, request) => {
+    const terminal = ownedTerminal(event, request?.terminalId);
+    if (!terminal || !finalTerminal(terminal.status)) return { ok: false };
+    try {
+      await terminalDaemon.forget(terminal.id);
+      rendererTerminals.get(event.sender.id)?.delete(terminal.id);
+      terminalDeliveries.delete(deliveryKey(event.sender.id, terminal.id));
       return { ok: true };
+    } catch {
+      return { ok: false };
     }
-    return { ok: false };
   });
-
-  ipcMain.handle('relay:terminal-show', (event, request) => {
+  ipcMain.handle('relay:terminal-hide', async (event, request) => {
     const terminal = ownedTerminal(event, request?.terminalId);
     if (!terminal) return { ok: false };
-    terminalManager.setHidden(terminal.id, false, event.sender.id);
-    return { ok: true };
-  });
-
-  ipcMain.handle('relay:terminal-interrupt', (event, request) => {
-    const t = ownedTerminal(event, request?.terminalId);
-    if (!t || !t.child)
-      return { ok: false, output: 'No terminal session is running.' };
-    const control = t.child.stdio[3];
-    if (safeStreamWrite(control, terminalControlFrame('interrupt'))) {
-      return { ok: true, output: 'Interrupt sent.' };
+    try {
+      await terminalDaemon.setHidden(terminal.id, true);
+      return { ok: true };
+    } catch {
+      return { ok: false };
     }
-    return { ok: false, output: 'Cannot send interrupt.' };
+  });
+  ipcMain.handle('relay:terminal-show', async (event, request) => {
+    const terminal = ownedTerminal(event, request?.terminalId);
+    if (!terminal) return { ok: false };
+    try {
+      await terminalDaemon.setHidden(terminal.id, false);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+  ipcMain.handle('relay:terminal-interrupt', async (event, request) => {
+    const terminal = ownedTerminal(event, request?.terminalId);
+    if (!terminal || finalTerminal(terminal.status))
+      return { ok: false, output: 'No terminal session is running.' };
+    try {
+      await terminalDaemon.interrupt(terminal.id);
+      return { ok: true, output: 'Interrupt sent.' };
+    } catch {
+      return { ok: false, output: 'Cannot send interrupt.' };
+    }
   });
 }
 
-function stopOwnedTerminals(ownerWebContentsId) {
-  for (const terminal of terminalManager.getAllForOwner(ownerWebContentsId)) {
-    if (terminal.finalized || !terminal.child) continue;
-    terminalManager.setStatus(terminal.id, 'stopping');
-    escalateStop(terminal.child, terminal);
-  }
+// macOS composites the vibrancy material behind the web contents, so the
+// window background stays clear and the renderer paints its own scrims on
+// top. Every other platform keeps the original opaque background.
+function windowMaterial() {
+  if (process.platform !== 'darwin') return { backgroundColor: '#000000' };
+  return {
+    backgroundColor: '#00000000',
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+  };
 }
 
 function createWindow() {
@@ -1099,7 +1436,8 @@ function createWindow() {
     minWidth: 720,
     minHeight: 560,
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#000000',
+    ...windowMaterial(),
+    show: false,
     webPreferences: {
       preload: path.join(here, 'preload.cjs'),
       contextIsolation: true,
@@ -1107,34 +1445,24 @@ function createWindow() {
       sandbox: true,
     },
   });
+  // Without an opaque background, showing before first paint reveals the bare
+  // vibrancy material. Every caller either waits for this or shows explicitly.
+  window.once('ready-to-show', () => {
+    if (!window.isDestroyed()) window.show();
+  });
   const senderId = window.webContents.id;
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.on('did-start-loading', () => {
     readyRenderers.delete(senderId);
+    resetRendererDeliveries(senderId);
   });
   window.webContents.on('render-process-gone', () => {
-    readyRenderers.delete(senderId);
-    stopOwnedTerminals(senderId);
-  });
-  window.on('close', (event) => {
-    const running = terminalManager.runningCount();
-    if (running === 0) return;
-    event.preventDefault();
-    dialog.showMessageBoxSync(window, {
-      type: 'warning',
-      title: 'Providers still running',
-      message: `Stop the active providers before closing Rirei. (${running} active)`,
-      detail:
-        'Closing now would make process ownership uncertain and could leave the provider writing without a controller.',
-      buttons: ['Keep Rirei Open'],
-      defaultId: 0,
-    });
+    releaseRenderer(senderId);
   });
   window.webContents.once('destroyed', () => {
-    readyRenderers.delete(senderId);
     clearUsageSubscription(senderId);
-    stopOwnedTerminals(senderId);
+    releaseRenderer(senderId);
   });
   window.loadFile(path.join(here, 'renderer', 'index.html'));
   return window;
@@ -1161,10 +1489,7 @@ function availableRireiWindow() {
 }
 
 function ownerWindow(terminalId) {
-  const ownerWebContentsId = terminalOwnerWebContentsId(
-    terminalManager.terminals,
-    terminalId,
-  );
+  const ownerWebContentsId = terminalOwnerId(terminalId);
   if (ownerWebContentsId === null) return null;
   return (
     BrowserWindow.getAllWindows().find(
@@ -1175,10 +1500,7 @@ function ownerWindow(terminalId) {
 }
 
 function deliverDeepLinkIntent(intent) {
-  const ownerWebContentsId = terminalOwnerWebContentsId(
-    terminalManager.terminals,
-    intent.terminalId,
-  );
+  const ownerWebContentsId = terminalOwnerId(intent.terminalId);
   const terminalWindow =
     ownerWebContentsId === null ? null : ownerWindow(intent.terminalId);
   const found = terminalWindow !== null;
@@ -1250,16 +1572,38 @@ if (!gotTheLock) {
     if (queueDeepLinksFromArgv(commandLine) === 0) focusAvailableRireiWindow();
   });
 
-  app.whenReady().then(() => {
-    registerIpc();
-    appReady = true;
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    flushDeepLinkIntents();
-    app.on('activate', () => {
+  app
+    .whenReady()
+    .then(async () => {
+      const runtime = daemonRuntimePaths();
+      terminalDaemon = new TerminalDaemonClient({
+        executable: process.execPath,
+        runAsNode: true,
+        entry: daemonEntryPath(),
+        bridgePath: ptyBridgePath(),
+        cliPath: cliPath(),
+        nodePath: nodePath(),
+        pathValue: providerPath(),
+        ...runtime,
+      });
+      wireTerminalDaemon();
+      await terminalDaemon.connectOrStart();
+      registerIpc();
+      appReady = true;
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
       flushDeepLinkIntents();
+      app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        flushDeepLinkIntents();
+      });
+    })
+    .catch((error) => {
+      dialog.showErrorBox(
+        'Rirei could not start',
+        error instanceof Error ? error.message : String(error),
+      );
+      app.quit();
     });
-  });
 
   app.on('before-quit', () => {
     appReady = false;
@@ -1268,6 +1612,11 @@ if (!gotTheLock) {
       clearUsageSubscription(senderId);
     for (const notification of liveNotifications) notification.close();
     liveNotifications.clear();
+    if (daemonReconnectTimer) {
+      globalThis.clearTimeout(daemonReconnectTimer);
+      daemonReconnectTimer = null;
+    }
+    terminalDaemon?.disconnect();
   });
 
   app.on('window-all-closed', () => app.quit());

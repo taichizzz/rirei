@@ -91,6 +91,9 @@ self-contained artifact.
 `electron-builder` config lives in `package.json` under `build`:
 
 - `files`: `desktop/**/*` and `package.json` (this includes `renderer/vendor/`).
+- `files` explicitly excludes Python `__pycache__`, `.pyc`, and `.pyo` artifacts.
+- `asarUnpack`: exposes the detached terminal-daemon entry and static import closure plus
+  `pty_bridge.py`, because Node and Python execute those files outside `app.asar`.
 - `extraResources`: copies `dist/index.cjs` to `cli/index.cjs`, exactly matching `cliPath()`.
 - `mac.target`: `dmg` and `zip`.
 

@@ -82,9 +82,34 @@ describe('provider plan usage', () => {
     );
     const settings = JSON.parse(await readFile(settingsPath!, 'utf8')) as {
       statusLine: { command: string; refreshInterval?: number };
+      hooks: Record<
+        string,
+        Array<{
+          matcher: string;
+          hooks: Array<{ type: string; command: string; timeout: number }>;
+        }>
+      >;
     };
     expect(settings.statusLine.command).toContain('claude-usage.cjs');
     expect(settings.statusLine.refreshInterval).toBeUndefined();
+    expect(settings.hooks.PermissionRequest?.[0]).toMatchObject({
+      matcher: '',
+      hooks: [
+        expect.objectContaining({
+          type: 'command',
+          command: expect.stringContaining('needs_permission'),
+          timeout: 2,
+        }),
+      ],
+    });
+    expect(settings.hooks.PreToolUse?.[0]).toMatchObject({
+      matcher: 'AskUserQuestion',
+      hooks: [
+        expect.objectContaining({
+          command: expect.stringContaining('waiting_for_input'),
+        }),
+      ],
+    });
     expect(await stat(path.dirname(settingsPath!))).toMatchObject({
       mode: 0o40700,
     });
@@ -221,14 +246,15 @@ describe('provider plan usage', () => {
     >;
     expect(stored).toMatchObject({
       provider: 'claude',
-      fiveHour: { usedPercentage: 23.5, resetsAt: 1784488616 },
-      week: { usedPercentage: 41.2, resetsAt: 1784918400 },
+      windows: {
+        five_hour: { usedPercentage: 23.5, resetsAt: 1784488616 },
+        seven_day: { usedPercentage: 41.2, resetsAt: 1784918400 },
+      },
     });
     expect(Object.keys(stored).sort()).toEqual([
       'capturedAt',
-      'fiveHour',
       'provider',
-      'week',
+      'windows',
     ]);
     expect(await readFile(outputPath, 'utf8')).not.toMatch(
       /session|transcript|prompt|secret/,
@@ -237,7 +263,7 @@ describe('provider plan usage', () => {
     expect((await stat(path.dirname(outputPath))).mode & 0o777).toBe(0o700);
   });
 
-  it('clamps numeric percentages and rejects nonnumeric fields and invalid resets', async () => {
+  it('rejects out-of-range percentages, nonnumeric fields, and invalid resets', async () => {
     const { root, home } = await projectAndHome();
     await prepareProviderUsage(root, 'claude', { home });
     const collector = path.join(root, '.relay', 'runtime', 'claude-usage.cjs');
@@ -254,10 +280,11 @@ describe('provider plan usage', () => {
       await readFile(claudeProviderUsagePath({ home }), 'utf8'),
     ) as Record<string, unknown>;
     expect(stored).toMatchObject({
-      fiveHour: { usedPercentage: 0 },
+      provider: 'claude',
+      status: 'error',
+      reason: 'invalid_rate_limits',
     });
-    expect(stored).not.toHaveProperty('fiveHour.resetsAt');
-    expect(stored).not.toHaveProperty('week');
+    expect(stored).not.toHaveProperty('windows');
   });
 
   it('does not refresh unchanged Claude values but updates changed values', async () => {
@@ -268,7 +295,7 @@ describe('provider plan usage', () => {
     await runCollector(collector, claudePayload(20));
     const first = JSON.parse(await readFile(outputPath, 'utf8')) as {
       capturedAt: string;
-      fiveHour: { usedPercentage: number };
+      windows: { five_hour: { usedPercentage: number } };
     };
     await new Promise((resolve) => setTimeout(resolve, 20));
     await runCollector(collector, claudePayload(20));
@@ -281,10 +308,10 @@ describe('provider plan usage', () => {
     await runCollector(collector, claudePayload(21));
     const changed = JSON.parse(await readFile(outputPath, 'utf8')) as {
       capturedAt: string;
-      fiveHour: { usedPercentage: number };
+      windows: { five_hour: { usedPercentage: number } };
     };
     expect(changed.capturedAt).not.toBe(first.capturedAt);
-    expect(changed.fiveHour.usedPercentage).toBe(21);
+    expect(changed.windows.five_hour.usedPercentage).toBe(21);
   });
 
   it('refreshes an old unchanged Claude observation before it becomes stale', async () => {
@@ -299,8 +326,10 @@ describe('provider plan usage', () => {
       JSON.stringify({
         provider: 'claude',
         capturedAt: oldCapture,
-        fiveHour: { usedPercentage: 20, resetsAt: 1784488616 },
-        week: { usedPercentage: 41.2, resetsAt: 1784918400 },
+        windows: {
+          five_hour: { usedPercentage: 20, resetsAt: 1784488616 },
+          seven_day: { usedPercentage: 41.2, resetsAt: 1784918400 },
+        },
       }),
       { mode: 0o600 },
     );
@@ -309,13 +338,13 @@ describe('provider plan usage', () => {
 
     const refreshed = JSON.parse(await readFile(outputPath, 'utf8')) as {
       capturedAt: string;
-      fiveHour: { usedPercentage: number };
+      windows: { five_hour: { usedPercentage: number } };
     };
     expect(refreshed.capturedAt).not.toBe(oldCapture);
-    expect(refreshed.fiveHour.usedPercentage).toBe(20);
+    expect(refreshed.windows.five_hour.usedPercentage).toBe(20);
   });
 
-  it('rejects oversized input without writing a sample', async () => {
+  it('records oversized input as a sanitized collector error', async () => {
     const { root, home } = await projectAndHome();
     await prepareProviderUsage(root, 'claude', { home });
     const collector = path.join(root, '.relay', 'runtime', 'claude-usage.cjs');
@@ -324,9 +353,14 @@ describe('provider plan usage', () => {
       padding: 'x'.repeat(CLAUDE_USAGE_INPUT_MAX_BYTES),
     });
     await runCollector(collector, oversized);
-    await expect(
-      readFile(claudeProviderUsagePath({ home })),
-    ).rejects.toMatchObject({ code: 'ENOENT' });
+    const stored = JSON.parse(
+      await readFile(claudeProviderUsagePath({ home }), 'utf8'),
+    );
+    expect(stored).toMatchObject({
+      provider: 'claude',
+      status: 'error',
+      reason: 'oversized_input',
+    });
   });
 
   it('uses unique temporary files during concurrent collector runs', async () => {
@@ -340,10 +374,10 @@ describe('provider plan usage', () => {
     );
     const outputPath = claudeProviderUsagePath({ home });
     const stored = JSON.parse(await readFile(outputPath, 'utf8')) as {
-      fiveHour: { usedPercentage: number };
+      windows: { five_hour: { usedPercentage: number } };
     };
-    expect(stored.fiveHour.usedPercentage).toBeGreaterThanOrEqual(10);
-    expect(stored.fiveHour.usedPercentage).toBeLessThanOrEqual(17);
+    expect(stored.windows.five_hour.usedPercentage).toBeGreaterThanOrEqual(10);
+    expect(stored.windows.five_hour.usedPercentage).toBeLessThanOrEqual(17);
     expect(await readdir(path.dirname(outputPath))).toEqual(['claude.json']);
   });
 });

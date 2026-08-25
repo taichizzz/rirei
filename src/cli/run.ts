@@ -6,7 +6,7 @@ import { resolveWorkspace } from '../worktrees/registry.js';
 export function runCommand(): Command {
   return new Command('run')
     .description('Launch an installed official agent CLI for the current task')
-    .argument('<agent>', 'claude, codex, gemini, or antigravity')
+    .argument('<agent>', 'claude, codex, gemini, antigravity, or opencode')
     .option(
       '--prompt <prompt>',
       'use an explicit prompt instead of the Relay handoff',

@@ -3,7 +3,13 @@ import { open } from 'node:fs/promises';
 const MAX_FILE_BYTES = 512_000;
 const MAX_SESSIONS = 128;
 const MAX_STRING = 160;
-const AGENTS = new Set(['claude', 'codex', 'gemini', 'antigravity']);
+const AGENTS = new Set([
+  'claude',
+  'codex',
+  'gemini',
+  'antigravity',
+  'opencode',
+]);
 const ROLES = new Set(['implement', 'review', 'verify', 'investigate']);
 const STATUSES = new Set([
   'starting',
@@ -15,6 +21,18 @@ const STATUSES = new Set([
   'failed',
   'orphaned',
 ]);
+const LIFECYCLE_STATES = new Set([
+  'starting',
+  'working',
+  'needs_permission',
+  'waiting_for_input',
+  'stopping',
+  'completed',
+  'cancelled',
+  'failed',
+  'orphaned',
+]);
+const ATTENTION_KINDS = new Set(['permission', 'input', 'unknown']);
 
 function exactKeys(value, required, optional = []) {
   const keys = Object.keys(value);
@@ -39,23 +57,45 @@ function isoDate(value) {
   );
 }
 
-function validUsage(usage) {
+function validUsageMetric(usage) {
   return (
     usage &&
     typeof usage === 'object' &&
     !Array.isArray(usage) &&
-    exactKeys(usage, ['window', 'remainingPercentage', 'resetsAt', 'fresh']) &&
-    ['five_hour', 'week'].includes(usage.window) &&
-    typeof usage.remainingPercentage === 'number' &&
-    Number.isFinite(usage.remainingPercentage) &&
-    usage.remainingPercentage >= 0 &&
-    usage.remainingPercentage <= 100 &&
-    (usage.resetsAt === null || isoDate(usage.resetsAt)) &&
-    typeof usage.fresh === 'boolean'
+    exactKeys(
+      usage,
+      ['id', 'kind', 'unit', 'status', 'statusReason'],
+      ['window', 'used', 'remaining', 'limit', 'resetsAt'],
+    ) &&
+    boundedString(usage.id) &&
+    ['quota', 'requests', 'tokens', 'credits', 'cost'].includes(usage.kind) &&
+    ['percent', 'requests', 'tokens', 'credits', 'currency'].includes(
+      usage.unit,
+    ) &&
+    ['available', 'stale'].includes(usage.status) &&
+    ['live', 'sample_stale', 'window_expired', 'invalid_capture'].includes(
+      usage.statusReason,
+    ) &&
+    (usage.window === undefined ||
+      (usage.window &&
+        typeof usage.window === 'object' &&
+        exactKeys(usage.window, ['label'], ['durationSeconds']) &&
+        boundedString(usage.window.label) &&
+        (usage.window.durationSeconds === undefined ||
+          (Number.isInteger(usage.window.durationSeconds) &&
+            usage.window.durationSeconds > 0)))) &&
+    ['used', 'remaining', 'limit'].every(
+      (key) =>
+        usage[key] === undefined ||
+        (typeof usage[key] === 'number' && Number.isFinite(usage[key])),
+    ) &&
+    (usage.resetsAt === undefined || isoDate(usage.resetsAt))
   );
 }
 
-function validSession(session) {
+function validSession(session, schemaVersion) {
+  const runtimeRequired = schemaVersion >= 2;
+  const lifecycleRequired = schemaVersion >= 3;
   return (
     session &&
     typeof session === 'object' &&
@@ -75,8 +115,14 @@ function validSession(session) {
         'startedAt',
         'updatedAt',
         'needsAttention',
+        ...(lifecycleRequired ? ['lifecycleState'] : []),
       ],
-      ['message', 'usage'],
+      [
+        'message',
+        'usage',
+        'activeRuntimeSeconds',
+        ...(lifecycleRequired ? ['attentionKind'] : []),
+      ],
     ) &&
     boundedString(session.id) &&
     boundedString(session.runId) &&
@@ -87,11 +133,22 @@ function validSession(session) {
     boundedString(session.branchLabel) &&
     ROLES.has(session.role) &&
     STATUSES.has(session.status) &&
+    (!lifecycleRequired || LIFECYCLE_STATES.has(session.lifecycleState)) &&
+    (session.attentionKind === undefined ||
+      ATTENTION_KINDS.has(session.attentionKind)) &&
     (session.message === undefined || boundedString(session.message)) &&
     isoDate(session.startedAt) &&
     isoDate(session.updatedAt) &&
+    (!runtimeRequired || Object.hasOwn(session, 'activeRuntimeSeconds')) &&
+    (session.activeRuntimeSeconds === undefined ||
+      (typeof session.activeRuntimeSeconds === 'number' &&
+        Number.isFinite(session.activeRuntimeSeconds) &&
+        session.activeRuntimeSeconds >= 0)) &&
     typeof session.needsAttention === 'boolean' &&
-    (session.usage === undefined || validUsage(session.usage))
+    (session.usage === undefined ||
+      (Array.isArray(session.usage) &&
+        session.usage.length <= 16 &&
+        session.usage.every(validUsageMetric)))
   );
 }
 
@@ -106,12 +163,14 @@ export function validateActivitySnapshot(value) {
       'updatedAt',
       'sessions',
     ]) ||
-    value.schemaVersion !== 1 ||
+    ![1, 2, 3].includes(value.schemaVersion) ||
     !boundedString(value.instanceId) ||
     !isoDate(value.updatedAt) ||
     !Array.isArray(value.sessions) ||
     value.sessions.length > MAX_SESSIONS ||
-    !value.sessions.every(validSession)
+    !value.sessions.every((session) =>
+      validSession(session, value.schemaVersion),
+    )
   )
     return null;
   return JSON.parse(JSON.stringify(value));

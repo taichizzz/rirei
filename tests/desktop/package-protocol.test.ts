@@ -8,7 +8,24 @@ describe('packaged desktop protocol', () => {
       name: 'Rirei terminal',
       schemes: ['rirei'],
     });
-    expect(packageJson.build.asarUnpack).toContain('desktop/pty_bridge.py');
+    expect(packageJson.build.asarUnpack).toEqual([
+      'desktop/terminal-daemon.mjs',
+      'desktop/terminal-daemon-server.mjs',
+      'desktop/terminal-daemon-protocol.mjs',
+      'desktop/terminal-control.mjs',
+      'desktop/provider-lifecycle-hook.cjs',
+      'desktop/codex-lifecycle-wrapper.mjs',
+      'desktop/opencode-lifecycle-wrapper.mjs',
+      'desktop/pty_bridge.py',
+    ]);
+    expect(packageJson.build.files).toEqual(
+      expect.arrayContaining([
+        'desktop/**/*',
+        '!desktop/**/__pycache__/**',
+        '!desktop/**/*.pyc',
+        '!desktop/**/*.pyo',
+      ]),
+    );
     expect(packageJson.build.extraResources).toEqual(
       expect.arrayContaining([
         { from: 'LICENSE', to: 'LICENSE' },

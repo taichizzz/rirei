@@ -67,7 +67,7 @@ async function project(
   await mkdir(relayPath(root), { recursive: true });
   const now = new Date().toISOString();
   const state: RelayState = {
-    schemaVersion: 4,
+    schemaVersion: 8,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -118,7 +118,15 @@ function lease(
     projectRoot: root,
     agent: 'codex',
     launchMode: 'new',
-    controllerId: `terminal:${index}`,
+    controllerId: `desktop:test-boot:terminal-${index}`,
+    controller: {
+      kind: 'desktop',
+      instanceId: `terminal-${index}`,
+      bootId: 'test-boot',
+    },
+    lifecycleStatus: 'working',
+    activeRuntimeSeconds: 0,
+    runtimeSequence: 0,
     startedAt: now,
     lastSeenAt: now,
     status: 'running',
@@ -170,7 +178,7 @@ describe('global activity snapshot', () => {
     }
   });
 
-  it('writes only the exact runtime-validated schema v1 session snapshot', async () => {
+  it('writes only the exact lifecycle-validated schema v3 session snapshot', async () => {
     const base = await sandbox();
     const { root, state } = await project(base, 'schema');
     state.runs = [lease(root, 1)];
@@ -194,14 +202,16 @@ describe('global activity snapshot', () => {
       branchLabel: 'rirei/task-1',
       role: 'implement',
       status: 'working',
+      lifecycleState: 'working',
       message: 'Agent is working',
       startedAt: state.runs[0]!.startedAt,
       updatedAt: expect.any(String),
+      activeRuntimeSeconds: expect.any(Number),
       needsAttention: false,
     });
   });
 
-  it('publishes the most constrained fresh provider plan window', async () => {
+  it('publishes all sanitized provider usage windows', async () => {
     const base = await sandbox();
     const { root, state } = await project(base, 'usage');
     const now = Date.now();
@@ -228,15 +238,23 @@ describe('global activity snapshot', () => {
     );
     state.runs = [lease(root, 1, { agent: 'claude' })];
 
-    expect((await syncActivity(root, state)).sessions[0]?.usage).toEqual({
-      window: 'five_hour',
-      remainingPercentage: 20,
-      resetsAt: expect.any(String),
-      fresh: true,
-    });
+    expect((await syncActivity(root, state)).sessions[0]?.usage).toEqual([
+      expect.objectContaining({
+        id: 'fiveHour',
+        unit: 'percent',
+        remaining: 20,
+        status: 'available',
+      }),
+      expect.objectContaining({
+        id: 'week',
+        unit: 'percent',
+        remaining: 60,
+        status: 'available',
+      }),
+    ]);
   });
 
-  it('selects fresh usage before stale usage and uses a stable tie-break', () => {
+  it('preserves arbitrary fresh and stale usage metrics', () => {
     expect(
       selectActivityUsage({
         id: 'codex',
@@ -245,6 +263,16 @@ describe('global activity snapshot', () => {
         statusReason: 'live_window',
         source: 'test',
         capturedAt: new Date().toISOString(),
+        metrics: [
+          {
+            id: 'requests',
+            kind: 'requests',
+            unit: 'requests',
+            remaining: 12,
+            status: 'available',
+            statusReason: 'live',
+          },
+        ],
         fiveHour: {
           usedPercentage: 50,
           remainingPercentage: 50,
@@ -261,28 +289,30 @@ describe('global activity snapshot', () => {
         },
         detail: 'test',
       }),
-    ).toMatchObject({
-      window: 'five_hour',
-      remainingPercentage: 50,
-      fresh: true,
-    });
+    ).toEqual([
+      expect.objectContaining({
+        id: 'requests',
+        unit: 'requests',
+        remaining: 12,
+      }),
+    ]);
   });
 
-  it('rejects a future snapshot on write and replaces malformed v1 content safely', async () => {
+  it('rejects a future snapshot on write and replaces malformed v2 content safely', async () => {
     const base = await sandbox();
     const { root, state } = await project(base, 'recovery');
     state.runs = [lease(root, 1)];
     await mkdir(activityDataHome(), { recursive: true });
     await writeFile(
       activityFilePath(),
-      JSON.stringify({ schemaVersion: 2, sessions: [] }),
+      JSON.stringify({ schemaVersion: 4, sessions: [] }),
     );
     await expect(syncActivity(root, state)).rejects.toThrow(/newer/);
 
     await writeFile(
       activityFilePath(),
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         instanceId: 'malformed',
         updatedAt: new Date().toISOString(),
         sessions: [],
@@ -494,7 +524,7 @@ describe('global activity snapshot', () => {
     const heartbeat = await waitForActivity(
       (snapshot) => snapshot.updatedAt !== initial.updatedAt,
     );
-    expect(heartbeat.sessions[0]?.updatedAt).not.toBe(
+    expect(heartbeat.sessions[0]?.updatedAt).toBe(
       initial.sessions[0]?.updatedAt,
     );
 
@@ -503,9 +533,87 @@ describe('global activity snapshot', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     const cleaned = await waitForActivity(
       (snapshot) => snapshot.sessions.length === 0,
+      5_000,
     );
     await vi.advanceTimersByTimeAsync(10_000);
     expect((await readActivity())?.updatedAt).toBe(cleaned.updatedAt);
+  });
+
+  it('accumulates runtime only while a session is active', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date('2026-08-02T00:00:00.000Z'));
+    const base = await sandbox();
+    const { root, state } = await project(base, 'runtime');
+    state.runs = [lease(root, 1)];
+    await syncActivity(root, state);
+
+    vi.setSystemTime(new Date('2026-08-02T00:00:10.000Z'));
+    state.runs[0] = {
+      ...state.runs[0]!,
+      lifecycleStatus: 'waiting_for_input',
+      attentionKind: 'input',
+      activeRuntimeSeconds: 10,
+      lastSeenAt: '2026-08-02T00:00:10.000Z',
+      status: 'waiting',
+    };
+    const waiting = await syncActivity(root, state);
+    expect(waiting.sessions[0]).toMatchObject({
+      activeRuntimeSeconds: 10,
+      needsAttention: true,
+      status: 'waiting',
+      lifecycleState: 'waiting_for_input',
+      attentionKind: 'input',
+    });
+
+    vi.setSystemTime(new Date('2026-08-02T00:00:30.000Z'));
+    state.runs[0] = {
+      ...state.runs[0]!,
+      lastSeenAt: '2026-08-02T00:00:30.000Z',
+    };
+    const stillWaiting = await syncActivity(root, state);
+    expect(stillWaiting.sessions[0]?.activeRuntimeSeconds).toBe(10);
+
+    state.runs[0] = {
+      ...state.runs[0]!,
+      lifecycleStatus: 'working',
+      attentionKind: undefined,
+      lastSeenAt: '2026-08-02T00:00:30.000Z',
+      status: 'running',
+    };
+    const resumed = await syncActivity(root, state);
+    expect(resumed.sessions[0]?.activeRuntimeSeconds).toBe(10);
+
+    vi.setSystemTime(new Date('2026-08-02T00:00:35.000Z'));
+    state.runs[0] = {
+      ...state.runs[0]!,
+      activeRuntimeSeconds: 15,
+      lastSeenAt: '2026-08-02T00:00:35.000Z',
+    };
+    const working = await syncActivity(root, state);
+    expect(working.sessions[0]?.activeRuntimeSeconds).toBe(15);
+  });
+
+  it('freezes stale leases and publishes them as needing attention', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date('2026-08-02T00:00:30.000Z'));
+    const base = await sandbox();
+    const { root, state } = await project(base, 'stale-lease');
+    state.runs = [
+      lease(root, 1, {
+        startedAt: '2026-08-02T00:00:00.000Z',
+        lastSeenAt: '2026-08-02T00:00:10.000Z',
+        activeRuntimeSeconds: 10,
+      }),
+    ];
+
+    expect((await syncActivity(root, state)).sessions[0]).toMatchObject({
+      status: 'needs_attention',
+      lifecycleState: 'orphaned',
+      attentionKind: 'unknown',
+      needsAttention: true,
+      updatedAt: '2026-08-02T00:00:10.000Z',
+      activeRuntimeSeconds: 10,
+    });
   });
 
   it('retains only recent terminal-owned completed, cancelled, and failed runs', async () => {

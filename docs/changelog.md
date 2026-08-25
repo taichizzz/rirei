@@ -4,6 +4,65 @@ This file records user-visible changes made to Relay and its Rirei desktop app. 
 CLI command and `.relay/` state directory retain their existing names when the desktop app
 branding changes.
 
+## 0.1.0-alpha.3 - 2026-08-25
+
+### Translucent window material
+
+- Rirei's window is now translucent on macOS. The window requests a clear background with
+  `vibrancy: 'under-window'`, so macOS composites its own blurred material behind the app.
+  Other platforms keep the previous opaque background.
+- Renderer surfaces became graduated translucent scrims (`--chrome`, `--rail`, `--stage`,
+  `--terminal`, `--field`). The terminal stays the densest surface at 88% so agent output
+  remains readable over any desktop; macOS supplies the blur, so no surface uses
+  `backdrop-filter` for it.
+- Dialogs are unchanged in contrast. New opaque `--panel` / `--panel-inset` tokens keep modal
+  panels, checkpoint patches, and profile previews solid, and the modal veil was raised to 88%
+  to cover what the translucent window now lets through.
+- The terminal canvas is created with `allowTransparency: true`, which gives up xterm's opaque
+  background fast path; `docs/desktop.md` records how to trade the look back for throughput.
+- Added a `prefers-reduced-transparency` fallback that restores the opaque palette when macOS
+  "Reduce transparency" is enabled, and the window now waits for `ready-to-show` so it no
+  longer paints before first frame.
+
+## 2026-08-24
+
+### Daemon-authoritative provider lifecycle
+
+- Added state schema v8 and activity schema v3 with normalized provider lifecycle, explicit
+  permission/input attention, monotonic daemon-owned active runtime, and stale-observation
+  rejection. Waiting time is never inferred as work.
+- Added terminal-scoped authenticated lifecycle reporting. Claude uses official generated
+  hooks; Codex uses a capability-token-authenticated app-server observer while retaining its
+  native TUI; OpenCode uses an authenticated, byte-bounded loopback SSE/REST observer while
+  retaining its native TUI. Observers cannot answer permissions, questions, or execute terminal
+  input.
+- Added complete daemon-inventory reconciliation. Live terminals are adopted after restart;
+  absent terminals are orphaned without releasing their worktrees. Recent hash-verified terminal
+  journals let an empty daemon inventory reconcile projects that have no live terminal.
+- Updated Rirei Notch's activity decoder and collapsed status policy for schema v3, OpenCode,
+  permission waits, input waits, orphan attention, and paused active-runtime display.
+
+## 2026-08-13
+
+### OpenCode adapter, controller identity, and orphan bidding
+
+- Added an `opencode` agent adapter (`OfficialCliAdapter`): interactive launch seeds the TUI
+  composer via `--prompt`, model overrides use `provider/model` names from `opencode models`,
+  resume targets are `--continue` / `--session <id>` with fork support, and authentication
+  detection reads configured providers from `opencode auth list`. The adapter is inert until
+  the `opencode` binary is installed, which this build does not bundle.
+- Persisted schema v7: every run lease now stores a boot-qualified controller identity
+  (kind, instance ID, PID, boot ID), bridge identity and lifecycle status. Ordered v5→v6→v7
+  migrations preserve existing leases and normalize canonical ownership IDs.
+- Terminal-owning hosts and CLI launches now prove liveness with a heartbeat that stamps
+  `lastSeenAt`; leases whose owner fails the heartbeat are orphaned without a coordinator.
+  The CLI claims orphaned runs by priority-one bid before recovery.
+- Added a bounded project-keyed application-support journal recording terminal lifecycle events
+  (created/attached/status/resized/interrupted/stopped/closed/exit/recovered) so a frontend
+  can reconcile its terminal inventory after a restart.
+- `relay run` and `relay switch` now accept `opencode` as an agent. OpenCode appears in the
+  desktop agent deck and launch provider selector.
+
 ## 2026-08-10
 
 ### Compact, evidence-labelled handoffs

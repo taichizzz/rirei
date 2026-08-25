@@ -1,5 +1,5 @@
 import { TerminalTabsModel } from './terminal-tabs-model.mjs';
-/* global document, localStorage, window, Terminal, FitAddon, clearTimeout, setTimeout */
+/* global document, localStorage, window, Terminal, FitAddon */
 const tabsModel = new TerminalTabsModel();
 
 let project = localStorage.getItem('relay-project') || '';
@@ -48,6 +48,7 @@ const historySearch = document.querySelector('#historySearch');
 const historyStatus = document.querySelector('#historyStatus');
 const historyList = document.querySelector('#historyList');
 const recoverRun = document.querySelector('#recoverRun');
+const resumeRecovered = document.querySelector('#resumeRecovered');
 const checkpointModal = document.querySelector('#checkpointModal');
 const checkpointClose = document.querySelector('#checkpointClose');
 const checkpointList = document.querySelector('#checkpointList');
@@ -96,11 +97,28 @@ function createXterm(id) {
       cursorBlink: true,
       convertEol: false,
       scrollback: 5000,
+      // The canvas would paint an opaque slab over the translucent window, so
+      // it stays clear and #terminalsContainer's --terminal scrim shows
+      // through instead. This costs xterm's opaque-background fast path; set
+      // this back to false and background to '#080a09' to trade the look for
+      // that throughput.
+      allowTransparency: true,
       theme: {
-        background: '#000000',
-        foreground: '#e6e6e0',
-        cursor: '#a9ef72',
-        selectionBackground: '#2a3320',
+        background: 'rgba(0, 0, 0, 0)',
+        foreground: '#f2f2ee',
+        cursor: '#f2f2ee',
+        cursorAccent: '#000000',
+        selectionBackground: '#333333',
+        black: '#000000',
+        brightBlack: '#858580',
+        green: '#a7d45d',
+        brightGreen: '#cdf875',
+        yellow: '#e6ba62',
+        brightYellow: '#f3d28a',
+        red: '#ee907e',
+        brightRed: '#ffad9d',
+        blue: '#8cbcff',
+        brightBlue: '#b2d2ff',
       },
     });
     const f = new FitAddon.FitAddon();
@@ -114,6 +132,9 @@ function createXterm(id) {
     disposable = t.onData((data) => {
       window.relay.terminalInput(id, data);
     });
+    const bellDisposable = t.onBell(() => {
+      window.relay.terminalAttention(id);
+    });
     const focus = () => t.focus();
     container.addEventListener('click', focus);
     return {
@@ -122,6 +143,7 @@ function createXterm(id) {
       container,
       dispose: () => {
         disposable?.dispose();
+        bellDisposable?.dispose();
         container?.removeEventListener('click', focus);
         t?.dispose();
         container?.remove();
@@ -229,32 +251,81 @@ function applyTerminalEvent(event) {
     return;
   }
   if (event.type === 'data') {
-    if (!tabsModel.updateOutputSequence(event.terminalId, event.sequence)) {
-      window.relay.acknowledgeTerminalOutput(event.terminalId, event.sequence);
+    const startCursor = event.startCursor ?? terminal.outputCursor;
+    const endCursor = event.endCursor ?? event.sequence;
+    if (
+      !Number.isSafeInteger(startCursor) ||
+      !Number.isSafeInteger(endCursor) ||
+      endCursor < startCursor
+    )
+      return;
+    if (endCursor <= terminal.outputCursor) {
+      window.relay.acknowledgeTerminalOutput(
+        event.terminalId,
+        terminal.outputCursor,
+      );
       return;
     }
-    terminal.terminal.write(event.data, () =>
-      window.relay.acknowledgeTerminalOutput(event.terminalId, event.sequence),
-    );
+    const gap = event.truncated || startCursor > terminal.outputCursor;
+    const bytes = event.dataBase64
+      ? Uint8Array.from(atob(event.dataBase64), (character) =>
+          character.charCodeAt(0),
+        )
+      : event.data;
+    const acknowledge = () => {
+      tabsModel.updateOutputSequence(event.terminalId, endCursor);
+      window.relay.acknowledgeTerminalOutput(event.terminalId, endCursor);
+    };
+    const writeData = () => {
+      if (bytes?.length) terminal.terminal.write(bytes, acknowledge);
+      else acknowledge();
+    };
+    if (gap) {
+      terminal.outputCursor = startCursor;
+      terminal.terminal.write(
+        '\r\n\x1b[90m[Relay: earlier terminal output is no longer available]\x1b[0m\r\n',
+        writeData,
+      );
+    } else {
+      writeData();
+    }
     return;
   }
-  if (event.sequence <= terminal.sequence) return;
+  if (
+    event.sequence < terminal.sequence ||
+    (event.type !== 'exit' && event.sequence === terminal.sequence)
+  )
+    return;
   if (event.type === 'status') {
     tabsModel.updateMetadata(event.terminalId, {
       status: event.status,
+      hidden: event.hidden ?? terminal.metadata.hidden,
+      dimensions: event.dimensions ?? terminal.metadata.dimensions,
+      bridge: event.bridge ?? terminal.metadata.bridge,
+      bridgeError: event.bridgeError ?? terminal.metadata.bridgeError,
       sequence: event.sequence,
     });
   } else if (event.type === 'exit') {
+    if (terminal.exitPresented) return;
+    terminal.exitPresented = true;
+    const providerLabel = event.providerResult
+      ? `provider ${displayExitReason(event.providerResult.reason)}`
+      : 'provider result unknown';
+    const bridgeLabel =
+      event.bridgeStatus === 'failed' || event.bridgeError
+        ? `; terminal bridge failed${event.bridgeError ? ` (${event.bridgeError})` : ''}`
+        : '';
     terminal.terminal.write(
-      `\r\n\x1b[90m[Relay: session ended${
-        event.error ? `: ${event.error}` : ` with code ${event.code}`
-      }]\x1b[0m\r\n`,
+      `\r\n\x1b[90m[Relay: ${providerLabel}${bridgeLabel}]\x1b[0m\r\n`,
     );
     tabsModel.updateMetadata(event.terminalId, {
       status: event.status,
       exitCode: event.code,
       signal: event.signal,
       error: event.error,
+      bridgeStatus: event.bridgeStatus,
+      bridgeError: event.bridgeError,
+      providerResult: event.providerResult,
       sequence: event.sequence,
     });
     syncControls();
@@ -536,8 +607,10 @@ function syncControls() {
     );
   if (locked) {
     recoverRun.hidden = true;
+    resumeRecovered.hidden = true;
   } else {
     recoverRun.hidden = !window.hasRecoverableRun;
+    resumeRecovered.hidden = !window.recoveredRun;
   }
 }
 
@@ -575,10 +648,17 @@ function renderDashboard(data) {
   dashboardCheckpoint.title = checkpoints.length
     ? `View ${checkpoints.length} retained checkpoint${checkpoints.length === 1 ? '' : 's'}`
     : 'No retained checkpoints';
-  window.hasRecoverableRun =
-    (Array.isArray(data.runs) && data.runs.length > 0) ||
-    (Array.isArray(data.agentHistory) &&
-      data.agentHistory.some((run) => !run.endedAt));
+  const reconciliation = Array.isArray(data.reconciliation)
+    ? data.reconciliation
+    : [];
+  window.recoveryRuns = reconciliation.filter(
+    (run) => run.status === 'orphaned' || run.status === 'needs_attention',
+  );
+  window.hasRecoverableRun = window.recoveryRuns.length > 0;
+  if (window.recoveryRuns.some((run) => run.status === 'orphaned'))
+    recoverRun.textContent = 'Release worktree';
+  else if (window.recoveryRuns.length > 0)
+    recoverRun.textContent = 'Check session';
   dashboardTest.textContent = data.latestTest
     ? `${data.latestTest.status} · ${relTime(data.latestTest.createdAt)}`
     : 'Not run';
@@ -686,6 +766,7 @@ async function execute(command) {
     });
     show(result);
     await refreshDashboard();
+    return result;
   } finally {
     commandRunning = false;
     syncControls();
@@ -712,6 +793,10 @@ document
     button.addEventListener('click', () => execute(button.dataset.command)),
   );
 async function launchInteractive(command, agent, resume = {}) {
+  if (command === 'fork-latest') {
+    command = 'resume';
+    resume = { ...resume, kind: 'latest', fork: true };
+  }
   if (!project)
     return show({ ok: false, output: 'Choose a project folder first.' });
   if (commandRunning || terminalStatusPending) return false;
@@ -725,6 +810,12 @@ async function launchInteractive(command, agent, resume = {}) {
   syncControls();
   try {
     const profile = agentProfiles[agent] ?? {};
+    const catalog = await loadAgentCatalog();
+    const capabilities = catalog.find((entry) => entry.id === agent);
+    const defaultResumeKind =
+      capabilities?.resumeCapabilities?.targets?.includes('picker')
+        ? 'picker'
+        : 'latest';
 
     const result = await window.relay.interactive({
       project,
@@ -732,7 +823,7 @@ async function launchInteractive(command, agent, resume = {}) {
       agent,
       model: profile.model,
       effort: profile.effort,
-      resumeTargetKind: resume.kind ?? 'picker',
+      resumeTargetKind: resume.kind ?? defaultResumeKind,
       resumeTargetValue: resume.value,
       fork: resume.fork === true,
       workspace: resume.workspace,
@@ -825,7 +916,30 @@ openShellButton.addEventListener('click', async () => {
 });
 dashboardRefreshButton.addEventListener('click', refreshDashboard);
 recoverRun.addEventListener('click', async () => {
-  await execute('recover');
+  const orphaned = (window.recoveryRuns ?? []).filter(
+    (run) => run.status === 'orphaned',
+  );
+  if (orphaned.length === 1) {
+    const target = orphaned[0];
+    const result = await execute('recover');
+    if (result?.ok) {
+      window.recoveredRun = target;
+      resumeRecovered.hidden = false;
+    }
+  } else await refreshDashboard();
+});
+resumeRecovered.addEventListener('click', async () => {
+  const target = window.recoveredRun;
+  if (!target) return;
+  const launched = await launchInteractive('resume', target.agent, {
+    kind: target.providerSessionId ? 'id' : 'latest',
+    value: target.providerSessionId,
+    workspace: target.workspaceId,
+  });
+  if (launched) {
+    window.recoveredRun = null;
+    resumeRecovered.hidden = true;
+  }
 });
 
 /* ---- durable agent session timeline ---- */
@@ -846,7 +960,11 @@ function formatDuration(startedAt, endedAt) {
   const start = Date.parse(startedAt);
   const end = endedAt ? Date.parse(endedAt) : Date.now();
   if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 'Unknown';
-  const seconds = Math.floor((end - start) / 1000);
+  return formatElapsedSeconds((end - start) / 1000);
+}
+
+function formatElapsedSeconds(value) {
+  const seconds = Math.max(0, Math.floor(value));
   if (seconds < 1) return '<1s';
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -862,6 +980,7 @@ function displayAgent(agent) {
     codex: 'Codex',
     gemini: 'Gemini',
     antigravity: 'Antigravity',
+    opencode: 'OpenCode',
   };
   return names[agent] ?? agent ?? 'Unknown agent';
 }
@@ -875,10 +994,31 @@ function displayExitReason(reason) {
 }
 
 function timelineTone(run) {
+  if (!run.endedAt && run.lifecycleStatus === 'orphaned') return 'failed';
   if (!run.endedAt) return 'active';
   if (run.exitReason === 'completed') return 'completed';
-  if (run.exitReason === 'user_cancelled') return 'cancelled';
+  if (run.exitReason === 'user_cancelled' || run.exitReason === 'interrupted')
+    return 'cancelled';
   return 'failed';
+}
+
+function exitDetail(run) {
+  const parts = [displayExitReason(run.exitReason)];
+  if (run.exitCode != null) parts.push(`code ${run.exitCode}`);
+  if (run.exitClassification) {
+    const { reason, confidence, source, providerCode } = run.exitClassification;
+    const lineage = `${confidence} confidence · ${source.replaceAll('_', ' ')}`;
+    if (
+      providerCode &&
+      providerCode !== String(run.exitCode) &&
+      providerCode !== run.exitReason
+    )
+      return `${parts.join(' · ')} · ${lineage} · provider ${providerCode}`;
+    if (reason !== run.exitReason)
+      return `${parts.join(' · ')} · ${lineage} (classified as ${displayExitReason(reason)})`;
+    return `${parts.join(' · ')} · ${lineage}`;
+  }
+  return parts.join(' · ');
 }
 
 function renderTimeline(runs) {
@@ -890,6 +1030,7 @@ function renderTimeline(runs) {
 
   for (const run of [...runs].reverse()) {
     const tone = timelineTone(run);
+    const orphaned = !run.endedAt && run.lifecycleStatus === 'orphaned';
     const item = el('li', `timeline-item ${tone}`);
     const marker = el('span', 'timeline-marker');
     marker.setAttribute('aria-hidden', 'true');
@@ -903,7 +1044,11 @@ function renderTimeline(runs) {
     const status = el(
       'span',
       'timeline-status',
-      tone === 'active' ? 'Running' : displayExitReason(run.exitReason),
+      orphaned
+        ? 'Needs recovery'
+        : tone === 'active'
+          ? 'Running'
+          : displayExitReason(run.exitReason),
     );
     head.append(identity, status);
 
@@ -916,13 +1061,27 @@ function renderTimeline(runs) {
     const facts = el('dl', 'timeline-facts');
     for (const [label, value] of [
       ['Started', formatSessionTime(run.startedAt)],
-      ['Ended', run.endedAt ? formatSessionTime(run.endedAt) : 'Still running'],
-      ['Duration', formatDuration(run.startedAt, run.endedAt)],
+      [
+        'Ended',
+        run.endedAt
+          ? formatSessionTime(run.endedAt)
+          : orphaned
+            ? 'Awaiting recovery'
+            : 'Still running',
+      ],
+      [
+        'Duration',
+        orphaned && Number.isFinite(run.activeRuntimeSeconds)
+          ? formatElapsedSeconds(run.activeRuntimeSeconds)
+          : formatDuration(run.startedAt, run.endedAt),
+      ],
       [
         'Exit',
         run.endedAt
-          ? `${displayExitReason(run.exitReason)}${run.exitCode == null ? '' : ` · code ${run.exitCode}`}`
-          : 'Pending',
+          ? exitDetail(run)
+          : orphaned
+            ? 'Ownership uncertain'
+            : 'Pending',
       ],
     ]) {
       const fact = el('div');
@@ -951,7 +1110,8 @@ timelineModal.addEventListener('click', (event) => {
 });
 
 /* ---- archived task history ---- */
-function renderHistory(entries) {
+async function renderHistory(entries) {
+  const catalog = await loadAgentCatalog();
   historyList.textContent = '';
   historyStatus.textContent = `${entries.length} ${entries.length === 1 ? 'task' : 'tasks'} found`;
   for (const entry of entries) {
@@ -980,7 +1140,11 @@ function renderHistory(entries) {
           `${displayAgent(run.provider)} · ${run.model ?? 'Auto'} · ${displayExitReason(run.exitReason)}`,
         ),
       );
-      if (run.providerSessionId && ['claude', 'codex'].includes(run.provider)) {
+      const capabilities = catalog.find((entry) => entry.id === run.provider);
+      if (
+        run.providerSessionId &&
+        capabilities?.resumeCapabilities?.targets?.includes('id')
+      ) {
         const resume = el('button', null, 'Resume');
         resume.addEventListener('click', () => {
           closeHistory();
@@ -990,6 +1154,19 @@ function renderHistory(entries) {
           });
         });
         runRow.append(resume);
+        if (capabilities.resumeCapabilities.supportsFork) {
+          const fork = el('button', null, 'Fork');
+          fork.addEventListener('click', () => {
+            closeHistory();
+            launchInteractive('resume', run.provider, {
+              kind: 'id',
+              value: run.providerSessionId,
+              fork: true,
+              workspace: run.workspaceId,
+            });
+          });
+          runRow.append(fork);
+        }
       }
       runs.append(runRow);
     }
@@ -1012,7 +1189,7 @@ async function loadHistory() {
     historyList.textContent = '';
     return;
   }
-  renderHistory(Array.isArray(result.data) ? result.data : []);
+  await renderHistory(Array.isArray(result.data) ? result.data : []);
 }
 
 function openHistory() {
@@ -1160,6 +1337,8 @@ function renderUsage(data) {
       available: 'Live',
       stale: 'Stale',
       unknown: 'Unknown',
+      unsupported: 'Unsupported',
+      error: 'Error',
     };
     const status = el(
       'div',
@@ -1167,18 +1346,30 @@ function renderUsage(data) {
       statusLabels[plan.status] ?? 'Unknown',
     );
     const windows = el('div', 'agent-windows');
-    for (const [label, window] of [
-      ['5-hour', plan.fiveHour],
-      ['Weekly', plan.week],
-    ]) {
+    const windowEntries =
+      plan.metrics && plan.metrics.length > 0
+        ? plan.metrics.map((metric) => [
+            metric.window?.label ?? metric.id,
+            metric,
+          ])
+        : [
+            ['5-hour', plan.fiveHour],
+            ['Weekly', plan.week],
+          ];
+    for (const [label, window] of windowEntries) {
       const row = el('div', 'window-row');
       const track = el('span', 'usage-track');
       const fill = el('span', 'usage-fill');
-      const remaining = window?.remainingPercentage;
-      fill.style.width = `${remaining ?? 0}%`;
-      if (remaining != null && remaining < 20) fill.classList.add('critical');
-      else if (remaining != null && remaining < 50)
-        fill.classList.add('warning');
+      const remaining = window?.remaining ?? window?.remainingPercentage;
+      const percent =
+        window?.unit === 'percent'
+          ? remaining
+          : window?.limit && remaining != null
+            ? (remaining / window.limit) * 100
+            : null;
+      fill.style.width = `${Math.max(0, Math.min(100, percent ?? 0))}%`;
+      if (percent != null && percent < 20) fill.classList.add('critical');
+      else if (percent != null && percent < 50) fill.classList.add('warning');
       track.append(fill);
       row.append(
         el('span', 'window-label', label),
@@ -1186,7 +1377,9 @@ function renderUsage(data) {
         el(
           'strong',
           null,
-          remaining == null ? '—' : `${Math.round(remaining)}%`,
+          remaining == null
+            ? '—'
+            : `${Math.round(remaining)}${window?.unit === 'percent' || window?.remainingPercentage !== undefined ? '%' : ` ${window?.unit ?? ''}`}`,
         ),
         el(
           'small',
@@ -1278,7 +1471,7 @@ function updateProfilePreview() {
 
 function populateEfforts(preferred) {
   const model = selectedProfileModel();
-  const modelOption = selectedCatalogAgent?.models?.find(
+  const modelOption = selectedCatalogAgent?.models?.values?.find(
     (item) => item.id === model,
   );
   const efforts = modelOption?.efforts?.length
@@ -1293,12 +1486,29 @@ function populateEfforts(preferred) {
 }
 
 async function loadAgentCatalog() {
-  if (agentCatalogCache) return agentCatalogCache;
+  if (agentCatalogCache?.expiresAt > Date.now())
+    return agentCatalogCache.agents;
   const result = await window.relay.agentCatalog({ project });
   if (!result.ok)
     throw new Error(result.output || 'Could not load agent catalog.');
-  agentCatalogCache = result.data.agents;
-  return agentCatalogCache;
+  agentCatalogCache = {
+    agents: result.data.agents,
+    expiresAt: Date.now() + 45_000,
+  };
+  return agentCatalogCache.agents;
+}
+
+function authStatusLabel(auth) {
+  if (!auth) return 'Unknown';
+  const labels = {
+    authenticated: 'Authenticated',
+    not_authenticated: 'Sign-in required',
+    configured: 'Configured',
+    unknown: 'Unknown',
+    unsupported: 'Unsupported',
+    error: 'Error',
+  };
+  return labels[auth.status] ?? 'Unknown';
 }
 
 async function openProfile(agent) {
@@ -1318,15 +1528,18 @@ async function openProfile(agent) {
       throw new Error(`No adapter found for ${agent}.`);
     profileTitle.textContent = selectedCatalogAgent.displayName;
     profileStatus.textContent = selectedCatalogAgent.installed
-      ? `${selectedCatalogAgent.version ?? 'Installed'} · live model catalog`
+      ? `${selectedCatalogAgent.version ?? 'Installed'} · live model catalog · ${authStatusLabel(selectedCatalogAgent.authentication)}`
       : 'CLI not installed · selections can be saved for later';
+    if (selectedCatalogAgent.authentication?.detail) {
+      profileStatus.title = selectedCatalogAgent.authentication.detail;
+    }
     const saved = agentProfiles[agent] ?? {};
     profileModel.textContent = '';
     addOption(profileModel, '', 'Auto · provider default');
-    for (const model of selectedCatalogAgent.models)
+    for (const model of selectedCatalogAgent.models?.values ?? [])
       addOption(profileModel, model.id, model.label);
     addOption(profileModel, '__custom', 'Custom model ID…');
-    const known = selectedCatalogAgent.models.some(
+    const known = (selectedCatalogAgent.models?.values ?? []).some(
       (model) => model.id === saved.model,
     );
     profileModel.value = saved.model ? (known ? saved.model : '__custom') : '';
@@ -1464,8 +1677,6 @@ function factory(item) {
     instances.dispose();
     return tabsModel.get(item.id);
   }
-  if (item.buffer) instances.terminal.write(item.buffer);
-  window.relay.acknowledgeTerminalOutput(item.id, item.sequence);
   return tabsModel.get(item.id);
 }
 

@@ -18,11 +18,13 @@ import { checkpointsCommand } from './cli/checkpoints.js';
 import { checkpointDiffCommand } from './cli/checkpoint-diff.js';
 import { workspaceCommand } from './cli/workspace.js';
 import { noteCommand } from './cli/note.js';
+import { reconcileCommand } from './cli/reconcile.js';
+import { bridgeCommand } from './cli/bridge.js';
 
 const program = new Command()
   .name('relay')
   .description('Durable coding-task handoffs between official agent CLIs')
-  .version('0.1.0-alpha.2')
+  .version('0.1.0-alpha.3')
   .addCommand(initCommand())
   .addCommand(startCommand())
   .addCommand(statusCommand())
@@ -39,6 +41,8 @@ const program = new Command()
   .addCommand(agentsCommand())
   .addCommand(historyCommand())
   .addCommand(recoverCommand())
+  .addCommand(reconcileCommand())
+  .addCommand(bridgeCommand())
   .addCommand(finishCommand())
   .addCommand(doctorCommand());
 

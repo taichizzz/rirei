@@ -14,7 +14,7 @@ import { readState } from '../state/store.js';
 export function switchCommand(): Command {
   return new Command('switch')
     .description('Checkpoint, preview a handoff, and launch another agent')
-    .argument('<agent>', 'claude, codex, gemini, or antigravity')
+    .argument('<agent>', 'claude, codex, gemini, antigravity, or opencode')
     .option('--model <model>', 'override the provider model for this session')
     .option('--effort <level>', 'override reasoning effort when supported')
     .option('--operation-id <id>', 'idempotency key for this provider launch')

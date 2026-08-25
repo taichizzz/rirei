@@ -82,7 +82,8 @@ Show installed adapters, CLI versions, discovered models, and supported effort l
 
 **Option:** `--json` — print the machine-readable catalog used by Rirei's session-profile
 picker. Codex models come from `codex debug models`; Antigravity uses a catalog verified from
-`agy models`; Claude uses documented model aliases and effort values. Discovery failures return an empty
+`agy models`; OpenCode reads live `provider/model` lines from `opencode models`; Claude uses
+documented model aliases and effort values. Discovery failures return an empty
 model list rather than guessing.
 
 ---
@@ -178,7 +179,8 @@ detection).
 
 ## `relay run <agent>`
 
-Launch an installed official CLI (`claude`, `codex`, `gemini`, or `antigravity`) for the current task.
+Launch an installed official CLI (`claude`, `codex`, `gemini`, `antigravity`, or `opencode`)
+for the current task.
 
 **Option:** `--prompt <prompt>` — use an explicit prompt instead of the generated handoff.
 
@@ -266,9 +268,10 @@ when removal would lose work. `--json` for machine-readable output.
 
 ## `relay resume <agent>`
 
-Resume a provider-owned Claude or Codex conversation in a new interactive PTY. Use exactly one
-of `--picker`, `--latest`, or `--id <value>`; picker is the default. Claude also supports
-`--fork`. An optional `--prompt`, `--model`, or `--effort` applies to the resumed launch. Relay
+Resume a provider-owned Claude, Codex, or OpenCode conversation in a new interactive PTY. Use
+at most one of `--picker`, `--latest`, or `--id <value>`. Providers with a picker default to it;
+OpenCode defaults to latest because its CLI exposes no picker. Claude and OpenCode support
+`--fork`. An optional `--prompt`, `--model`, or supported `--effort` applies to the resumed launch. Relay
 records resume metadata but does not read provider conversation files. Frontends can also pass
 `--operation-id` and `--terminal-id`.
 
@@ -284,6 +287,12 @@ Mark a recorded current run as interrupted and clear its active lock. Relay cann
 an external provider process has stopped, so explicit `--force` confirmation is required.
 Use `--run-id <id>` when several orphaned runs exist and `--reason <text>` to record why
 recovery is safe. Recovery events include the requester and reason.
+
+## `relay reconcile`
+
+Check durable controller and bridge ownership without releasing any worktree. `--json` returns
+`live`, `needs_attention`, or `orphaned` per run. Different-boot or unverifiable ownership
+remains blocked; only a conclusively missing same-boot local PID is marked orphaned.
 
 ## `relay checkpoints` / `relay checkpoint-diff <id>`
 

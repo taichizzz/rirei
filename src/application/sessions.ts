@@ -1,18 +1,29 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
   AgentAdapter,
+  ExitClassification,
   ProcessResult,
+  ProviderObservation,
   ResumeTargetKind,
 } from '../agents/adapter.js';
+import { interruptedExitClassification } from '../agents/adapter.js';
+import { buildControllerIdentity, controllerIdFor } from './controller.js';
 import { prepareProviderUsage } from '../plan-usage.js';
 import type { ProcessHost } from '../process/process-host.js';
 import { appendEvent } from '../state/events.js';
+import { appendTerminalJournal } from '../state/journal.js';
 import {
   acquireLease,
   markLeaseOrphaned,
   releaseLease,
 } from '../state/leases.js';
-import type { RelayState, RunLease } from '../state/schema.js';
+import type {
+  ControllerIdentity,
+  OrphanBid,
+  RelayState,
+  RunLease,
+} from '../state/schema.js';
+import { ORPHAN_BID_LIMIT } from '../state/schema.js';
 import { updateState } from '../state/store.js';
 import type { WorkspaceRole } from '../worktrees/schema.js';
 
@@ -38,7 +49,10 @@ export interface StartRunRequest {
   adapter: AgentAdapter;
   prompt: string;
   selection?: RunSelection;
-  controllerId?: string;
+  /** Structured identity of the process that will own the provider process. */
+  controller?: ControllerIdentity;
+  /** Bounded provider signals observed during the run, fed to exit classification. */
+  observations?: ProviderObservation[];
 }
 
 export interface CompletedRun {
@@ -89,12 +103,23 @@ function runIdFor(sessionId: string, operationId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
+function resultObservations(
+  observations: ProviderObservation[] | undefined,
+): ProviderObservation[] {
+  return (observations ?? []).slice(0, 16).map((observation) => ({
+    kind: observation.kind,
+    ...(observation.detail ? { detail: observation.detail } : {}),
+  }));
+}
+
 function resultFromHistory(
   run: RelayState['agentHistory'][number],
 ): ProcessResult {
   return {
     exitCode: run.exitCode ?? null,
     signal: null,
+    terminationIntent: 'none',
+    observations: [],
     stdout: '',
     stderr: '',
   };
@@ -126,6 +151,13 @@ export class SessionManager {
       throw new RunAlreadyStartedError(runId, operationId);
 
     await appendEvent(request.projectRoot, 'agent_started', prepared.event);
+    if (selection.terminalId)
+      await appendTerminalJournal(request.projectRoot, {
+        at: new Date().toISOString(),
+        terminalId: selection.terminalId,
+        event: 'attached',
+        detail: `agent ${request.adapter.id} started`,
+      });
 
     let handleId: string;
     try {
@@ -137,10 +169,16 @@ export class SessionManager {
       ).id;
     } catch (error) {
       const result: ProcessResult = {
-        exitCode: 127,
+        exitCode: null,
         signal: null,
+        spawnErrorCode:
+          typeof (error as NodeJS.ErrnoException).code === 'string'
+            ? (error as NodeJS.ErrnoException).code
+            : undefined,
+        terminationIntent: 'none',
+        observations: [],
         stdout: '',
-        stderr: error instanceof Error ? error.message : String(error),
+        stderr: '',
       };
       await this.finalize(request, prepared.run, runId, operationId, result);
       throw error;
@@ -225,6 +263,16 @@ export class SessionManager {
       throw new Error(
         `${request.adapter.displayName} does not support session resume.`,
       );
+    if (
+      launchMode !== 'new' &&
+      selection.resumeTargetKind &&
+      !request.adapter.resumeCapabilities!.targets.includes(
+        selection.resumeTargetKind,
+      )
+    )
+      throw new Error(
+        `${request.adapter.displayName} does not support ${selection.resumeTargetKind} session resume.`,
+      );
     if (selection.resumeTargetKind === 'id' && !selection.resumeTargetValue)
       throw new Error('Exact resume requires a provider session ID.');
 
@@ -239,7 +287,8 @@ export class SessionManager {
           )
         : undefined;
     const providerSessionId =
-      launchMode === 'new' && request.adapter.id === 'claude'
+      launchMode === 'new' &&
+      request.adapter.resumeCapabilities?.exposesNewSessionId
         ? randomUUID()
         : launchMode === 'resume' && selection.resumeTargetKind === 'id'
           ? selection.resumeTargetValue
@@ -286,7 +335,18 @@ export class SessionManager {
         request.state.git.currentBranch ??
         request.state.git.startingBranch,
       role: selection.workspace?.role ?? ('implement' as const),
+      lifecycleStatus: 'working' as const,
+      activeRuntimeSeconds: 0,
+      runtimeSequence: 0,
+      providerObservations:
+        resultObservations(request.observations).length > 0
+          ? resultObservations(request.observations)
+          : undefined,
     };
+    const controller = buildControllerIdentity({
+      terminalId: selection.terminalId,
+      identity: request.controller,
+    });
     const lease: RunLease = {
       runId,
       terminalId: selection.terminalId,
@@ -303,11 +363,11 @@ export class SessionManager {
       effort: selection.effort,
       launchMode,
       providerSessionId,
-      controllerId:
-        request.controllerId ??
-        (selection.terminalId
-          ? `terminal:${selection.terminalId}`
-          : `cli:${process.pid}`),
+      controller,
+      controllerId: controllerIdFor(controller),
+      lifecycleStatus: 'working',
+      activeRuntimeSeconds: 0,
+      runtimeSequence: 0,
       startedAt,
       lastSeenAt: startedAt,
       status: 'running',
@@ -377,9 +437,19 @@ export class SessionManager {
     operationId: string,
     result: ProcessResult,
   ): Promise<CompletedRun> {
-    let reason = 'unknown_failure';
+    let classification: ExitClassification = {
+      reason: 'unknown_failure',
+      confidence: 'low',
+      source: 'fallback',
+    };
     try {
-      reason = (await request.adapter.classifyExit(result)).reason;
+      classification = await request.adapter.classifyExit({
+        ...result,
+        observations: resultObservations([
+          ...result.observations,
+          ...(request.observations ?? []),
+        ]),
+      });
     } catch {
       // Lease finalization must not depend on optional provider classification.
     }
@@ -387,7 +457,15 @@ export class SessionManager {
       ...run,
       endedAt: new Date().toISOString(),
       exitCode: result.exitCode,
-      exitReason: reason,
+      exitReason: classification.reason,
+      exitClassification: classification,
+      lifecycleStatus:
+        classification.reason === 'completed'
+          ? ('completed' as const)
+          : ['user_cancelled', 'interrupted'].includes(classification.reason)
+            ? ('cancelled' as const)
+            : ('failed' as const),
+      attentionKind: undefined,
     };
     let merged = false;
     let state: RelayState;
@@ -405,7 +483,20 @@ export class SessionManager {
             merged = true;
             const agentHistory = existing
               ? current.agentHistory.map((item) =>
-                  item.id === runId ? completedRun : item,
+                  item.id === runId
+                    ? {
+                        ...item,
+                        ...completedRun,
+                        activeRuntimeSeconds: Math.max(
+                          item.activeRuntimeSeconds ?? 0,
+                          completedRun.activeRuntimeSeconds ?? 0,
+                        ),
+                        runtimeSequence: Math.max(
+                          item.runtimeSequence ?? 0,
+                          completedRun.runtimeSequence ?? 0,
+                        ),
+                      }
+                    : item,
                 )
               : [...current.agentHistory, completedRun];
             return releaseLease({ ...current, agentHistory }, runId);
@@ -431,7 +522,7 @@ export class SessionManager {
       sessionId: request.state.sessionId,
       agent: request.adapter.id,
       exitCode: result.exitCode,
-      reason,
+      reason: classification.reason,
       stateMerge:
         state.sessionId !== request.state.sessionId
           ? 'skipped_newer_task'
@@ -439,6 +530,13 @@ export class SessionManager {
             ? 'merged'
             : 'skipped_already_finalized',
     }).catch(() => undefined);
+    if (run.terminalId)
+      await appendTerminalJournal(request.projectRoot, {
+        at: new Date().toISOString(),
+        terminalId: run.terminalId,
+        event: 'exit',
+        detail: `agent ${request.adapter.id} ${classification.reason}`,
+      }).catch(() => undefined);
     return { runId, result, state };
   }
 
@@ -474,12 +572,23 @@ export async function markControllerOrphaned(
     }
     return next;
   });
-  for (const runId of orphanedRunIds)
+  for (const runId of orphanedRunIds) {
     await appendEvent(projectRoot, 'agent_orphaned', {
       runId,
       controllerId,
       reason: 'controller_disconnected',
     });
+    const terminalId = state.runs.find(
+      (lease) => lease.runId === runId,
+    )?.terminalId;
+    if (terminalId)
+      await appendTerminalJournal(projectRoot, {
+        at: new Date().toISOString(),
+        terminalId,
+        event: 'closed',
+        detail: 'controller disconnected',
+      }).catch(() => undefined);
+  }
   return state;
 }
 
@@ -505,7 +614,8 @@ export async function recoverOrphanedRun(request: {
             ...run,
             endedAt,
             exitCode: null,
-            exitReason: 'interrupted',
+            exitReason: 'interrupted' as const,
+            exitClassification: interruptedExitClassification(),
           }
         : run,
     );
@@ -523,5 +633,81 @@ export async function recoverOrphanedRun(request: {
     requestedBy: request.requestedBy,
     reason: request.reason,
   });
+  const terminalId = state.agentHistory.find(
+    (run) => run.id === request.runId,
+  )?.terminalId;
+  if (terminalId)
+    await appendTerminalJournal(request.projectRoot, {
+      at: endedAt,
+      terminalId,
+      event: 'recovered',
+      detail: request.reason,
+    }).catch(() => undefined);
   return state;
+}
+
+export interface OrphanBidRequest {
+  projectRoot: string;
+  runId: string;
+  /** Canonical controllerId string, e.g. `cli:<uuid>`. */
+  controllerId: string;
+  priority: number;
+}
+
+export interface OrphanBidResult {
+  won: boolean;
+  winnerControllerId: string;
+  bids: OrphanBid[];
+  state: RelayState;
+}
+
+function compareBids(left: OrphanBid, right: OrphanBid): number {
+  if (left.priority !== right.priority) return right.priority - left.priority;
+  if (left.at !== right.at) return left.at.localeCompare(right.at);
+  return left.controllerId.localeCompare(right.controllerId);
+}
+
+/**
+ * Deterministic takeover protocol for orphaned runs. A controller that wants
+ * to claim an orphaned run records a bid; the winner is the highest priority,
+ * then the earliest bid, then the smallest controller id, so any number of
+ * contenders converge on the same owner without a coordinator.
+ */
+export async function submitOrphanBid(
+  request: OrphanBidRequest,
+): Promise<OrphanBidResult> {
+  const bid: OrphanBid = {
+    controllerId: request.controllerId,
+    priority: request.priority,
+    at: new Date().toISOString(),
+  };
+  const state = await updateState(request.projectRoot, (current) => {
+    const lease = current.runs.find((item) => item.runId === request.runId);
+    if (!lease) throw new Error(`No run lease ${request.runId} exists.`);
+    if (lease.status !== 'orphaned')
+      throw new Error(
+        `Run ${request.runId} is ${lease.status}, not orphaned; stop its controller instead.`,
+      );
+    const bids = [...(lease.bids ?? []), bid].slice(-ORPHAN_BID_LIMIT);
+    return {
+      ...current,
+      runs: current.runs.map((item) =>
+        item.runId === request.runId ? { ...item, bids } : item,
+      ),
+    };
+  });
+  const lease = state.runs.find((item) => item.runId === request.runId);
+  const bids = lease?.bids ?? [];
+  const winner = bids.reduce<OrphanBid | undefined>(
+    (best, candidate) =>
+      best === undefined || compareBids(candidate, best) < 0 ? candidate : best,
+    undefined,
+  );
+  const winnerControllerId = winner?.controllerId ?? request.controllerId;
+  return {
+    won: winnerControllerId === request.controllerId,
+    winnerControllerId,
+    bids,
+    state,
+  };
 }

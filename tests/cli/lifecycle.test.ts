@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { activityFilePath } from '../../src/state/activity.js';
+import { updateState } from '../../src/state/store.js';
 import { createRepository, removeRepository } from '../helpers.js';
 
 const execFileAsync = promisify(execFile);
@@ -110,7 +111,7 @@ describe('Relay lifecycle commands', () => {
       schemaVersion: number;
       sessions: unknown[];
     };
-    expect(activity).toMatchObject({ schemaVersion: 1, sessions: [] });
+    expect(activity).toMatchObject({ schemaVersion: 3, sessions: [] });
     expect(activity).not.toHaveProperty('events');
     const status = await relay(root, 'status', '--json');
     expect(JSON.parse(status.stdout)).toMatchObject({
@@ -121,6 +122,173 @@ describe('Relay lifecycle commands', () => {
       remainingWork: [],
       decisions: [],
       blockers: [],
+    });
+  });
+
+  it('publishes terminal waiting and resumed bridge states', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Track terminal attention');
+    const now = new Date().toISOString();
+    const terminalId = `terminal-attention-${process.pid}-${Date.now()}`;
+    await updateState(root, (current) => ({
+      ...current,
+      runs: [
+        {
+          runId: 'run-attention',
+          terminalId,
+          worktreePath: root,
+          projectRoot: root,
+          agent: 'codex',
+          launchMode: 'new',
+          controllerId: `desktop:test:${terminalId}`,
+          controller: {
+            kind: 'desktop',
+            instanceId: terminalId,
+            bootId: 'test',
+          },
+          lifecycleStatus: 'working',
+          activeRuntimeSeconds: 0,
+          runtimeSequence: 0,
+          startedAt: now,
+          lastSeenAt: now,
+          status: 'running',
+        },
+      ],
+    }));
+
+    await relay(
+      root,
+      'bridge',
+      '--terminal-id',
+      terminalId,
+      '--status',
+      'waiting',
+      '--lifecycle-state',
+      'needs_permission',
+      '--attention-kind',
+      'permission',
+      '--active-runtime-seconds',
+      '12',
+      '--runtime-sequence',
+      '4',
+      '--daemon-id',
+      'daemon-test',
+      '--daemon-pid',
+      String(process.pid),
+      '--daemon-boot-id',
+      'test-boot',
+    );
+    expect(
+      JSON.parse(await readFile(`${root}/.relay/state.json`, 'utf8')).runs[0],
+    ).toMatchObject({
+      status: 'waiting',
+      lifecycleStatus: 'needs_permission',
+      attentionKind: 'permission',
+      activeRuntimeSeconds: 12,
+      runtimeSequence: 4,
+      controller: { kind: 'daemon', instanceId: 'daemon-test' },
+    });
+    await relay(
+      root,
+      'bridge',
+      '--terminal-id',
+      terminalId,
+      '--status',
+      'running',
+      '--lifecycle-state',
+      'working',
+      '--active-runtime-seconds',
+      '999',
+      '--runtime-sequence',
+      '3',
+    );
+    expect(
+      JSON.parse(await readFile(`${root}/.relay/state.json`, 'utf8')).runs[0],
+    ).toMatchObject({
+      status: 'waiting',
+      lifecycleStatus: 'needs_permission',
+      activeRuntimeSeconds: 12,
+      runtimeSequence: 4,
+    });
+    await relay(
+      root,
+      'bridge',
+      '--terminal-id',
+      terminalId,
+      '--status',
+      'running',
+      '--lifecycle-state',
+      'working',
+      '--active-runtime-seconds',
+      '15',
+      '--runtime-sequence',
+      '5',
+    );
+    expect(
+      JSON.parse(await readFile(`${root}/.relay/state.json`, 'utf8')).runs[0],
+    ).toMatchObject({
+      status: 'running',
+      lifecycleStatus: 'working',
+      activeRuntimeSeconds: 15,
+      runtimeSequence: 5,
+    });
+
+    await updateState(root, (current) => ({
+      ...current,
+      runs: current.runs.map((lease) =>
+        lease.terminalId === terminalId
+          ? {
+              ...lease,
+              status: 'stopping',
+              lifecycleStatus: 'stopping',
+              runtimeSequence: 6,
+            }
+          : lease,
+      ),
+      agentHistory: [
+        ...current.agentHistory,
+        {
+          id: 'ended-terminal-run',
+          agent: 'codex',
+          terminalId,
+          startedAt: now,
+          endedAt: now,
+          lifecycleStatus: 'failed',
+          activeRuntimeSeconds: 15,
+          runtimeSequence: 6,
+        },
+      ],
+    }));
+    await relay(
+      root,
+      'bridge',
+      '--terminal-id',
+      terminalId,
+      '--status',
+      'running',
+      '--lifecycle-state',
+      'working',
+      '--active-runtime-seconds',
+      '20',
+      '--runtime-sequence',
+      '7',
+    );
+    const protectedState = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    );
+    expect(protectedState.runs[0]).toMatchObject({
+      status: 'stopping',
+      lifecycleStatus: 'stopping',
+      activeRuntimeSeconds: 15,
+      runtimeSequence: 6,
+    });
+    expect(protectedState.agentHistory.at(-1)).toMatchObject({
+      endedAt: now,
+      lifecycleStatus: 'failed',
+      activeRuntimeSeconds: 15,
+      runtimeSequence: 6,
     });
   });
 
@@ -575,7 +743,7 @@ describe('Relay lifecycle commands', () => {
       exitReason: 'completed',
     });
     const activity = await readFile(activityFilePath(), 'utf8');
-    expect(JSON.parse(activity)).toMatchObject({ schemaVersion: 1 });
+    expect(JSON.parse(activity)).toMatchObject({ schemaVersion: 3 });
     expect(activity).not.toContain('gpt-5.2-codex');
     expect(activity).not.toContain('high');
   });
@@ -927,6 +1095,14 @@ describe('Relay lifecycle commands', () => {
       agent: 'claude',
       launchMode: 'new',
       controllerId: 'test',
+      controller: {
+        kind: 'cli',
+        instanceId: 'test',
+        bootId: 'test-boot',
+      },
+      lifecycleStatus: 'orphaned',
+      activeRuntimeSeconds: 0,
+      runtimeSequence: 0,
       startedAt: '2026-07-21T00:00:00.000Z',
       lastSeenAt: '2026-07-21T00:00:00.000Z',
       status: 'orphaned',

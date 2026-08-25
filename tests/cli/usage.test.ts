@@ -75,7 +75,7 @@ describe('relay usage', () => {
 
     const json = await relay(root, home, codexHome, 'usage', '--json');
     expect(JSON.parse(json.stdout)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       task: { title: 'Inspect usage', status: 'active' },
       checkpoints: 0,
       fiveHours: { runs: 0, totalMs: 0 },

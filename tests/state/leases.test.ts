@@ -13,7 +13,7 @@ const NOW = '2026-01-01T00:00:00.000Z';
 
 function state(): RelayState {
   return {
-    schemaVersion: 4,
+    schemaVersion: 8,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -47,7 +47,16 @@ function lease(overrides: Partial<RunLease> = {}): RunLease {
     projectRoot: '/repo',
     agent: 'claude',
     launchMode: 'new',
-    controllerId: 'cli:1',
+    controllerId: 'cli:test-boot:1',
+    controller: {
+      kind: 'cli',
+      instanceId: '1',
+      pid: 1,
+      bootId: 'test-boot',
+    },
+    lifecycleStatus: 'working',
+    activeRuntimeSeconds: 0,
+    runtimeSequence: 0,
     startedAt: NOW,
     lastSeenAt: NOW,
     status: 'running',
@@ -116,7 +125,22 @@ describe('run leases', () => {
   });
 
   it('keeps an orphaned worktree claimed until explicit recovery', () => {
-    const first = acquireLease(state(), lease());
+    const first = acquireLease(
+      {
+        ...state(),
+        agentHistory: [
+          {
+            id: 'run-1',
+            agent: 'claude',
+            startedAt: NOW,
+            lifecycleStatus: 'working',
+            activeRuntimeSeconds: 4,
+            runtimeSequence: 1,
+          },
+        ],
+      },
+      lease({ activeRuntimeSeconds: 12, runtimeSequence: 3 }),
+    );
     const orphaned = markLeaseOrphaned(first, 'run-1');
     // The lease record survives for inspection...
     expect(orphaned.runs).toHaveLength(1);
@@ -124,6 +148,13 @@ describe('run leases', () => {
     // Unknown process ownership must block another writer and cleanup.
     expect(activeLeases(orphaned)).toHaveLength(1);
     expect(leaseForWorktree(orphaned, '/repo')?.runId).toBe('run-1');
+    expect(orphaned.agentHistory[0]).toMatchObject({
+      lifecycleStatus: 'orphaned',
+      attentionKind: 'unknown',
+      activeRuntimeSeconds: 12,
+      runtimeSequence: 3,
+    });
+    expect(orphaned.agentHistory[0]?.endedAt).toBeUndefined();
     expect(() => acquireLease(orphaned, lease({ runId: 'run-2' }))).toThrow(
       /already running/,
     );

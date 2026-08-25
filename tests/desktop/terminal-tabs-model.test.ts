@@ -77,5 +77,24 @@ describe('TerminalTabsModel', () => {
     model.updateMetadata('t1', { status: 'stopping', sequence: 6 });
     expect(model.updateOutputSequence('t1', 5)).toBe(true);
     expect(model.get('t1').sequence).toBe(6);
+    expect(model.get('t1').outputCursor).toBe(5);
+  });
+
+  test('does not mark daemon replay as consumed during inventory reconciliation', () => {
+    const model = new TerminalTabsModel();
+    model.addTerminal(
+      't1',
+      { status: 'running', sequence: 1, outputCursor: 20 },
+      {},
+      {},
+      {},
+    );
+
+    model.reconcileInventory([
+      { id: 't1', status: 'running', sequence: 2, nextCursor: 100 },
+    ]);
+
+    expect(model.get('t1').outputCursor).toBe(20);
+    expect(model.updateOutputSequence('t1', 64)).toBe(true);
   });
 });

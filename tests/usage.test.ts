@@ -5,7 +5,7 @@ import type { RelayState } from '../src/state/schema.js';
 function baseState(overrides: Partial<RelayState> = {}): RelayState {
   const now = '2026-07-12T00:00:00.000Z';
   return {
-    schemaVersion: 4,
+    schemaVersion: 8,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -45,6 +45,7 @@ describe('summarizeUsage', () => {
     expect(ids).toContain('codex');
     expect(ids).toContain('gemini');
     expect(ids).toContain('antigravity');
+    expect(ids).toContain('opencode');
     expect(summary.agents.every((agent) => agent.runs === 0)).toBe(true);
   });
 

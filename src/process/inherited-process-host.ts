@@ -14,11 +14,19 @@ interface HostedProcess {
   child: ChildProcess;
   listeners: Set<ProcessListener>;
   result?: ProcessResult;
+  terminationIntent: ProcessResult['terminationIntent'];
 }
 
 /** Process host used by the scriptable CLI, preserving inherited terminal I/O. */
 export class InheritedProcessHost implements ProcessHost {
   private readonly processes = new Map<string, HostedProcess>();
+  private controllerIntent: ProcessResult['terminationIntent'] = 'none';
+
+  setTerminationIntent(intent: ProcessResult['terminationIntent']): void {
+    this.controllerIntent = intent;
+    for (const hosted of this.processes.values())
+      hosted.terminationIntent = intent;
+  }
 
   async start(request: ProcessStartRequest): Promise<ProcessHandle> {
     const id = randomUUID();
@@ -27,7 +35,11 @@ export class InheritedProcessHost implements ProcessHost {
       env: request.env ?? process.env,
       stdio: 'inherit',
     });
-    const hosted: HostedProcess = { child, listeners: new Set() };
+    const hosted: HostedProcess = {
+      child,
+      listeners: new Set(),
+      terminationIntent: this.controllerIntent,
+    };
     this.processes.set(id, hosted);
     let finalized = false;
     const finalize = (result: ProcessResult): void => {
@@ -38,14 +50,27 @@ export class InheritedProcessHost implements ProcessHost {
     };
     child.once('error', (error) =>
       finalize({
-        exitCode: 127,
+        exitCode: null,
         signal: null,
+        spawnErrorCode:
+          typeof (error as NodeJS.ErrnoException).code === 'string'
+            ? (error as NodeJS.ErrnoException).code
+            : undefined,
+        terminationIntent: hosted.terminationIntent,
+        observations: [],
         stdout: '',
-        stderr: error.message,
+        stderr: '',
       }),
     );
     child.once('close', (exitCode, signal) =>
-      finalize({ exitCode, signal, stdout: '', stderr: '' }),
+      finalize({
+        exitCode,
+        signal,
+        terminationIntent: hosted.terminationIntent,
+        observations: [],
+        stdout: '',
+        stderr: '',
+      }),
     );
     return { id };
   }
@@ -67,11 +92,15 @@ export class InheritedProcessHost implements ProcessHost {
   }
 
   async interrupt(handleId: string): Promise<void> {
-    this.requireProcess(handleId).child.kill('SIGINT');
+    const hosted = this.requireProcess(handleId);
+    hosted.terminationIntent = 'user_interrupt';
+    hosted.child.kill('SIGINT');
   }
 
   async stop(handleId: string): Promise<void> {
-    this.requireProcess(handleId).child.kill('SIGTERM');
+    const hosted = this.requireProcess(handleId);
+    hosted.terminationIntent = 'user_stop';
+    hosted.child.kill('SIGTERM');
   }
 
   subscribe(handleId: string, listener: ProcessListener): Unsubscribe {

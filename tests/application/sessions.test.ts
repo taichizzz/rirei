@@ -6,6 +6,7 @@ import {
   recoverOrphanedRun,
   RunAlreadyStartedError,
   SessionManager,
+  submitOrphanBid,
 } from '../../src/application/sessions.js';
 import type {
   ProcessEvent,
@@ -27,17 +28,31 @@ const adapter: AgentAdapter = {
   id: 'codex',
   displayName: 'Codex',
   executable: 'codex',
+  capabilities: {
+    interactive: true,
+    headless: false,
+    modelDiscovery: true,
+    modelVariants: true,
+    authenticationDiscovery: true,
+    usageCollection: true,
+    structuredEvents: false,
+  },
   async detectInstallation() {
     return { status: 'ready' };
   },
   async detectAuthentication() {
-    return { status: 'unknown' };
+    return {
+      status: 'unknown',
+      checkedAt: NOW,
+      source: 'none',
+      confidence: 'low',
+    };
   },
   async getVersion() {
     return 'test';
   },
   async getModels() {
-    return [];
+    return { status: 'available', values: [], source: 'test' };
   },
   async getEffortLevels() {
     return [];
@@ -46,9 +61,32 @@ const adapter: AgentAdapter = {
     return { executable: 'codex', args: ['test prompt'] };
   },
   async classifyExit(result) {
+    const providerEvent = result.observations.find(
+      (entry) => entry.kind !== 'provider_error',
+    );
+    if (providerEvent) {
+      const reason =
+        providerEvent.kind === 'rate_limit'
+          ? 'rate_limit'
+          : providerEvent.kind === 'usage_limit'
+            ? 'usage_limit'
+            : providerEvent.kind === 'authentication'
+              ? 'authentication_error'
+              : 'network_error';
+      return {
+        reason,
+        confidence: 'high',
+        source: 'provider_event',
+        ...(providerEvent.detail ? { providerCode: providerEvent.detail } : {}),
+      };
+    }
+    const completed = result.exitCode === 0;
     return {
-      reason: result.exitCode === 0 ? 'completed' : 'unknown_failure',
-      confidence: result.exitCode === 0 ? 'high' : 'low',
+      reason: completed ? 'completed' : 'unknown_failure',
+      confidence: completed ? 'high' : 'low',
+      source: completed ? 'provider_exit_code' : 'fallback',
+      providerCode:
+        result.exitCode === null ? undefined : String(result.exitCode),
     };
   },
 };
@@ -115,7 +153,7 @@ class FakeProcessHost implements ProcessHost {
 
 function initialState(root: string): RelayState {
   return {
-    schemaVersion: 4,
+    schemaVersion: 8,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -158,6 +196,8 @@ afterEach(async () => {
 const success: ProcessResult = {
   exitCode: 0,
   signal: null,
+  terminationIntent: 'none',
+  observations: [],
   stdout: '',
   stderr: '',
 };
@@ -196,6 +236,41 @@ describe('SessionManager', () => {
       role: 'implement',
       exitReason: 'completed',
       exitCode: 0,
+      exitClassification: {
+        reason: 'completed',
+        confidence: 'high',
+        source: 'provider_exit_code',
+        providerCode: '0',
+      },
+    });
+  });
+
+  it('persists a durable exit classification derived from provider observations', async () => {
+    const { root, state } = await project();
+    const host = new FakeProcessHost();
+    const manager = new SessionManager(host);
+    const run = await manager.startRun({
+      projectRoot: root,
+      state,
+      adapter,
+      prompt: 'Rate limited',
+      observations: [{ kind: 'rate_limit', detail: 'rate_limited' }],
+      selection: { operationId: 'rate-limit', terminalId: 'terminal-2' },
+    });
+
+    host.exit(run.handleId!, { ...success, exitCode: 42 });
+    await run.completion;
+    const persisted = await readState(root);
+    expect(persisted.agentHistory[0]).toMatchObject({
+      exitReason: 'rate_limit',
+      exitCode: 42,
+      exitClassification: {
+        reason: 'rate_limit',
+        confidence: 'high',
+        source: 'provider_event',
+        providerCode: 'rate_limited',
+      },
+      providerObservations: [{ kind: 'rate_limit', detail: 'rate_limited' }],
     });
   });
 
@@ -295,7 +370,7 @@ describe('SessionManager', () => {
     const persisted = await readState(root);
     expect(persisted.runs).toEqual([]);
     expect(persisted.agentHistory[0]).toMatchObject({
-      exitCode: 127,
+      exitCode: null,
       exitReason: 'unknown_failure',
     });
   });
@@ -334,7 +409,12 @@ describe('SessionManager', () => {
       state,
       adapter,
       prompt: 'Orphan',
-      controllerId: 'desktop:test-controller',
+      controller: {
+        kind: 'desktop',
+        instanceId: 'test-controller',
+        pid: 42,
+        bootId: 'test-boot',
+      },
       selection: {
         operationId: 'orphan',
         workspace: { id: 'ws-orphan', worktreePath: '/worktrees/orphan' },
@@ -345,14 +425,14 @@ describe('SessionManager', () => {
       recoverOrphanedRun({
         projectRoot: root,
         runId: run.runId,
-        requestedBy: 'test-user',
+        requestedBy: 'desktop:test-boot:test-controller',
         reason: 'unsafe while controlled',
       }),
     ).rejects.toThrow(/not orphaned/);
 
     const orphaned = await markControllerOrphaned(
       root,
-      'desktop:test-controller',
+      'desktop:test-boot:test-controller',
     );
     expect(orphaned.runs[0]).toMatchObject({
       runId: run.runId,
@@ -374,7 +454,7 @@ describe('SessionManager', () => {
     const recovered = await recoverOrphanedRun({
       projectRoot: root,
       runId: run.runId,
-      requestedBy: 'test-user',
+      requestedBy: 'desktop:test-boot:test-controller',
       reason: 'confirmed fake host stopped',
     });
     expect(recovered.runs).toEqual([]);
@@ -391,5 +471,117 @@ describe('SessionManager', () => {
       exitReason: 'interrupted',
       exitCode: null,
     });
+  });
+});
+
+describe('orphan bidding protocol', () => {
+  it('award the same orphaned run to the highest-priority deterministic bid', async () => {
+    const { root, state } = await project();
+    const host = new FakeProcessHost();
+    const manager = new SessionManager(host);
+    const run = await manager.startRun({
+      projectRoot: root,
+      state,
+      adapter,
+      prompt: 'Bid',
+      controller: {
+        kind: 'desktop',
+        instanceId: 'owner',
+        pid: 1,
+        bootId: 'test-boot',
+      },
+      selection: {
+        operationId: 'bidding',
+        workspace: { id: 'ws-bid', worktreePath: '/worktrees/bid' },
+      },
+    });
+    await markControllerOrphaned(root, 'desktop:test-boot:owner');
+
+    const low = await submitOrphanBid({
+      projectRoot: root,
+      runId: run.runId,
+      controllerId: 'cli:low-priority',
+      priority: 0,
+    });
+    const high = await submitOrphanBid({
+      projectRoot: root,
+      runId: run.runId,
+      controllerId: 'cli:high-priority',
+      priority: 5,
+    });
+
+    expect(low.bids).toHaveLength(1);
+    expect(high.won).toBe(true);
+    expect(high.winnerControllerId).toBe('cli:high-priority');
+    expect((await readState(root)).runs[0]?.bids).toHaveLength(2);
+    host.exit(run.handleId!, success);
+    await run.completion;
+  });
+
+  it('breaks equal-priority ties by earliest bid, then smallest id', async () => {
+    const { root, state } = await project();
+    const host = new FakeProcessHost();
+    const manager = new SessionManager(host);
+    const run = await manager.startRun({
+      projectRoot: root,
+      state,
+      adapter,
+      prompt: 'Tie',
+      controller: {
+        kind: 'desktop',
+        instanceId: 'owner',
+        pid: 1,
+        bootId: 'test-boot',
+      },
+      selection: {
+        operationId: 'tie',
+        workspace: { id: 'ws-tie', worktreePath: '/worktrees/tie' },
+      },
+    });
+    await markControllerOrphaned(root, 'desktop:test-boot:owner');
+
+    const first = await submitOrphanBid({
+      projectRoot: root,
+      runId: run.runId,
+      controllerId: 'cli:second-bidder',
+      priority: 1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await submitOrphanBid({
+      projectRoot: root,
+      runId: run.runId,
+      controllerId: 'cli:first-bidder',
+      priority: 1,
+    });
+
+    expect(first.won).toBe(true);
+    expect(first.winnerControllerId).toBe('cli:second-bidder');
+    expect(second.won).toBe(false);
+    expect(second.winnerControllerId).toBe('cli:second-bidder');
+    host.exit(run.handleId!, success);
+    await run.completion;
+  });
+
+  it('refuses to bid on a run that is not orphaned', async () => {
+    const { root, state } = await project();
+    const host = new FakeProcessHost();
+    const manager = new SessionManager(host);
+    const run = await manager.startRun({
+      projectRoot: root,
+      state,
+      adapter,
+      prompt: 'Live',
+      selection: { operationId: 'live-bid' },
+    });
+    await expect(
+      submitOrphanBid({
+        projectRoot: root,
+        runId: run.runId,
+        controllerId: 'cli:outsider',
+        priority: 1,
+      }),
+    ).rejects.toThrow(/not orphaned/);
+    host.exit(run.handleId!, success);
+    await run.completion;
   });
 });

@@ -6,8 +6,9 @@ Rirei permission approval is intentionally split into two independent boundaries
    or protocol.
 2. A trusted local companion submits a human decision to Rirei.
 
-This document specifies the second boundary. The channel is not activated yet, and no
-provider hooks are installed by the current release.
+This document specifies the second boundary. The decision channel is not activated yet.
+Rirei does install or host passive lifecycle observers, but they report only normalized status
+and cannot submit a permission or question response.
 
 ## Security model
 
@@ -61,13 +62,19 @@ activity feed.
 
 ## Provider activation
 
-- **Claude:** use the official `PermissionRequest` HTTP hook in Rirei's generated per-launch
-  settings. This is the recommended first live integration.
-- **Codex:** use an explicitly trusted `PermissionRequest` hook or a dedicated app-server
-  host. Never bypass trust for unrelated hooks.
+- **Claude:** generated per-launch settings use official `PermissionRequest` and
+  `PreToolUse`/`AskUserQuestion` hooks to report `needs_permission` or `waiting_for_input` to
+  the owning terminal. The hook intentionally emits no decision. A future decision channel
+  may extend this boundary without changing provider-global settings.
+- **Codex:** Rirei hosts `codex app-server` on a random, capability-token-authenticated loopback
+  WebSocket and attaches the native TUI through `--remote`. A second authenticated connection observes
+  `thread/status/changed` passively and never answers an app-server request.
 - **Gemini:** use ACP `session/request_permission`; native PTY output is not sufficient.
 - **Antigravity:** no verified structured approval interface is currently available, so it
   remains terminal-only.
+- **OpenCode:** the native TUI hosts a random-password loopback server. Rirei observes
+  authenticated SSE events and reconciles pending permission/question state through bounded
+  read-only REST requests. It never enables `--auto` or calls a reply endpoint.
 
 Terminal-output scraping and simulated approval keystrokes are prohibited because output can
 be spoofed, split, stale, or no longer associated with the visible prompt.

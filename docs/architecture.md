@@ -33,6 +33,7 @@ src/
 │   ├── migrations.ts     # ordered persistent state migrations
 │   ├── notes.ts          # note capture, resolution, and Git freshness
 │   ├── activity.ts       # global sanitized activity snapshot
+│   ├── journal.ts        # durable terminal lifecycle evidence
 │   └── events.ts         # compatibility projection hook
 ├── git/
 │   └── repository.ts     # discoverRepository, inspectGitBaseline, inspectGitSnapshot
@@ -49,11 +50,14 @@ tests/                    # Vitest suites mirroring src/
    arguments, resolves the repository, and calls into `lifecycle.ts` or the state/store
    helpers. Commands avoid business logic beyond argument handling and output formatting.
 
-2. **Application layer (`desktop/terminal-manager.mjs` & `src/application/sessions.ts`)** —
-   `TerminalManager` limits concurrency to 4 active terminals. It retains outputs per-tab.
+2. **Application layer (`desktop/terminal-daemon*.mjs` & `src/application/sessions.ts`)** —
+   the detached desktop daemon owns live PTYs, limits concurrency to 4 active terminals, and
+   retains bounded output independently of renderer and Electron-window lifetimes.
    `SessionManager` owns provider command preparation, durable run identity, worktree leases,
    process-host handles, controls, and one-time finalization. It depends on the typed
    `ProcessHost` contract rather than CLI, Electron, or a particular PTY implementation.
+   The daemon is also the authority for normalized lifecycle state and active runtime. It
+   synchronizes those observations to the run lease on a five-second cadence.
 
 3. **Lifecycle layer (`src/lifecycle.ts`)** — the shared operations that multiple commands
    need:
@@ -116,6 +120,8 @@ The same `createCheckpoint` / `renderHandoff` / `launchAgent` primitives back `r
   (write to a temp file, then `rename` over the target) so an interrupted process never
   leaves a half-written file. See [state-and-events.md](state-and-events.md).
 - **`~/Library/Application Support/Rirei/activity.json`** — bounded, sanitized, cross-project session snapshot for read-only companion surfaces.
+- **`~/Library/Application Support/Rirei/terminal-journal-*.json`** — bounded terminal evidence
+  used to discover and reconcile known projects after a desktop or daemon restart.
 - **`.relay/config.json`** — validated configuration. See [configuration.md](configuration.md).
 - **`.relay/checkpoints/<id>/`** — per-checkpoint snapshots. See
   [checkpoints-and-handoff.md](checkpoints-and-handoff.md).

@@ -1,7 +1,5 @@
 export const DEFAULT_USAGE_THRESHOLDS = Object.freeze([20, 5]);
 
-const WINDOW_KEYS = Object.freeze(['fiveHour', 'week']);
-
 function timestamp(value) {
   if (typeof value !== 'string') return null;
   const parsed = Date.parse(value);
@@ -15,6 +13,38 @@ function percentage(value) {
     value <= 100
     ? value
     : null;
+}
+
+function planWindows(plan) {
+  if (Array.isArray(plan.metrics) && plan.metrics.length > 0) {
+    return plan.metrics
+      .filter(
+        (metric) =>
+          metric &&
+          typeof metric === 'object' &&
+          !Array.isArray(metric) &&
+          typeof metric.id === 'string',
+      )
+      .map((metric) => ({
+        key: metric.id,
+        usedPercentage: percentage(metric.used),
+        remainingPercentage: percentage(metric.remaining),
+        resetsAt: metric.resetsAt === undefined ? null : metric.resetsAt,
+        status: metric.status,
+      }));
+  }
+  return ['fiveHour', 'week']
+    .map((key) => ({
+      key,
+      usedPercentage: percentage(plan[key]?.usedPercentage),
+      remainingPercentage: percentage(plan[key]?.remainingPercentage),
+      resetsAt:
+        plan[key]?.resetsAt === null || plan[key]?.resetsAt === undefined
+          ? null
+          : plan[key]?.resetsAt,
+      status: plan[key]?.status,
+    }))
+    .filter((window) => window.status !== undefined);
 }
 
 export function createUsageAlertPolicy(thresholds = DEFAULT_USAGE_THRESHOLDS) {
@@ -46,10 +76,10 @@ export function createUsageAlertPolicy(thresholds = DEFAULT_USAGE_THRESHOLDS) {
           continue;
         providerCaptures.set(providerKey, capturedAt);
 
-        for (const windowKey of WINDOW_KEYS) {
-          const usageWindow = plan[windowKey];
-          const remaining = percentage(usageWindow?.remainingPercentage);
-          if (usageWindow?.status !== 'available' || remaining === null)
+        for (const usageWindow of planWindows(plan)) {
+          const windowKey = usageWindow.key;
+          const remaining = percentage(usageWindow.remainingPercentage);
+          if (usageWindow.status !== 'available' || remaining === null)
             continue;
 
           const resetAt =

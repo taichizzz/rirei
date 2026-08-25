@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  AGENT_EXIT_REASONS,
+  EXIT_CLASSIFICATION_SOURCES,
+} from '../agents/adapter.js';
 
 const workItemSchema = z.object({
   description: z.string().min(1),
@@ -104,6 +108,56 @@ export const runLeaseStatusSchema = z.enum([
 ]);
 export type RunLeaseStatus = z.infer<typeof runLeaseStatusSchema>;
 
+export const runLifecycleStatusSchema = z.enum([
+  'starting',
+  'working',
+  'needs_permission',
+  'waiting_for_input',
+  'stopping',
+  'completed',
+  'failed',
+  'cancelled',
+  'orphaned',
+]);
+export type RunLifecycleStatus = z.infer<typeof runLifecycleStatusSchema>;
+
+export const runAttentionKindSchema = z.enum([
+  'permission',
+  'input',
+  'unknown',
+]);
+export type RunAttentionKind = z.infer<typeof runAttentionKindSchema>;
+
+export const controllerKindSchema = z.enum(['cli', 'desktop', 'daemon']);
+export type ControllerKind = z.infer<typeof controllerKindSchema>;
+
+/**
+ * Structured, collision-proof identity of the process that owns a provider run.
+ * The canonical string form includes kind, boot identity, and instance ID. A
+ * recycled PID can therefore never prove ownership of an earlier lease.
+ */
+export const controllerIdentitySchema = z.object({
+  kind: controllerKindSchema,
+  instanceId: z.string().min(1),
+  pid: z.number().int().positive().optional(),
+  bootId: z.string().min(1),
+});
+export type ControllerIdentity = z.infer<typeof controllerIdentitySchema>;
+
+export const ORPHAN_BID_LIMIT = 8;
+
+/**
+ * A deterministic takeover claim recorded against an orphaned run. Several
+ * controllers may bid for the same run; the winner is the highest priority,
+ * then the earliest timestamp, then the lexicographically smallest id.
+ */
+export const orphanBidSchema = z.object({
+  controllerId: z.string().min(1),
+  priority: z.number().int().nonnegative(),
+  at: z.string().datetime(),
+});
+export type OrphanBid = z.infer<typeof orphanBidSchema>;
+
 /**
  * An explicit claim on a working tree by one provider run. Leases replace the
  * single `currentAgent`/`currentRunId` pair so several agents can run in one
@@ -126,13 +180,66 @@ const runLeaseSchema = z.object({
   effort: z.string().min(1).optional(),
   launchMode: z.enum(['new', 'resume', 'fork']),
   providerSessionId: z.string().min(1).optional(),
-  /** Who owns the process, e.g. `cli:<pid>`. Recorded for force recovery. */
+  /** Who owns the process, e.g. `cli:<id>`. Recorded for force recovery. */
   controllerId: z.string().min(1),
+  /** Structured identity of the owning controller. */
+  controller: controllerIdentitySchema,
+  bridgeIdentity: z
+    .object({
+      instanceId: z.string().min(1),
+      pid: z.number().int().positive(),
+      protocolVersion: z.literal(1),
+    })
+    .optional(),
+  lifecycleStatus: runLifecycleStatusSchema,
+  attentionKind: runAttentionKindSchema.optional(),
+  /** Monotonic daemon-owned runtime, excluding permission/input waits. */
+  activeRuntimeSeconds: z.number().finite().nonnegative(),
+  /** Rejects delayed observations from older daemon transitions. */
+  runtimeSequence: z.number().int().nonnegative(),
+  /** Deterministic takeover bids against an orphaned run, oldest first. */
+  bids: z.array(orphanBidSchema).max(ORPHAN_BID_LIMIT).optional(),
   startedAt: z.string().datetime(),
   lastSeenAt: z.string().datetime(),
   status: runLeaseStatusSchema,
 });
 export type RunLease = z.infer<typeof runLeaseSchema>;
+
+const agentExitReasonSchema = z.enum(AGENT_EXIT_REASONS);
+const exitClassificationSourceSchema = z.enum(EXIT_CLASSIFICATION_SOURCES);
+
+const providerObservationSchema = z.object({
+  kind: z.enum([
+    'provider_error',
+    'rate_limit',
+    'usage_limit',
+    'authentication',
+    'network',
+  ]),
+  detail: z
+    .enum([
+      'invalid_token',
+      'expired_token',
+      'quota_exhausted',
+      'rate_limited',
+      'network_unavailable',
+      'provider_unavailable',
+    ])
+    .optional(),
+});
+
+const exitClassificationSchema = z.object({
+  reason: agentExitReasonSchema,
+  confidence: z.enum(['low', 'medium', 'high']),
+  source: exitClassificationSourceSchema,
+  providerCode: z
+    .string()
+    .min(1)
+    .max(80)
+    .regex(/^[a-zA-Z0-9._:-]+$/)
+    .optional(),
+  retryAt: z.string().datetime().optional(),
+});
 
 const agentRunSchema = z.object({
   id: z.string().min(1).optional(),
@@ -142,7 +249,9 @@ const agentRunSchema = z.object({
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime().optional(),
   exitCode: z.number().int().nullable().optional(),
-  exitReason: z.string().optional(),
+  exitReason: agentExitReasonSchema.optional(),
+  exitClassification: exitClassificationSchema.optional(),
+  providerObservations: z.array(providerObservationSchema).max(16).optional(),
   launchMode: z.enum(['new', 'resume', 'fork']).optional(),
   providerSessionId: z.string().min(1).optional(),
   resumeTargetKind: z.enum(['latest', 'picker', 'id']).optional(),
@@ -152,9 +261,13 @@ const agentRunSchema = z.object({
   workspaceId: z.string().min(1).optional(),
   branchLabel: z.string().min(1).optional(),
   role: z.enum(['implement', 'review', 'verify', 'investigate']).optional(),
+  lifecycleStatus: runLifecycleStatusSchema.optional(),
+  attentionKind: runAttentionKindSchema.optional(),
+  activeRuntimeSeconds: z.number().finite().nonnegative().optional(),
+  runtimeSequence: z.number().int().nonnegative().optional(),
 });
 
-export const LATEST_STATE_SCHEMA = 4;
+export const LATEST_STATE_SCHEMA = 8;
 
 export const relayStateSchema = z.object({
   schemaVersion: z.literal(LATEST_STATE_SCHEMA),

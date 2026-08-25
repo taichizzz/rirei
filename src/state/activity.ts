@@ -21,10 +21,10 @@ import {
 import { rireiDataHome } from '../worktrees/data-dir.js';
 import { readRegistry } from '../worktrees/registry.js';
 import type { WorkspaceRole } from '../worktrees/schema.js';
-import type { RelayState, RunLease } from './schema.js';
+import type { RelayState, RunLease, RunLifecycleStatus } from './schema.js';
 import { readState } from './store.js';
 
-export const LATEST_ACTIVITY_SCHEMA = 1;
+export const LATEST_ACTIVITY_SCHEMA = 3;
 export const ACTIVITY_SESSION_LIMIT = 128;
 export const ACTIVITY_PROJECT_LIMIT = 128;
 export const ACTIVITY_STRING_LIMIT = 160;
@@ -46,7 +46,13 @@ const SOURCE_FILE_PATTERN = /^activity-source-([0-9a-f]{64})\.json$/;
 const MAX_SUPPORT_FILE_BYTES = 1_000_000;
 const USAGE_CACHE_MS = 60_000;
 
-const agentSchema = z.enum(['claude', 'codex', 'gemini', 'antigravity']);
+const agentSchema = z.enum([
+  'claude',
+  'codex',
+  'gemini',
+  'antigravity',
+  'opencode',
+]);
 const roleSchema = z.enum(['implement', 'review', 'verify', 'investigate']);
 const statusSchema = z.enum([
   'starting',
@@ -58,13 +64,42 @@ const statusSchema = z.enum([
   'failed',
   'orphaned',
 ]);
+const lifecycleStateSchema = z.enum([
+  'starting',
+  'working',
+  'needs_permission',
+  'waiting_for_input',
+  'stopping',
+  'completed',
+  'failed',
+  'cancelled',
+  'orphaned',
+]);
+const attentionKindSchema = z.enum(['permission', 'input', 'unknown']);
 const boundedString = z.string().min(1).max(ACTIVITY_STRING_LIMIT);
-const usageSchema = z
+const usageMetricSchema = z
   .object({
-    window: z.enum(['five_hour', 'week']),
-    remainingPercentage: z.number().min(0).max(100),
-    resetsAt: z.string().datetime().nullable(),
-    fresh: z.boolean(),
+    id: boundedString,
+    kind: z.enum(['quota', 'requests', 'tokens', 'credits', 'cost']),
+    unit: z.enum(['percent', 'requests', 'tokens', 'credits', 'currency']),
+    window: z
+      .object({
+        label: boundedString,
+        durationSeconds: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+    used: z.number().finite().optional(),
+    remaining: z.number().finite().optional(),
+    limit: z.number().finite().optional(),
+    resetsAt: z.string().datetime().optional(),
+    status: z.enum(['available', 'stale']),
+    statusReason: z.enum([
+      'live',
+      'sample_stale',
+      'window_expired',
+      'invalid_capture',
+    ]),
   })
   .strict();
 const activitySessionSchema = z
@@ -78,11 +113,14 @@ const activitySessionSchema = z
     branchLabel: boundedString,
     role: roleSchema,
     status: statusSchema,
+    lifecycleState: lifecycleStateSchema,
+    attentionKind: attentionKindSchema.optional(),
     message: boundedString.optional(),
     startedAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
+    activeRuntimeSeconds: z.number().finite().nonnegative().default(0),
     needsAttention: z.boolean(),
-    usage: usageSchema.optional(),
+    usage: z.array(usageMetricSchema).max(16).optional(),
   })
   .strict();
 
@@ -132,6 +170,7 @@ interface LockOwner {
 
 const heartbeatTimers = new Map<string, NodeJS.Timeout>();
 const heartbeatInFlight = new Set<string>();
+const heartbeatPending = new Set<string>();
 const usageCache = new Map<
   string,
   {
@@ -453,7 +492,13 @@ function safeValue(value: string, fallback: string): string {
   return normalized.slice(0, ACTIVITY_STRING_LIMIT);
 }
 
-function fixedMessage(status: RireiActivitySession['status']): string {
+function fixedMessage(
+  status: RireiActivitySession['status'],
+  lifecycleState?: RunLifecycleStatus,
+): string {
+  if (lifecycleState === 'needs_permission') return 'Agent needs permission';
+  if (lifecycleState === 'waiting_for_input')
+    return 'Agent is waiting for input';
   switch (status) {
     case 'starting':
       return 'Starting agent';
@@ -477,29 +522,31 @@ function fixedMessage(status: RireiActivitySession['status']): string {
 export function selectActivityUsage(
   provider: ProviderPlanUsage,
 ): RireiActivitySession['usage'] {
-  const candidates = [
-    provider.fiveHour
-      ? { window: 'five_hour' as const, value: provider.fiveHour }
-      : undefined,
-    provider.week
-      ? { window: 'week' as const, value: provider.week }
-      : undefined,
-  ].filter((candidate) => candidate !== undefined);
-  candidates.sort(
-    (left, right) =>
-      Number(left.value.status !== 'available') -
-        Number(right.value.status !== 'available') ||
-      left.value.remainingPercentage - right.value.remainingPercentage ||
-      (left.window === 'five_hour' ? -1 : 1),
-  );
-  const selected = candidates[0];
-  if (!selected) return undefined;
-  return {
-    window: selected.window,
-    remainingPercentage: selected.value.remainingPercentage,
-    resetsAt: selected.value.resetsAt,
-    fresh: selected.value.status === 'available',
-  };
+  return provider.metrics.length > 0
+    ? provider.metrics.slice(0, 16).map((metric) => ({
+        id: safeValue(metric.id, 'metric'),
+        kind: metric.kind,
+        unit: metric.unit,
+        ...(metric.window
+          ? {
+              window: {
+                label: safeValue(metric.window.label, 'Usage'),
+                ...(metric.window.durationSeconds
+                  ? { durationSeconds: metric.window.durationSeconds }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(metric.used !== undefined ? { used: metric.used } : {}),
+        ...(metric.remaining !== undefined
+          ? { remaining: metric.remaining }
+          : {}),
+        ...(metric.limit !== undefined ? { limit: metric.limit } : {}),
+        ...(metric.resetsAt ? { resetsAt: metric.resetsAt } : {}),
+        status: metric.status,
+        statusReason: metric.statusReason,
+      }))
+    : undefined;
 }
 
 async function projectUsage(
@@ -536,7 +583,11 @@ async function projectUsage(
 
 export function mapLeaseStatus(
   status: RunLease['status'],
+  lifecycleStatus?: RunLifecycleStatus,
 ): RireiActivitySession['status'] {
+  if (lifecycleStatus === 'needs_permission') return 'needs_attention';
+  if (lifecycleStatus === 'waiting_for_input') return 'waiting';
+  if (lifecycleStatus === 'orphaned') return 'orphaned';
   switch (status) {
     case 'starting':
       return 'starting';
@@ -548,6 +599,14 @@ export function mapLeaseStatus(
     case 'orphaned':
       return 'orphaned';
   }
+}
+
+function finalLifecycleStatus(
+  status: RireiActivitySession['status'],
+): RunLifecycleStatus {
+  if (status === 'completed' || status === 'cancelled' || status === 'failed')
+    return status;
+  return 'orphaned';
 }
 
 function historyStatus(
@@ -563,6 +622,7 @@ async function projectSessions(
   projectRoot: string,
   state: RelayState,
   now: number,
+  previousSessions: RireiActivitySession[],
 ): Promise<RireiActivitySession[]> {
   const usageByAgent = await projectUsage(projectRoot, now);
   let privacyMode = true;
@@ -606,7 +666,7 @@ async function projectSessions(
     };
   };
   const sessions: RireiActivitySession[] = [];
-  const projectionTime = new Date(now).toISOString();
+  void previousSessions;
   for (const lease of state.runs) {
     if (!lease.terminalId) continue;
     const agent = agentSchema.safeParse(lease.agent);
@@ -616,7 +676,7 @@ async function projectSessions(
       lease.branchLabel,
       lease.role,
     );
-    const status = mapLeaseStatus(lease.status);
+    const status = mapLeaseStatus(lease.status, lease.lifecycleStatus);
     const usage = usageByAgent.get(agent.data);
     sessions.push({
       id: safeValue(lease.terminalId, 'session'),
@@ -628,10 +688,17 @@ async function projectSessions(
       branchLabel: metadata.branchLabel,
       role: metadata.role,
       status,
-      message: fixedMessage(status),
+      lifecycleState: lease.lifecycleStatus,
+      ...(lease.attentionKind ? { attentionKind: lease.attentionKind } : {}),
+      message: fixedMessage(status, lease.lifecycleStatus),
       startedAt: lease.startedAt,
-      updatedAt: projectionTime,
-      needsAttention: status === 'orphaned' || status === 'needs_attention',
+      updatedAt: lease.lastSeenAt,
+      activeRuntimeSeconds: lease.activeRuntimeSeconds,
+      needsAttention: [
+        'needs_permission',
+        'waiting_for_input',
+        'orphaned',
+      ].includes(lease.lifecycleStatus),
       ...(usage ? { usage } : {}),
     });
   }
@@ -652,6 +719,7 @@ async function projectSessions(
       run.role,
     );
     const status = historyStatus(run.exitReason);
+    const lifecycleState = run.lifecycleStatus ?? finalLifecycleStatus(status);
     const usage = usageByAgent.get(agent.data);
     sessions.push({
       id: safeValue(run.terminalId, 'session'),
@@ -663,9 +731,12 @@ async function projectSessions(
       branchLabel: metadata.branchLabel,
       role: metadata.role,
       status,
-      message: fixedMessage(status),
+      lifecycleState,
+      ...(run.attentionKind ? { attentionKind: run.attentionKind } : {}),
+      message: fixedMessage(status, lifecycleState),
       startedAt: run.startedAt,
       updatedAt: run.endedAt,
+      activeRuntimeSeconds: run.activeRuntimeSeconds ?? 0,
       needsAttention: status === 'failed',
       ...(usage ? { usage } : {}),
     });
@@ -694,12 +765,20 @@ async function publishLocked(
   const nowIso = new Date().toISOString();
   const key = sourceKey(projectRoot);
   const registry = await readSources();
+  const previousProjection = sourceSnapshotSchema.safeParse(
+    await readRaw(projectSourceFilePath(key)),
+  );
   const projectProjection = sourceSnapshotSchema.parse({
     schemaVersion: 1,
     key,
     updatedAt: nowIso,
     sessions: (
-      await projectSessions(projectRoot, currentState, Date.now())
+      await projectSessions(
+        projectRoot,
+        currentState,
+        Date.now(),
+        previousProjection.success ? previousProjection.data.sessions : [],
+      )
     ).slice(0, ACTIVITY_SESSION_LIMIT),
   });
   await atomicWrite(projectSourceFilePath(key), projectProjection);
@@ -744,7 +823,9 @@ async function publishLocked(
           sessions.push({
             ...session,
             status: 'needs_attention',
-            message: fixedMessage('needs_attention'),
+            lifecycleState: 'orphaned',
+            attentionKind: 'unknown',
+            message: fixedMessage('needs_attention', 'orphaned'),
             needsAttention: true,
           });
         } else {
@@ -787,8 +868,11 @@ function updateHeartbeat(projectRoot: string, state: RelayState): void {
   }
   const key = path.resolve(projectRoot);
   if (heartbeatTimers.has(key)) return;
-  const timer = setInterval(() => {
-    if (heartbeatInFlight.has(key)) return;
+  const publishHeartbeat = () => {
+    if (heartbeatInFlight.has(key)) {
+      heartbeatPending.add(key);
+      return;
+    }
     heartbeatInFlight.add(key);
     void readState(projectRoot)
       .then(async (latest) => {
@@ -796,8 +880,13 @@ function updateHeartbeat(projectRoot: string, state: RelayState): void {
         if (!hasPublishableSessions(latest)) stopActivityHeartbeat(projectRoot);
       })
       .catch(() => undefined)
-      .finally(() => heartbeatInFlight.delete(key));
-  }, HEARTBEAT_INTERVAL_MS);
+      .finally(() => {
+        heartbeatInFlight.delete(key);
+        if (heartbeatPending.delete(key) && heartbeatTimers.has(key))
+          queueMicrotask(publishHeartbeat);
+      });
+  };
+  const timer = setInterval(publishHeartbeat, HEARTBEAT_INTERVAL_MS);
   timer.unref();
   heartbeatTimers.set(key, timer);
 }
@@ -808,6 +897,7 @@ export function stopActivityHeartbeat(projectRoot: string): void {
   if (timer) clearInterval(timer);
   heartbeatTimers.delete(key);
   heartbeatInFlight.delete(key);
+  heartbeatPending.delete(key);
   usageCache.delete(key);
 }
 

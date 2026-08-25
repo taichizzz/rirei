@@ -49,13 +49,42 @@ function planWindow(window: PlanWindow | undefined): string {
   return window.status === 'stale' ? `${value} (stale)` : value;
 }
 
+function metricValue(metric: ProviderPlanUsage['metrics'][number]): string {
+  if (metric.unit === 'percent' && metric.used !== undefined) {
+    const remaining =
+      metric.remaining !== undefined
+        ? ` (${Math.round(metric.remaining * 100) / 100}% remaining)`
+        : '';
+    const display = `${Math.round(metric.used * 100) / 100}% used${remaining}`;
+    return metric.status === 'stale' ? `${display} (stale)` : display;
+  }
+  const value = metric.remaining ?? metric.used;
+  if (value === undefined) return '-';
+  const suffix = metric.unit === 'percent' ? '%' : ` ${metric.unit}`;
+  const display = `${Math.round(value * 100) / 100}${suffix}`;
+  return metric.status === 'stale' ? `${display} (stale)` : display;
+}
+
 function planRow(plan: ProviderPlanUsage): string {
-  return (
-    plan.displayName.padEnd(15) +
-    plan.status.padEnd(11) +
-    planWindow(plan.fiveHour).padEnd(20) +
-    planWindow(plan.week)
-  );
+  const windows =
+    plan.metrics.length > 0
+      ? plan.metrics.map((metric) => ({
+          label: metric.window?.label ?? metric.id,
+          value: metricValue(metric),
+        }))
+      : [
+          { label: '5-hour', value: planWindow(plan.fiveHour) },
+          { label: 'Weekly', value: planWindow(plan.week) },
+        ];
+  return windows
+    .map(
+      ({ label, value }) =>
+        plan.displayName.padEnd(15) +
+        plan.status.padEnd(11) +
+        label.padEnd(16) +
+        value,
+    )
+    .join('\n');
 }
 
 export function usageCommand(): Command {
@@ -72,7 +101,7 @@ export function usageCommand(): Command {
           process.stdout.write(
             `${JSON.stringify(
               {
-                schemaVersion: 1,
+                schemaVersion: 2,
                 task: { title: 'Provider plans', status: 'active' },
                 plans,
               },
@@ -83,7 +112,7 @@ export function usageCommand(): Command {
           return;
         }
         process.stdout.write(
-          `${['Provider plan usage', 'Provider       Status     5-hour              Weekly', ...plans.map(planRow)].join('\n')}\n`,
+          `${['Provider plan usage', 'Provider       Status      Window          Usage', ...plans.map(planRow)].join('\n')}\n`,
         );
         return;
       }
@@ -101,7 +130,7 @@ export function usageCommand(): Command {
       const plans = await readProviderPlanUsage(root);
       if (options.json) {
         process.stdout.write(
-          `${JSON.stringify({ schemaVersion: 1, ...summary, plans }, null, 2)}\n`,
+          `${JSON.stringify({ schemaVersion: 2, ...summary, plans }, null, 2)}\n`,
         );
         return;
       }
@@ -113,7 +142,7 @@ export function usageCommand(): Command {
         ...summary.agents.map(row),
         '',
         'Provider plan usage',
-        'Provider       Status     5-hour              Weekly',
+        'Provider       Status      Window          Usage',
         ...plans.map(planRow),
       ];
       process.stdout.write(`${lines.join('\n')}\n`);

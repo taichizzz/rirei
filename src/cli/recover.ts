@@ -1,5 +1,12 @@
 import { Command } from 'commander';
-import { recoverOrphanedRun } from '../application/sessions.js';
+import {
+  recoverOrphanedRun,
+  submitOrphanBid,
+} from '../application/sessions.js';
+import {
+  buildControllerIdentity,
+  controllerIdFor,
+} from '../application/controller.js';
 import {
   discoverRepository,
   ensureRelayLocalExclusion,
@@ -43,15 +50,34 @@ export function recoverCommand(): Command {
           throw new Error(
             'The recorded provider still has an active controller. Stop it through that controller; forced recovery is only allowed for orphaned runs.',
           );
-        const recovered = target
-          ? await recoverOrphanedRun({
-              projectRoot,
-              runId: target.runId,
-              requestedBy: `cli:${process.pid}`,
-              reason:
-                options.reason?.trim() || 'user confirmed provider stopped',
-            })
-          : await recoverStaleRun(projectRoot, state);
+        const controllerId = controllerIdFor(
+          buildControllerIdentity({ kind: 'cli' }),
+        );
+        const reason =
+          options.reason?.trim() || 'user confirmed provider stopped';
+        if (target) {
+          const bid = await submitOrphanBid({
+            projectRoot,
+            runId: target.runId,
+            controllerId,
+            priority: 1,
+          });
+          if (!bid.won)
+            throw new Error(
+              `Another controller won the bid for run ${target.runId} (${bid.winnerControllerId}).`,
+            );
+          await recoverOrphanedRun({
+            projectRoot,
+            runId: target.runId,
+            requestedBy: controllerId,
+            reason,
+          });
+          process.stdout.write(
+            'Recovered the stale Relay run as interrupted.\n',
+          );
+          return;
+        }
+        const recovered = await recoverStaleRun(projectRoot, state);
         process.stdout.write(
           recovered
             ? 'Recovered the stale Relay run as interrupted.\n'

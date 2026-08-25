@@ -11,6 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { relayPath } from '../safety/path-policy.js';
+import { interruptedExitClassification } from '../agents/adapter.js';
 import {
   LATEST_STATE_SCHEMA,
   OPERATION_LEDGER_LIMIT,
@@ -139,6 +140,7 @@ function normalizeClosedTask(state: RelayState): RelayState {
             endedAt: state.task.updatedAt,
             exitCode: null,
             exitReason: 'interrupted',
+            exitClassification: interruptedExitClassification(),
           },
     ),
   };

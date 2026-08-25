@@ -1,6 +1,6 @@
 {
   "name": "@taichizzz/rirei",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "private": true,
   "description": "Local orchestration and durable handoffs for officially installed coding-agent CLIs.",
   "license": "MIT",
@@ -77,10 +77,20 @@
     },
     "asar": true,
     "asarUnpack": [
+      "desktop/terminal-daemon.mjs",
+      "desktop/terminal-daemon-server.mjs",
+      "desktop/terminal-daemon-protocol.mjs",
+      "desktop/terminal-control.mjs",
+      "desktop/provider-lifecycle-hook.cjs",
+      "desktop/codex-lifecycle-wrapper.mjs",
+      "desktop/opencode-lifecycle-wrapper.mjs",
       "desktop/pty_bridge.py"
     ],
     "files": [
       "desktop/**/*",
+      "!desktop/**/__pycache__/**",
+      "!desktop/**/*.pyc",
+      "!desktop/**/*.pyo",
       "package.json"
     ],
     "protocols": [

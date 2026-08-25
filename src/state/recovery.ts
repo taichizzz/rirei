@@ -1,5 +1,6 @@
 import { appendEvent } from './events.js';
 import { releaseLease } from './leases.js';
+import { interruptedExitClassification } from '../agents/adapter.js';
 import type { RelayState } from './schema.js';
 import { updateState } from './store.js';
 
@@ -48,6 +49,7 @@ export async function recoverStaleRun(
       endedAt,
       exitCode: null,
       exitReason: 'interrupted',
+      exitClassification: interruptedExitClassification(),
     };
     // Force recovery releases the lease and records who asked for it.
     return releaseLease(

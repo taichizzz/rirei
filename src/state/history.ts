@@ -15,6 +15,8 @@ export interface TaskHistoryEntry {
     model?: string;
     effort?: string;
     exitReason?: string;
+    exitClassification?: RelayState['agentHistory'][number]['exitClassification'];
+    providerObservations?: RelayState['agentHistory'][number]['providerObservations'];
     launchMode?: 'new' | 'resume' | 'fork';
     providerSessionId?: string;
     terminalId?: string;
@@ -41,6 +43,8 @@ function historyEntry(state: RelayState, current: boolean): TaskHistoryEntry {
       model: run.model,
       effort: run.effort,
       exitReason: run.exitReason,
+      exitClassification: run.exitClassification,
+      providerObservations: run.providerObservations,
       launchMode: run.launchMode,
       providerSessionId: run.providerSessionId,
       terminalId: run.terminalId,
@@ -75,6 +79,13 @@ function matchesQuery(entry: TaskHistoryEntry, query: string): boolean {
       note.text,
       note.reason,
       note.provenance.agent,
+    ]),
+    ...entry.runs.flatMap((record) => [
+      record.exitClassification?.reason,
+      record.exitClassification?.providerCode,
+      ...(record.providerObservations ?? []).map(
+        (observation) => observation.kind,
+      ),
     ]),
   ];
   const normalized = query.trim().toLocaleLowerCase();

@@ -74,3 +74,17 @@ jobs:
       - name: Smoke packaged macOS PTY
         if: matrix.os == 'macos-latest'
         run: npm run desktop:smoke
+
+  required:
+    name: verify
+    if: always()
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the platform matrix
+        if: needs.verify.result != 'success'
+        run: exit 1
+
+      - name: Confirm the platform matrix
+        run: echo "Windows, macOS, and Linux verification passed."

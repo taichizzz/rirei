@@ -1,5 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import spawn from 'cross-spawn';
 import type { ProcessResult } from '../agents/adapter.js';
 import type {
   ProcessEvent,

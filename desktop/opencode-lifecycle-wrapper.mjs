@@ -1,10 +1,15 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
+const dependencyUrl = import.meta.url.includes('.asar.unpacked/')
+  ? import.meta.url.replace('.asar.unpacked/', '.asar/')
+  : import.meta.url;
+const spawn = createRequire(dependencyUrl)('cross-spawn');
 const STARTUP_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 2_000;
 const EVENT_IDLE_TIMEOUT_MS = 15_000;
@@ -185,23 +190,96 @@ export async function endpointJson(
   }
 }
 
+async function findListeningPortsForPid(pid) {
+  if (process.platform === 'win32') {
+    try {
+      const { stdout } = await execFileAsync('netstat', ['-ano', '-p', 'tcp'], {
+        encoding: 'utf8',
+        timeout: 1000,
+        maxBuffer: 512 * 1024,
+      });
+      const ports = [];
+      const pidStr = String(pid);
+      for (const line of stdout.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('TCP')) continue;
+        const parts = trimmed.split(/\s+/);
+        if (
+          parts.length >= 5 &&
+          parts[3] === 'LISTENING' &&
+          parts[4] === pidStr
+        ) {
+          const lastColon = parts[1].lastIndexOf(':');
+          if (lastColon !== -1) {
+            const port = Number.parseInt(parts[1].slice(lastColon + 1), 10);
+            if (port > 0 && port <= 65535) ports.push(port);
+          }
+        }
+      }
+      return ports;
+    } catch {
+      return [];
+    }
+  }
+
+  const lsofCandidates = ['/usr/sbin/lsof', 'lsof'];
+  for (const lsofBin of lsofCandidates) {
+    try {
+      const { stdout } = await execFileAsync(
+        lsofBin,
+        ['-nP', '-a', '-p', String(pid), '-iTCP', '-sTCP:LISTEN', '-Fn'],
+        { encoding: 'utf8', timeout: 1000, maxBuffer: 64 * 1024 },
+      );
+      const ports = stdout
+        .split('\n')
+        .map(
+          (line) =>
+            /^n(?:127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):([1-9][0-9]{0,4})$/.exec(
+              line,
+            )?.[1],
+        )
+        .filter(Boolean)
+        .map((p) => Number(p));
+      if (ports.length > 0) return ports;
+    } catch {
+      // Continue to next candidate
+    }
+  }
+
+  try {
+    const { stdout } = await execFileAsync('ss', ['-tlnp'], {
+      encoding: 'utf8',
+      timeout: 1000,
+      maxBuffer: 256 * 1024,
+    });
+    const ports = [];
+    const pidPattern = new RegExp(`pid=${pid}(?:,|\\))`);
+    for (const line of stdout.split('\n')) {
+      if (line.includes('LISTEN') && pidPattern.test(line)) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          const lastColon = parts[3].lastIndexOf(':');
+          if (lastColon !== -1) {
+            const port = Number.parseInt(parts[3].slice(lastColon + 1), 10);
+            if (port > 0 && port <= 65535) ports.push(port);
+          }
+        }
+      }
+    }
+    return ports;
+  } catch {
+    return [];
+  }
+}
+
 async function discoverPort(child, headers, signal) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode)
       throw new Error('OpenCode exited before lifecycle monitoring started.');
     try {
-      const { stdout } = await execFileAsync(
-        '/usr/sbin/lsof',
-        ['-nP', '-a', '-p', String(child.pid), '-iTCP', '-sTCP:LISTEN', '-Fn'],
-        { encoding: 'utf8', timeout: 1000, maxBuffer: 64 * 1024 },
-      );
-      const ports = stdout
-        .split('\n')
-        .map((line) => /^n127\.0\.0\.1:([1-9][0-9]{0,4})$/.exec(line)?.[1])
-        .filter(Boolean);
-      for (const portText of ports) {
-        const port = Number(portText);
+      const ports = await findListeningPortsForPid(child.pid);
+      for (const port of ports) {
         if (port > 65_535) continue;
         const baseURL = `http://127.0.0.1:${port}/`;
         try {
@@ -218,7 +296,7 @@ async function discoverPort(child, headers, signal) {
         }
       }
     } catch {
-      // lsof exits nonzero until the child owns a listening socket.
+      // Ports query may fail until socket is bound
     }
     await abortableDelay(100, signal);
   }

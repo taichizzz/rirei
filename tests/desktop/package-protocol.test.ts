@@ -13,6 +13,8 @@ describe('packaged desktop protocol', () => {
       'desktop/terminal-daemon-server.mjs',
       'desktop/terminal-daemon-protocol.mjs',
       'desktop/terminal-control.mjs',
+      'desktop/terminal-host.mjs',
+      'desktop/node-pty-loader.cjs',
       'desktop/provider-lifecycle-hook.cjs',
       'desktop/codex-lifecycle-wrapper.mjs',
       'desktop/opencode-lifecycle-wrapper.mjs',

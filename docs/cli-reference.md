@@ -359,6 +359,50 @@ Reports:
 
 ---
 
+## `relay tui`
+
+Launch the cross-platform interactive terminal dashboard in Windows Terminal or any ANSI terminal.
+
+```powershell
+relay tui
+```
+
+Features:
+
+- Live list of active Relay projects, git branches, and worktree roles.
+- Running agent sessions with active runtime accounting and attention badges.
+- 5-hour and 7-day provider plan limits and reset times.
+- Hotkeys:
+  - `c`: Launch Claude session
+  - `o`: Launch Codex session
+  - `g`: Launch Gemini session
+  - `a`: Launch Antigravity session
+  - `p`: Launch OpenCode session
+  - `s`: Open new shell terminal
+  - `Enter`: Attach to selected session (raw passthrough mode; press `Ctrl+]` to detach)
+  - `u`: Refresh dashboard state
+  - `q`: Quit dashboard (leaves daemon and agents running)
+
+---
+
+## `relay daemon`
+
+Internal command used by the TUI and Electron application to launch and supervise the detached terminal daemon.
+
+```bash
+relay daemon --internal --socket <socket-path-or-named-pipe> --descriptor <descriptor-path>
+```
+
+Options:
+
+- `--internal`: Runs the terminal daemon process in the foreground.
+- `--socket <path>`: Path to Unix socket (`.sock`) or Windows named pipe (`\\.\pipe\...`).
+- `--descriptor <path>`: Path to daemon descriptor JSON file.
+- `--cli <path>`: Path to Relay CLI bundle.
+- `--node <path>`: Path to Node.js executable.
+
+---
+
 ## Exit codes
 
 - Commands throw on error; the top-level handler in `src/index.ts` prints `relay: <message>`

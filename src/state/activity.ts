@@ -10,7 +10,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { homedir, hostname } from 'node:os';
+import { hostname } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { readConfig } from '../config/loader.js';
@@ -18,7 +18,7 @@ import {
   readProviderPlanUsage,
   type ProviderPlanUsage,
 } from '../plan-usage.js';
-import { rireiDataHome } from '../worktrees/data-dir.js';
+import { rireiDataHome } from '../platform/runtime-paths.js';
 import { readRegistry } from '../worktrees/registry.js';
 import type { WorkspaceRole } from '../worktrees/schema.js';
 import type { RelayState, RunLease, RunLifecycleStatus } from './schema.js';
@@ -180,13 +180,6 @@ const usageCache = new Map<
 >();
 
 export function activityDataHome(): string {
-  const override = process.env.RIREI_DATA_HOME?.trim();
-  if (override)
-    return path.isAbsolute(override)
-      ? path.resolve(override)
-      : path.resolve(homedir(), override);
-  if (process.platform === 'darwin')
-    return path.join(homedir(), 'Library', 'Application Support', 'Rirei');
   return rireiDataHome();
 }
 

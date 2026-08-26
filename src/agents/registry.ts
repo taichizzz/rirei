@@ -1,7 +1,7 @@
-import { access, constants, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { isExecutableInstalled } from '../platform/executable.js';
 import {
   type AgentAdapter,
   type AgentCapabilities,
@@ -659,17 +659,8 @@ export function getAgent(id: AgentId): AgentAdapter {
 export async function detectExecutable(
   executable: string,
 ): Promise<InstallationResult> {
-  const directories = process.env.PATH?.split(path.delimiter) ?? [];
-  for (const directory of directories) {
-    try {
-      const candidate = path.join(directory, executable);
-      await access(candidate, constants.X_OK);
-      if ((await stat(candidate)).isFile()) return { status: 'ready' };
-    } catch {
-      // Continue checking PATH entries.
-    }
-  }
-  return { status: 'not_installed' };
+  const installed = await isExecutableInstalled(executable);
+  return { status: installed ? 'ready' : 'not_installed' };
 }
 
 export function conservativeAuthenticationStatus(): AuthenticationSnapshot {

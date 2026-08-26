@@ -31,6 +31,7 @@ import {
   parseTerminalProtocolFrame,
   terminalControlFrame,
 } from './terminal-control.mjs';
+import { createTerminalHost } from './terminal-host.mjs';
 
 const ACTIVE = new Set(['starting', 'running', 'waiting', 'stopping']);
 const RUNTIME_ACTIVE = new Set(['starting', 'running']);
@@ -52,6 +53,10 @@ const MAX_TERMINALS = 4;
 const OUTPUT_RING_BYTES = 2 * 1024 * 1024;
 const AUTH_TIMEOUT_MS = 2_000;
 const BRIDGE_REGISTRATION_TIMEOUT_MS = 60_000;
+
+function isNamedPipePath(endpointPath) {
+  return endpointPath.startsWith('\\\\.\\pipe\\');
+}
 
 function safeWrite(stream, data) {
   if (!stream?.writable || stream.destroyed) return false;
@@ -214,8 +219,28 @@ async function writeDescriptor(file, descriptor) {
 }
 
 async function prepareSocket(socketPath) {
+  if (isNamedPipePath(socketPath)) {
+    const live = await new Promise((resolve) => {
+      const socket = net.createConnection(socketPath);
+      const timer = globalThis.setTimeout(() => {
+        socket.destroy();
+        resolve(false);
+      }, 200);
+      socket.once('connect', () => {
+        globalThis.clearTimeout(timer);
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('error', () => {
+        globalThis.clearTimeout(timer);
+        resolve(false);
+      });
+    });
+    if (live) throw new Error('A terminal daemon is already active.');
+    return;
+  }
   await mkdir(path.dirname(socketPath), { recursive: true, mode: 0o700 });
-  await chmod(path.dirname(socketPath), 0o700);
+  await chmod(path.dirname(socketPath), 0o700).catch(() => undefined);
   try {
     const details = await lstat(socketPath);
     if (!details.isSocket())
@@ -251,6 +276,7 @@ export async function runTerminalDaemon(options) {
   const token = randomBytes(32).toString('base64url');
   const terminals = new Map();
   const connections = new Set();
+  let closing = false;
   await prepareSocket(options.socketPath);
 
   const publish = (event) => {
@@ -392,7 +418,11 @@ export async function runTerminalDaemon(options) {
     }
   };
 
-  const start = (body) => {
+  const start = async (body) => {
+    if (closing)
+      throw Object.assign(new Error('Terminal daemon is shutting down.'), {
+        daemonCode: 'shutting_down',
+      });
     if (!body || !safeString(body.project, 4096))
       throw Object.assign(new Error('Invalid project.'), {
         daemonCode: 'invalid_start',
@@ -440,6 +470,7 @@ export async function runTerminalDaemon(options) {
       finalized: false,
       exit: null,
       child: null,
+      host: null,
       stopTimers: [],
       attentionScan: '',
       attentionKind: null,
@@ -451,40 +482,122 @@ export async function runTerminalDaemon(options) {
       runtimeClock: () => performance.now(),
     };
     const command = options.commandFor(body, id);
-    const child = spawn('/usr/bin/python3', [options.bridgePath, ...command], {
+    const terminalEnv = {
+      ...process.env,
+      PATH: options.pathValue ?? process.env.PATH,
+      RELAY_COLS: String(size.cols),
+      RELAY_ROWS: String(size.rows),
+      RELAY_SIGNAL_PROCESS_GROUP: body.kind === 'shell' ? '1' : '0',
+      TERM: process.env.TERM ?? 'xterm-256color',
+      RIREI_TERMINAL_ID: id,
+      RIREI_LIFECYCLE_SOCKET: options.socketPath,
+      RIREI_LIFECYCLE_TOKEN: terminal.lifecycleToken,
+      ...(options.nodePath ? { RIREI_NODE_PATH: options.nodePath } : {}),
+      ...(options.lifecycleHookPath
+        ? { RIREI_LIFECYCLE_HOOK: options.lifecycleHookPath }
+        : {}),
+      ...(options.codexLifecycleWrapperPath
+        ? {
+            RIREI_CODEX_LIFECYCLE_WRAPPER: options.codexLifecycleWrapperPath,
+          }
+        : {}),
+      ...(options.openCodeLifecycleWrapperPath
+        ? {
+            RIREI_OPENCODE_LIFECYCLE_WRAPPER:
+              options.openCodeLifecycleWrapperPath,
+          }
+        : {}),
+    };
+
+    if (options.forcePythonBridge && options.bridgePath) {
+      const child = spawn(
+        '/usr/bin/python3',
+        [options.bridgePath, ...command],
+        {
+          cwd: body.project,
+          env: terminalEnv,
+          stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
+        },
+      );
+      terminal.child = child;
+      terminals.set(id, terminal);
+      publish({ event: 'created', terminal: publicTerminal(terminal) });
+      child.stdout.on('data', (data) => {
+        if (terminal.status === 'starting')
+          transitionTerminal(terminal, 'running');
+        appendOutput(terminal, data);
+        const attentionKind =
+          terminal.kind === 'agent' && terminal.status === 'running'
+            ? outputAttentionKind(terminal, data)
+            : null;
+        if (attentionKind)
+          transitionTerminal(terminal, 'waiting', attentionKind);
+        publish({
+          event: 'output_available',
+          terminalId: id,
+          nextCursor: terminal.nextCursor,
+        });
+      });
+      let diagnosticBytes = 0;
+      child.stderr.on('data', (data) => {
+        diagnosticBytes += data.length;
+        if (diagnosticBytes <= 4096) terminal.bridgeError = 'bridge_diagnostic';
+      });
+      let bridgeBuffer = '';
+      child.stdio[4].on('data', (data) => {
+        bridgeBuffer += data.toString('utf8');
+        if (bridgeBuffer.length > 64 * 1024) bridgeBuffer = '';
+        while (bridgeBuffer.includes('\n')) {
+          const offset = bridgeBuffer.indexOf('\n');
+          const line = bridgeBuffer.slice(0, offset);
+          bridgeBuffer = bridgeBuffer.slice(offset + 1);
+          const frame = parseTerminalProtocolFrame(line);
+          if (!frame) continue;
+          if (frame.type === 'ready') {
+            terminal.bridge = {
+              instanceId: frame.bridgeId,
+              pid: frame.bridgePid,
+              childPid: frame.childPid,
+              protocolVersion: frame.version,
+            };
+            if (terminal.status === 'starting')
+              transitionTerminal(terminal, 'running');
+          } else if (frame.type === 'error') terminal.bridgeError = frame.code;
+          terminal.lastActivityAt = new Date().toISOString();
+          terminal.sequence += 1;
+          publish({ event: 'status', terminal: publicTerminal(terminal) });
+          if (frame.type === 'ready') void registerBridge(terminal);
+        }
+      });
+      child.once('error', () => void finalize(terminal, null, null, true));
+      child.once(
+        'close',
+        (code, signal) => void finalize(terminal, code, signal, false),
+      );
+      return publicTerminal(terminal);
+    }
+
+    const [executable, ...args] = command;
+    const host = await createTerminalHost(executable, args, {
       cwd: body.project,
-      env: {
-        ...process.env,
-        PATH: options.pathValue,
-        RELAY_COLS: String(size.cols),
-        RELAY_ROWS: String(size.rows),
-        RELAY_SIGNAL_PROCESS_GROUP: body.kind === 'shell' ? '1' : '0',
-        TERM: process.env.TERM ?? 'xterm-256color',
-        RIREI_TERMINAL_ID: id,
-        RIREI_LIFECYCLE_SOCKET: options.socketPath,
-        RIREI_LIFECYCLE_TOKEN: terminal.lifecycleToken,
-        ...(options.nodePath ? { RIREI_NODE_PATH: options.nodePath } : {}),
-        ...(options.lifecycleHookPath
-          ? { RIREI_LIFECYCLE_HOOK: options.lifecycleHookPath }
-          : {}),
-        ...(options.codexLifecycleWrapperPath
-          ? {
-              RIREI_CODEX_LIFECYCLE_WRAPPER: options.codexLifecycleWrapperPath,
-            }
-          : {}),
-        ...(options.openCodeLifecycleWrapperPath
-          ? {
-              RIREI_OPENCODE_LIFECYCLE_WRAPPER:
-                options.openCodeLifecycleWrapperPath,
-            }
-          : {}),
-      },
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
+      env: terminalEnv,
+      cols: size.cols,
+      rows: size.rows,
+      parentGuardNodePath: options.nodePath,
     });
-    terminal.child = child;
+    terminal.host = host;
+    terminal.bridge = {
+      instanceId: id,
+      pid: host.pid,
+      childPid: host.pid,
+      protocolVersion: 1,
+    };
     terminals.set(id, terminal);
     publish({ event: 'created', terminal: publicTerminal(terminal) });
-    child.stdout.on('data', (data) => {
+    transitionTerminal(terminal, 'running');
+    void registerBridge(terminal);
+
+    host.onData((data) => {
       if (terminal.status === 'starting')
         transitionTerminal(terminal, 'running');
       appendOutput(terminal, data);
@@ -499,49 +612,36 @@ export async function runTerminalDaemon(options) {
         nextCursor: terminal.nextCursor,
       });
     });
-    let diagnosticBytes = 0;
-    child.stderr.on('data', (data) => {
-      diagnosticBytes += data.length;
-      if (diagnosticBytes <= 4096) terminal.bridgeError = 'bridge_diagnostic';
+
+    host.onExit((result) => {
+      void finalize(
+        terminal,
+        result.exitCode,
+        result.signal,
+        Boolean(result.error),
+      );
     });
-    let bridgeBuffer = '';
-    child.stdio[4].on('data', (data) => {
-      bridgeBuffer += data.toString('utf8');
-      if (bridgeBuffer.length > 64 * 1024) bridgeBuffer = '';
-      while (bridgeBuffer.includes('\n')) {
-        const offset = bridgeBuffer.indexOf('\n');
-        const line = bridgeBuffer.slice(0, offset);
-        bridgeBuffer = bridgeBuffer.slice(offset + 1);
-        const frame = parseTerminalProtocolFrame(line);
-        if (!frame) continue;
-        if (frame.type === 'ready') {
-          terminal.bridge = {
-            instanceId: frame.bridgeId,
-            pid: frame.bridgePid,
-            childPid: frame.childPid,
-            protocolVersion: frame.version,
-          };
-          if (terminal.status === 'starting')
-            transitionTerminal(terminal, 'running');
-        } else if (frame.type === 'error') terminal.bridgeError = frame.code;
-        terminal.lastActivityAt = new Date().toISOString();
-        terminal.sequence += 1;
-        publish({ event: 'status', terminal: publicTerminal(terminal) });
-        if (frame.type === 'ready') void registerBridge(terminal);
-      }
-    });
-    child.once('error', () => void finalize(terminal, null, null, true));
-    child.once(
-      'close',
-      (code, signal) => void finalize(terminal, code, signal, false),
-    );
+
     return publicTerminal(terminal);
   };
 
   const stop = (terminal) => {
-    if (!terminal.child || terminal.finalized) return publicTerminal(terminal);
+    if ((!terminal.child && !terminal.host) || terminal.finalized)
+      return publicTerminal(terminal);
     if (terminal.status === 'stopping') return publicTerminal(terminal);
     transitionTerminal(terminal, 'stopping');
+    if (terminal.host) {
+      void terminal.host.interrupt('user_stop');
+      terminal.stopTimers = [
+        globalThis.setTimeout(() => {
+          if (!terminal.finalized) void terminal.host.terminate();
+        }, options.stopTerminateMs ?? 2000),
+        globalThis.setTimeout(() => {
+          if (!terminal.finalized) void terminal.host.killTree();
+        }, options.stopKillMs ?? 4000),
+      ];
+      return publicTerminal(terminal);
+    }
     safeWrite(
       terminal.child.stdio[3],
       terminalControlFrame('interrupt', { intent: 'user_stop' }),
@@ -553,11 +653,11 @@ export async function runTerminalDaemon(options) {
             terminal.child?.stdio[3],
             terminalControlFrame('terminate'),
           );
-      }, 2000),
+      }, options.stopTerminateMs ?? 2000),
       globalThis.setTimeout(() => {
         if (!terminal.finalized)
           safeWrite(terminal.child?.stdio[3], terminalControlFrame('kill'));
-      }, 4000),
+      }, options.stopKillMs ?? 4000),
     ];
     return publicTerminal(terminal);
   };
@@ -597,7 +697,11 @@ export async function runTerminalDaemon(options) {
           daemonCode: 'input_too_large',
         });
       try {
-        await writeStream(terminal.child?.stdin, data);
+        if (terminal.host) {
+          await terminal.host.write(data);
+        } else {
+          await writeStream(terminal.child?.stdin, data);
+        }
       } catch {
         throw Object.assign(new Error('Terminal input is unavailable.'), {
           daemonCode: 'not_running',
@@ -617,7 +721,14 @@ export async function runTerminalDaemon(options) {
       terminal.rows = size.rows;
       terminal.sequence += 1;
       terminal.lastActivityAt = new Date().toISOString();
-      safeWrite(terminal.child?.stdio[3], terminalControlFrame('resize', size));
+      if (terminal.host) {
+        terminal.host.resize(size.cols, size.rows);
+      } else {
+        safeWrite(
+          terminal.child?.stdio[3],
+          terminalControlFrame('resize', size),
+        );
+      }
       const published = publicTerminal(terminal);
       publish({ event: 'resized', terminal: published });
       return published;
@@ -657,15 +768,18 @@ export async function runTerminalDaemon(options) {
       return publicTerminal(terminal);
     }
     if (op === 'interrupt') {
-      if (
+      if (terminal.host) {
+        await terminal.host.interrupt('user_interrupt');
+      } else if (
         !safeWrite(
           terminal.child?.stdio[3],
           terminalControlFrame('interrupt', { intent: 'user_interrupt' }),
         )
-      )
+      ) {
         throw Object.assign(new Error('Terminal interrupt is unavailable.'), {
           daemonCode: 'not_running',
         });
+      }
       terminal.sequence += 1;
       terminal.lastActivityAt = new Date().toISOString();
       const published = publicTerminal(terminal);
@@ -837,7 +951,8 @@ export async function runTerminalDaemon(options) {
     server.listen(options.socketPath, resolve);
   });
   try {
-    await chmod(options.socketPath, 0o600);
+    if (!isNamedPipePath(options.socketPath))
+      await chmod(options.socketPath, 0o600);
     await writeDescriptor(options.descriptorPath, {
       schemaVersion: 1,
       protocolVersion: DAEMON_PROTOCOL_VERSION,
@@ -850,7 +965,8 @@ export async function runTerminalDaemon(options) {
     });
   } catch (error) {
     await new Promise((resolve) => server.close(resolve));
-    await rm(options.socketPath, { force: true });
+    if (!isNamedPipePath(options.socketPath))
+      await rm(options.socketPath, { force: true });
     throw error;
   }
 
@@ -871,16 +987,43 @@ export async function runTerminalDaemon(options) {
     close: async ({ stopActive = true } = {}) => {
       if (!closePromise)
         closePromise = (async () => {
+          closing = true;
           globalThis.clearInterval(heartbeatTimer);
           if (stopActive)
             for (const terminal of terminals.values())
               if (ACTIVE.has(terminal.status)) stop(terminal);
+          if (stopActive) {
+            const deadline = Date.now() + (options.shutdownTimeoutMs ?? 5500);
+            while (
+              [...terminals.values()].some((terminal) =>
+                ACTIVE.has(terminal.status),
+              ) &&
+              Date.now() < deadline
+            )
+              await new Promise((resolve) =>
+                globalThis.setTimeout(resolve, 25),
+              );
+            for (const terminal of terminals.values())
+              if (ACTIVE.has(terminal.status) && terminal.host)
+                await terminal.host.killTree().catch(() => undefined);
+            const forcedDeadline = Date.now() + 500;
+            while (
+              [...terminals.values()].some((terminal) =>
+                ACTIVE.has(terminal.status),
+              ) &&
+              Date.now() < forcedDeadline
+            )
+              await new Promise((resolve) =>
+                globalThis.setTimeout(resolve, 25),
+              );
+          }
           for (const connection of connections) connection.socket.destroy();
           connections.clear();
           await new Promise((resolve, reject) =>
             server.close((error) => (error ? reject(error) : resolve())),
           );
-          await rm(options.socketPath, { force: true });
+          if (!isNamedPipePath(options.socketPath))
+            await rm(options.socketPath, { force: true });
           try {
             const descriptor = JSON.parse(
               await readFile(options.descriptorPath, 'utf8'),
@@ -901,5 +1044,8 @@ export function daemonSocketPath(runtimeRoot) {
     .update(runtimeRoot)
     .digest('hex')
     .slice(0, 16);
+  if (process.platform === 'win32') {
+    return `\\\\.\\pipe\\rirei-${hash}-pty-v1`;
+  }
   return path.join(runtimeRoot, `pty-${hash}.sock`);
 }

@@ -160,11 +160,12 @@ describe('terminal daemon', () => {
 
   test('replays bounded slices and reports output truncated from the ring', async () => {
     const outputBytes = 2 * 1024 * 1024 + 1024;
+    const outputCompleteMarker = 'RIREI_OUTPUT_COMPLETE';
     const { daemon, descriptorPath, root, socketPath } = await startDaemon(
       () => [
         process.execPath,
         '-e',
-        `process.stdout.write(Buffer.alloc(${outputBytes}, 97)); setInterval(() => {}, 1000)`,
+        `process.stdout.write(Buffer.alloc(${outputBytes}, 97)); process.stdout.write('${outputCompleteMarker}'); setInterval(() => {}, 1000)`,
       ],
     );
     const firstClient = new TerminalDaemonClient({
@@ -181,6 +182,13 @@ describe('terminal daemon', () => {
     await waitFor(
       () => firstClient.inspect(terminal.id),
       (item) => item.nextCursor >= outputBytes,
+    );
+    await waitFor(
+      () => firstClient.attach(terminal.id, outputBytes),
+      (item) =>
+        Buffer.from(item.data, 'base64')
+          .toString('utf8')
+          .includes(outputCompleteMarker),
     );
 
     const first = await firstClient.attach(terminal.id, 0);

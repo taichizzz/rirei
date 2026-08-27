@@ -1,12 +1,18 @@
-import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import spawn from 'cross-spawn';
 
-const output = execFileSync(
-  process.platform === 'win32' ? 'npm.cmd' : 'npm',
+const packed = spawn.sync(
+  'npm',
   ['pack', '--dry-run', '--json', '--ignore-scripts'],
   { encoding: 'utf8' },
 );
-const reports = JSON.parse(output);
+if (packed.error) throw packed.error;
+if (packed.status !== 0) {
+  throw new Error(
+    `npm pack exited ${packed.status}: ${packed.stderr || packed.stdout}`,
+  );
+}
+const reports = JSON.parse(packed.stdout);
 const files = reports[0]?.files?.map((file) => file.path).sort();
 const expected = [
   'LICENSE',

@@ -40,7 +40,7 @@
     "dev": "tsx src/index.ts",
     "tui": "node dist/index.cjs tui",
     "desktop:dev": "npm run build && electron desktop/main.mjs",
-    "desktop:build": "npm run build && electron-builder --mac",
+    "desktop:build": "npm run build && electron-builder --mac --publish never",
     "lint": "eslint desktop src tests eslint.config.js",
     "format": "prettier --check .",
     "format:write": "prettier --write .",

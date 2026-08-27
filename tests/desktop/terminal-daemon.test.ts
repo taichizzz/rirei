@@ -378,7 +378,7 @@ describe('terminal daemon', () => {
       () => [
         process.execPath,
         '-e',
-        `process.on('SIGINT', () => {}); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)`,
+        `process.on('SIGINT', () => {}); process.on('SIGTERM', () => {}); process.stdout.write('READY'); setInterval(() => {}, 1000)`,
       ],
     );
     const client = new TerminalDaemonClient({ descriptorPath, socketPath });
@@ -392,6 +392,10 @@ describe('terminal daemon', () => {
     await waitFor(
       () => client.inspect(terminal.id),
       (item) => item.status === 'running',
+    );
+    await waitFor(
+      () => client.attach(terminal.id, 0),
+      (item) => Buffer.from(item.data, 'base64').includes('READY'),
     );
 
     await client.stop(terminal.id);

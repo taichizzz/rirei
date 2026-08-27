@@ -41,21 +41,23 @@ describe('desktop node-pty terminal host', () => {
     roots.push(root);
     const original = process.cwd();
     process.chdir(root);
-    try {
-      const host = await createTerminalHost(
-        process.execPath,
-        ['-e', 'process.stdout.write("resolved"); setTimeout(() => {}, 100)'],
-        { cwd: root, env: process.env },
-      );
-      let output = '';
-      host.onData((data: Uint8Array) => {
-        output += Buffer.from(data).toString('utf8');
-      });
-      await new Promise<void>((resolve) => host.onExit(() => resolve()));
-      expect(output).toContain('resolved');
-    } finally {
-      process.chdir(original);
-    }
+    const host = await (async () => {
+      try {
+        return await createTerminalHost(
+          process.execPath,
+          ['-e', 'process.stdout.write("resolved"); setTimeout(() => {}, 100)'],
+          { cwd: original, env: process.env },
+        );
+      } finally {
+        process.chdir(original);
+      }
+    })();
+    let output = '';
+    host.onData((data: Uint8Array) => {
+      output += Buffer.from(data).toString('utf8');
+    });
+    await new Promise<void>((resolve) => host.onExit(() => resolve()));
+    expect(output).toContain('resolved');
   });
 
   it('force-kills the PTY process tree', async () => {

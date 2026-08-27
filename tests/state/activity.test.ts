@@ -143,9 +143,14 @@ afterEach(async () => {
     delete process.env.RIREI_PROVIDER_USAGE_HOME;
   else process.env.RIREI_PROVIDER_USAGE_HOME = originalProviderUsageHome;
   await Promise.all(
-    sandboxes
-      .splice(0)
-      .map((directory) => rm(directory, { recursive: true, force: true })),
+    sandboxes.splice(0).map((directory) =>
+      rm(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      }),
+    ),
   );
 });
 

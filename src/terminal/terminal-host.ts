@@ -67,6 +67,13 @@ export class NodePtyTerminalHost implements TerminalHost {
     this.ptyProcess.onExit((event: { exitCode: number; signal?: number }) => {
       if (this.disposed) return;
       this.disposed = true;
+      if (process.platform === 'win32') {
+        try {
+          this.ptyProcess.kill();
+        } catch {
+          // The process exited; this only releases remaining ConPTY handles.
+        }
+      }
       const result: TerminalExit = {
         exitCode: Number.isInteger(event.exitCode) ? event.exitCode : null,
         signal: event.signal ? String(event.signal) : null,

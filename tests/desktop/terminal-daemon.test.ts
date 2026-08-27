@@ -184,7 +184,13 @@ describe('terminal daemon', () => {
       (item) => item.nextCursor >= outputBytes,
     );
     await waitFor(
-      () => firstClient.attach(terminal.id, outputBytes),
+      async () => {
+        const latest = await firstClient.inspect(terminal.id);
+        return firstClient.attach(
+          terminal.id,
+          Math.max(0, latest.nextCursor - 64 * 1024),
+        );
+      },
       (item) =>
         Buffer.from(item.data, 'base64')
           .toString('utf8')

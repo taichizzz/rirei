@@ -4,8 +4,9 @@ import { relayPath } from '../../src/safety/path-policy.js';
 
 describe('relayPath', () => {
   it('creates paths beneath the Relay directory', () => {
-    expect(relayPath('/project', 'checkpoints', 'one')).toBe(
-      path.join('/project', '.relay', 'checkpoints', 'one'),
+    const root = path.resolve(path.sep, 'project');
+    expect(relayPath(root, 'checkpoints', 'one')).toBe(
+      path.join(root, '.relay', 'checkpoints', 'one'),
     );
   });
 

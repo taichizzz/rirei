@@ -10,7 +10,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { homedir, hostname } from 'node:os';
+import { hostname } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { readConfig } from '../config/loader.js';
@@ -18,7 +18,7 @@ import {
   readProviderPlanUsage,
   type ProviderPlanUsage,
 } from '../plan-usage.js';
-import { rireiDataHome } from '../worktrees/data-dir.js';
+import { rireiDataHome } from '../platform/runtime-paths.js';
 import { readRegistry } from '../worktrees/registry.js';
 import type { WorkspaceRole } from '../worktrees/schema.js';
 import type { RelayState, RunLease, RunLifecycleStatus } from './schema.js';
@@ -180,13 +180,6 @@ const usageCache = new Map<
 >();
 
 export function activityDataHome(): string {
-  const override = process.env.RIREI_DATA_HOME?.trim();
-  if (override)
-    return path.isAbsolute(override)
-      ? path.resolve(override)
-      : path.resolve(homedir(), override);
-  if (process.platform === 'darwin')
-    return path.join(homedir(), 'Library', 'Application Support', 'Rirei');
   return rireiDataHome();
 }
 
@@ -264,9 +257,26 @@ async function createOwnedDirectory(directory: string): Promise<LockOwner> {
     });
     await rename(claim, directory);
   } catch (error) {
-    await rm(claim, { recursive: true, force: true });
-    if ((error as NodeJS.ErrnoException).code === 'ENOTEMPTY')
-      (error as NodeJS.ErrnoException).code = 'EEXIST';
+    const filesystemError = error as NodeJS.ErrnoException;
+    if (
+      filesystemError.code === 'EEXIST' ||
+      filesystemError.code === 'ENOTEMPTY'
+    )
+      filesystemError.code = 'EEXIST';
+    else if (filesystemError.code === 'EPERM' && process.platform === 'win32') {
+      try {
+        await lstat(directory);
+        filesystemError.code = 'EEXIST';
+      } catch {
+        // Preserve a genuine permissions error when no competing lock exists.
+      }
+    }
+    await rm(claim, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: ACQUIRE_INTERVAL_MS,
+    });
     throw error;
   }
   return owner;
@@ -278,7 +288,12 @@ async function removeIfOwned(
 ): Promise<void> {
   if ((await readOwner(directory))?.token !== owner.token) return;
   try {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: ACQUIRE_INTERVAL_MS,
+    });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (
@@ -322,7 +337,12 @@ async function acquireActivityLock(): Promise<LockOwner> {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         const owner = await readOwner(directory);
         if (lockIsStale(owner)) {
-          await rm(directory, { recursive: true, force: true });
+          await rm(directory, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: ACQUIRE_INTERVAL_MS,
+          });
           return await createOwnedDirectory(directory);
         }
         busy = true;

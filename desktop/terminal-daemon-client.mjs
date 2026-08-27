@@ -43,6 +43,18 @@ function currentBootId(now = Date.now()) {
   return `${hostname()}:${Math.round((now - uptime() * 1000) / 60_000)}`;
 }
 
+export function isSafeDaemonDescriptorFile(
+  descriptorFile,
+  platform = process.platform,
+  currentUid = process.getuid?.(),
+) {
+  if (!descriptorFile.isFile() || descriptorFile.isSymbolicLink()) return false;
+  if (platform === 'win32') return true;
+  if (currentUid !== undefined && descriptorFile.uid !== currentUid)
+    return false;
+  return (descriptorFile.mode & 0o077) === 0;
+}
+
 export class TerminalDaemonClient extends EventEmitter {
   constructor(options) {
     super();
@@ -140,12 +152,7 @@ export class TerminalDaemonClient extends EventEmitter {
 
   async openConnection() {
     const descriptorFile = await lstat(this.options.descriptorPath);
-    if (
-      !descriptorFile.isFile() ||
-      descriptorFile.isSymbolicLink() ||
-      (process.getuid && descriptorFile.uid !== process.getuid()) ||
-      (descriptorFile.mode & 0o077) !== 0
-    )
+    if (!isSafeDaemonDescriptorFile(descriptorFile))
       throw new Error('Unsafe terminal daemon descriptor permissions.');
     const descriptor = JSON.parse(
       await readFile(this.options.descriptorPath, 'utf8'),

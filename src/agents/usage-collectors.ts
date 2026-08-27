@@ -361,7 +361,7 @@ export async function claudePrepareUsage(
   const projectRoot = context.projectRoot;
   const runtime = relayPath(projectRoot, 'runtime');
   await mkdir(runtime, { recursive: true, mode: 0o700 });
-  await chmod(runtime, 0o700);
+  await chmod(runtime, 0o700).catch(() => undefined);
   const collectorPath = relayPath(projectRoot, 'runtime', 'claude-usage.cjs');
   const settingsPath = relayPath(
     projectRoot,
@@ -373,10 +373,15 @@ export async function claudePrepareUsage(
     encoding: 'utf8',
     mode: 0o600,
   });
-  await chmod(collectorPath, 0o600);
-  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  await chmod(collectorPath, 0o600).catch(() => undefined);
+  const quote = (value: string) =>
+    process.platform === 'win32'
+      ? `"${value.replaceAll('"', '""')}"`
+      : `'${value.replaceAll("'", "'\\''")}'`;
   const lifecycleCommand = (state: string) =>
-    `if [ -n "$RIREI_TERMINAL_ID" ] && [ -n "$RIREI_NODE_PATH" ] && [ -n "$RIREI_LIFECYCLE_HOOK" ]; then "$RIREI_NODE_PATH" "$RIREI_LIFECYCLE_HOOK" ${state}; fi`;
+    process.platform === 'win32'
+      ? `if defined RIREI_TERMINAL_ID if defined RIREI_NODE_PATH if defined RIREI_LIFECYCLE_HOOK "%RIREI_NODE_PATH%" "%RIREI_LIFECYCLE_HOOK%" ${state}`
+      : `if [ -n "$RIREI_TERMINAL_ID" ] && [ -n "$RIREI_NODE_PATH" ] && [ -n "$RIREI_LIFECYCLE_HOOK" ]; then "$RIREI_NODE_PATH" "$RIREI_LIFECYCLE_HOOK" ${state}; fi`;
   await writeFile(
     settingsPath,
     `${JSON.stringify(

@@ -1,7 +1,12 @@
-import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const dependencyUrl = import.meta.url.includes('.asar.unpacked/')
+  ? import.meta.url.replace('.asar.unpacked/', '.asar/')
+  : import.meta.url;
+const spawn = createRequire(dependencyUrl)('cross-spawn');
 
 const STARTUP_TIMEOUT_MS = 10_000;
 export const CODEX_REMOTE_TOKEN_ENV = 'RIREI_CODEX_WS_TOKEN';

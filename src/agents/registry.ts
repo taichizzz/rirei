@@ -1,7 +1,7 @@
-import { access, constants, stat } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import spawn from 'cross-spawn';
+import { isExecutableInstalled } from '../platform/executable.js';
+import { killProcessTree } from '../platform/process-control.js';
 import {
   type AgentAdapter,
   type AgentCapabilities,
@@ -26,13 +26,104 @@ import {
   codexReadUsage,
 } from './usage-collectors.js';
 
-const execFileAsync = promisify(execFile);
-
 const EXEC_TIMEOUT_MS = 10_000;
 const AUTH_PROBE_TIMEOUT_MS = 5_000;
 const AUTH_PROBE_MAX_BYTES = 64 * 1024;
 const AUTH_CACHE_MS = 45_000;
 const authenticationCache = new Map<AgentId, AuthenticationSnapshot>();
+
+interface ExecutableOutput {
+  stdout: string;
+  stderr: string;
+}
+
+interface ExecutableOptions {
+  timeout: number;
+  maxBuffer?: number;
+}
+
+function runExecutable(
+  executable: string,
+  args: string[],
+  options: ExecutableOptions,
+): Promise<ExecutableOutput> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const maxBuffer = options.maxBuffer ?? 1024 * 1024;
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let killed = false;
+    let errorCode: string | undefined;
+    let settled = false;
+
+    const output = (): ExecutableOutput => ({
+      stdout: Buffer.concat(stdout).toString('utf8'),
+      stderr: Buffer.concat(stderr).toString('utf8'),
+    });
+    const fail = (message: string, code?: string) => {
+      const error = Object.assign(new Error(message), output(), {
+        code,
+        killed,
+      });
+      reject(error);
+    };
+    const abort = (code: string, message: string) => {
+      if (settled) return;
+      settled = true;
+      killed = true;
+      errorCode = code;
+      globalThis.clearTimeout(timer);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      if (child.pid) void killProcessTree(child.pid);
+      else child.kill();
+      fail(message, code);
+    };
+    const append = (chunks: Buffer[], chunk: Buffer, current: number) => {
+      const remaining = Math.max(0, maxBuffer - current);
+      if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
+      if (chunk.length > remaining)
+        abort(
+          'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+          `${executable} exceeded the output limit.`,
+        );
+      return current + chunk.length;
+    };
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdoutBytes = append(stdout, Buffer.from(chunk), stdoutBytes);
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrBytes = append(stderr, Buffer.from(chunk), stderrBytes);
+    });
+    child.once('error', (error: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timer);
+      fail(`Failed to start ${executable}.`, error.code);
+    });
+    child.once('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timer);
+      if (code === 0 && !errorCode) resolve(output());
+      else
+        fail(
+          `${executable} exited with ${code ?? signal ?? 'an error'}.`,
+          errorCode ?? (code === null ? (signal ?? undefined) : String(code)),
+        );
+    });
+    const timer = globalThis.setTimeout(
+      () => abort('ETIMEDOUT', `${executable} timed out.`),
+      options.timeout,
+    );
+  });
+}
 
 function lifecycleWrappedCommand(
   environmentName:
@@ -182,11 +273,10 @@ class OfficialCliAdapter implements AgentAdapter {
   }
   async getVersion(): Promise<string | null> {
     try {
-      const { stdout, stderr } = await execFileAsync(
+      const { stdout, stderr } = await runExecutable(
         this.executable,
         ['--version'],
         {
-          encoding: 'utf8',
           timeout: EXEC_TIMEOUT_MS,
         },
       );
@@ -278,10 +368,10 @@ class OpenCodeAdapter implements AgentAdapter {
 
   async getVersion(): Promise<string | null> {
     try {
-      const { stdout, stderr } = await execFileAsync(
+      const { stdout, stderr } = await runExecutable(
         this.executable,
         ['--version'],
-        { encoding: 'utf8', timeout: EXEC_TIMEOUT_MS },
+        { timeout: EXEC_TIMEOUT_MS },
       );
       return (stdout || stderr).trim().slice(0, 200) || null;
     } catch {
@@ -446,8 +536,7 @@ function unavailableModels(source: string): DiscoveryResult<ModelOption> {
 async function codexModels(): Promise<DiscoveryResult<ModelOption>> {
   const source = 'codex debug models';
   try {
-    const { stdout } = await execFileAsync('codex', ['debug', 'models'], {
-      encoding: 'utf8',
+    const { stdout } = await runExecutable('codex', ['debug', 'models'], {
       timeout: EXEC_TIMEOUT_MS,
       maxBuffer: 4 * 1024 * 1024,
     });
@@ -659,17 +748,8 @@ export function getAgent(id: AgentId): AgentAdapter {
 export async function detectExecutable(
   executable: string,
 ): Promise<InstallationResult> {
-  const directories = process.env.PATH?.split(path.delimiter) ?? [];
-  for (const directory of directories) {
-    try {
-      const candidate = path.join(directory, executable);
-      await access(candidate, constants.X_OK);
-      if ((await stat(candidate)).isFile()) return { status: 'ready' };
-    } catch {
-      // Continue checking PATH entries.
-    }
-  }
-  return { status: 'not_installed' };
+  const installed = await isExecutableInstalled(executable);
+  return { status: installed ? 'ready' : 'not_installed' };
 }
 
 export function conservativeAuthenticationStatus(): AuthenticationSnapshot {
@@ -699,14 +779,12 @@ interface AuthProbe {
 async function runAuthProbe(probe: AuthProbe): Promise<AuthenticationSnapshot> {
   const checkedAt = new Date().toISOString();
   try {
-    const { stdout, stderr } = await execFileAsync(
+    const { stdout, stderr } = await runExecutable(
       probe.executable,
       probe.args,
       {
-        encoding: 'utf8',
         timeout: AUTH_PROBE_TIMEOUT_MS,
         maxBuffer: AUTH_PROBE_MAX_BYTES,
-        windowsHide: true,
       },
     );
     const parsed = probe.parse(stdout, stderr);
@@ -850,8 +928,7 @@ const ANSI_ESCAPE_CODES = new RegExp(
 async function opencodeModels(): Promise<DiscoveryResult<ModelOption>> {
   const source = 'opencode models';
   try {
-    const { stdout } = await execFileAsync('opencode', ['models'], {
-      encoding: 'utf8',
+    const { stdout } = await runExecutable('opencode', ['models'], {
       timeout: EXEC_TIMEOUT_MS,
       maxBuffer: 4 * 1024 * 1024,
     });

@@ -11,9 +11,10 @@ const execFileAsync = promisify(execFile);
 const entrypoint = fileURLToPath(
   new URL('../../src/index.ts', import.meta.url),
 );
-const tsxLoader = fileURLToPath(
-  new URL('../../node_modules/tsx/dist/loader.mjs', import.meta.url),
-);
+const tsxLoader = new URL(
+  '../../node_modules/tsx/dist/loader.mjs',
+  import.meta.url,
+).href;
 const directories: Array<{ path: string; repository?: boolean }> = [];
 
 afterEach(async () => {
@@ -40,7 +41,12 @@ async function relay(
     {
       cwd,
       encoding: 'utf8',
-      env: { ...process.env, HOME: home, CODEX_HOME: codexHome },
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        CODEX_HOME: codexHome,
+      },
     },
   );
 }

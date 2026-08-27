@@ -2,9 +2,16 @@
 
 Rirei is a local coding-agent orchestration harness. It runs officially installed provider CLIs in real terminals, gives concurrent agents isolated Git worktrees, and preserves a provider-independent task record so work can move between agents without copying credentials or raw conversations.
 
-`relay` is Rirei's scriptable orchestration engine and CLI. The Rirei desktop app is one frontend over that engine. A future TUI will be another frontend, not a separate product.
+`relay` is Rirei's scriptable orchestration engine and CLI. Rirei provides both an Electron desktop app on macOS and an interactive cross-platform TUI dashboard (`relay tui`) for Windows Terminal, macOS, and Linux.
 
 Rirei is pre-release software. Review [Security](docs/security.md) and [Publication](docs/publication.md) before distributing builds.
+
+## Quick Start (TUI Dashboard)
+
+```powershell
+# Open the interactive TUI in Windows Terminal, PowerShell, or bash:
+relay tui
+```
 
 ## What relaying means
 
@@ -93,7 +100,7 @@ Rirei's Usage panel reports provider plan usage when a supported machine-readabl
 
 ### Integrated terminal internals
 
-Interactive agents run through `desktop/pty_bridge.py`, which allocates a real PTY so provider CLIs behave exactly as they do in a normal terminal. The renderer streams raw PTY bytes into an xterm.js terminal and forwards keystrokes back over IPC; terminal dimensions (and live window resizes) are sent to the bridge on a dedicated control file descriptor so the TUI is always sized correctly. xterm.js and its fit addon are vendored under `desktop/renderer/vendor/` (no network fetch at runtime). Relay still handles no provider credentials — the launched CLI owns its own authentication.
+Interactive agents run through the shared `node-pty` terminal host, which uses ConPTY on Windows and native PTYs on Unix so provider CLIs behave exactly as they do in a normal terminal. The daemon owns each PTY, streams bounded output to Electron or `relay tui`, forwards keystrokes, and applies live terminal resizes. The previous Python bridge remains only as a compatibility path. xterm.js and its fit addon are vendored under `desktop/renderer/vendor/` (no network fetch at runtime). Relay still handles no provider credentials — the launched CLI owns its own authentication.
 
 ## Authentication boundary
 

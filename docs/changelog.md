@@ -4,6 +4,24 @@ This file records user-visible changes made to Relay and its Rirei desktop app. 
 CLI command and `.relay/` state directory retain their existing names when the desktop app
 branding changes.
 
+## 0.1.0-alpha.4 - 2026-08-26
+
+### Cross-platform terminal dashboard
+
+- Added `relay tui`, an interactive dashboard for Windows Terminal, macOS, and Linux with
+  active-session status, recent projects and worktrees, provider usage gauges, and keyboard
+  launch shortcuts.
+- Added raw terminal passthrough with resize synchronization and `Ctrl+]` detachment, allowing
+  sessions to continue under the background daemon and be reattached later.
+- Added `relay daemon --internal` and platform-aware daemon supervision so the TUI can start,
+  reconnect to, and safely stop terminal sessions independently of Electron.
+- Replaced the default Python PTY bridge with `node-pty`, using ConPTY on Windows and native
+  PTYs on Unix while retaining the existing daemon protocol and bounded output replay.
+- Added cross-platform runtime paths, Windows named pipes, `%PATHEXT%` executable discovery,
+  shell selection, process-tree cleanup, and TCP port discovery.
+- Added Windows, macOS, and Linux CI coverage with packed-install, daemon startup, PTY,
+  package-content, and production-audit release gates.
+
 ## 0.1.0-alpha.3 - 2026-08-25
 
 ### Translucent window material

@@ -5,21 +5,86 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   verify:
-    runs-on: macos-latest
-    timeout-minutes: 20
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [22.x]
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
-          cache: npm
-      - run: npm ci
-      - run: npm run verify
-      - run: npm run audit:production
-      - run: npm run package:check
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format
+
+      - name: Build binary
+        run: npm run build
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Verify npm package contents
+        run: npm run package:check
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
+      - name: Smoke packed install, daemon, and PTY
+        run: npm run smoke:packed
+
+      - name: Smoke verification (Relay CLI)
+        shell: bash
+        run: |
+          node dist/index.cjs --help
+          node dist/index.cjs daemon --help
+          node dist/index.cjs tui --help
+          node dist/index.cjs status --help
+          node dist/index.cjs usage --help
+
+      - name: Build macOS desktop artifacts
+        if: matrix.os == 'macos-latest'
+        run: npm run desktop:build
+
+      - name: Smoke packaged macOS PTY
+        if: matrix.os == 'macos-latest'
+        run: npm run desktop:smoke
+
+  required:
+    name: verify
+    if: always()
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the platform matrix
+        if: needs.verify.result != 'success'
+        run: exit 1
+
+      - name: Confirm the platform matrix
+        run: echo "Windows, macOS, and Linux verification passed."

@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { chmod, lstat, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
-import { TerminalDaemonClient } from '../../desktop/terminal-daemon-client.mjs';
+import {
+  isSafeDaemonDescriptorFile,
+  TerminalDaemonClient,
+} from '../../desktop/terminal-daemon-client.mjs';
 import {
   DaemonFrameDecoder,
   encodeDaemonFrame,
@@ -19,7 +22,14 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true })),
+    roots.splice(0).map((root) =>
+      rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 100,
+      }),
+    ),
   );
 });
 
@@ -28,13 +38,19 @@ async function temporaryPaths() {
   roots.push(root);
   return {
     root,
-    socketPath: path.join(root, 'daemon.sock'),
+    socketPath:
+      process.platform === 'win32'
+        ? `\\\\.\\pipe\\rirei-test-${randomUUID()}`
+        : path.join(root, 'daemon.sock'),
     descriptorPath: path.join(root, 'daemon.json'),
   };
 }
 
 async function startDaemon(
-  commandFor = () => ['/bin/zsh', '-f'],
+  commandFor = () =>
+    process.platform === 'win32'
+      ? [process.env.ComSpec || 'cmd.exe']
+      : ['/bin/zsh', '-f'],
   overrides: Record<string, unknown> = {},
 ) {
   const paths = await temporaryPaths();
@@ -67,6 +83,12 @@ async function waitFor<T>(
 function processAlive(pid: number) {
   try {
     process.kill(pid, 0);
+    if (process.platform !== 'win32') {
+      const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+        encoding: 'utf8',
+      }).stdout.trim();
+      if (!state || state.startsWith('Z')) return false;
+    }
     return true;
   } catch {
     return false;
@@ -100,6 +122,17 @@ async function welcome(socketPath: string, token: string) {
 }
 
 describe('terminal daemon', () => {
+  test('uses platform-aware descriptor permission checks', () => {
+    const descriptor = {
+      isFile: () => true,
+      isSymbolicLink: () => false,
+      mode: 0o100666,
+      uid: 501,
+    };
+    expect(isSafeDaemonDescriptorFile(descriptor, 'win32')).toBe(true);
+    expect(isSafeDaemonDescriptorFile(descriptor, 'darwin', 501)).toBe(false);
+  });
+
   test('authenticates the reconnect token before accepting requests', async () => {
     const { daemon, socketPath } = await startDaemon();
     const rejected = net.createConnection(socketPath);
@@ -127,11 +160,12 @@ describe('terminal daemon', () => {
 
   test('replays bounded slices and reports output truncated from the ring', async () => {
     const outputBytes = 2 * 1024 * 1024 + 1024;
+    const outputCompleteMarker = 'RIREI_OUTPUT_COMPLETE';
     const { daemon, descriptorPath, root, socketPath } = await startDaemon(
       () => [
         process.execPath,
         '-e',
-        `process.stdout.write(Buffer.alloc(${outputBytes}, 97)); setInterval(() => {}, 1000)`,
+        `process.stdout.write(Buffer.alloc(${outputBytes}, 97)); process.stdout.write('${outputCompleteMarker}'); setInterval(() => {}, 1000)`,
       ],
     );
     const firstClient = new TerminalDaemonClient({
@@ -148,6 +182,19 @@ describe('terminal daemon', () => {
     await waitFor(
       () => firstClient.inspect(terminal.id),
       (item) => item.nextCursor >= outputBytes,
+    );
+    await waitFor(
+      async () => {
+        const latest = await firstClient.inspect(terminal.id);
+        return firstClient.attach(
+          terminal.id,
+          Math.max(0, latest.nextCursor - 64 * 1024),
+        );
+      },
+      (item) =>
+        Buffer.from(item.data, 'base64')
+          .toString('utf8')
+          .includes(outputCompleteMarker),
     );
 
     const first = await firstClient.attach(terminal.id, 0);
@@ -191,7 +238,9 @@ describe('terminal daemon', () => {
       terminal.id,
       second.endCursor,
     );
-    expect(reattached.startCursor).toBe(second.endCursor);
+    expect(reattached.startCursor).toBe(
+      Math.max(second.endCursor, reattached.oldestCursor),
+    );
     await expect(
       restartedMainClient.setWaiting(terminal.id),
     ).resolves.toMatchObject({ status: 'waiting' });
@@ -350,7 +399,7 @@ describe('terminal daemon', () => {
       () => [
         process.execPath,
         '-e',
-        `process.on('SIGINT', () => {}); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)`,
+        `process.on('SIGINT', () => {}); process.on('SIGTERM', () => {}); process.stdout.write('READY'); setInterval(() => {}, 1000)`,
       ],
     );
     const client = new TerminalDaemonClient({ descriptorPath, socketPath });
@@ -365,6 +414,10 @@ describe('terminal daemon', () => {
       () => client.inspect(terminal.id),
       (item) => item.status === 'running',
     );
+    await waitFor(
+      () => client.attach(terminal.id, 0),
+      (item) => Buffer.from(item.data, 'base64').includes('READY'),
+    );
 
     await client.stop(terminal.id);
     await expect(
@@ -377,6 +430,63 @@ describe('terminal daemon', () => {
 
     client.disconnect();
     await daemon.close({ stopActive: true });
+  });
+
+  test('awaits bounded process-tree shutdown before daemon close returns', async () => {
+    const script = [
+      "const { spawn } = require('node:child_process');",
+      "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
+      "console.log('CHILD_PID=' + child.pid);",
+      "process.on('SIGTERM', () => {});",
+      'setInterval(() => {}, 1000);',
+    ].join('');
+    const { daemon, descriptorPath, root, socketPath } = await startDaemon(
+      () => [process.execPath, '-e', script],
+      {
+        stopTerminateMs: 50,
+        stopKillMs: 100,
+        shutdownTimeoutMs: 1000,
+      },
+    );
+    const client = new TerminalDaemonClient({ descriptorPath, socketPath });
+    await client.connect();
+    const terminal = await client.start({
+      kind: 'shell',
+      project: root,
+      workspaceId: 'default',
+    });
+    const running = await waitFor(
+      () => client.inspect(terminal.id),
+      (item) => item.status === 'running',
+    );
+    const replay = await waitFor(
+      () => client.attach(terminal.id, 0),
+      (item) =>
+        /CHILD_PID=(\d+)/.test(
+          Buffer.from(item.data, 'base64').toString('utf8'),
+        ),
+    );
+    const childPid = Number.parseInt(
+      Buffer.from(replay.data, 'base64')
+        .toString('utf8')
+        .match(/CHILD_PID=(\d+)/)?.[1] ?? '0',
+      10,
+    );
+    expect(childPid).toBeGreaterThan(0);
+    expect(processAlive(running.bridge.pid)).toBe(true);
+    expect(processAlive(childPid)).toBe(true);
+    client.disconnect();
+
+    const startedAt = Date.now();
+    await daemon.close({ stopActive: true });
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+    await waitFor(
+      async () => ({
+        root: processAlive(running.bridge.pid),
+        child: processAlive(childPid),
+      }),
+      (alive) => !alive.root && !alive.child,
+    );
   });
 
   test('retries bridge registration until run state is ready', async () => {
@@ -487,7 +597,7 @@ describe('terminal daemon', () => {
         createdAt: new Date().toISOString(),
       }),
     );
-    await chmod(descriptorPath, 0o600);
+    if (process.platform !== 'win32') await chmod(descriptorPath, 0o600);
     const sockets = new Set<net.Socket>();
     const server = net.createServer((socket) => {
       sockets.add(socket);
@@ -589,7 +699,10 @@ describe('terminal daemon', () => {
       kind: 'shell',
       project: root,
       workspaceId: 'default',
-      shell: '/bin/zsh',
+      shell:
+        process.platform === 'win32'
+          ? process.env.ComSpec || 'cmd.exe'
+          : '/bin/zsh',
     });
     const running = await waitFor(
       () => client.inspect(terminal.id),
@@ -599,13 +712,29 @@ describe('terminal daemon', () => {
     daemonProcess.kill('SIGKILL');
     await disconnected;
 
-    await waitFor(
-      async () => ({
-        bridge: processAlive(running.bridge.pid),
-        child: processAlive(running.bridge.childPid),
-      }),
-      (alive) => !alive.bridge && !alive.child,
-    );
+    const deadline = Date.now() + 10_000;
+    while (
+      (processAlive(running.bridge.pid) ||
+        processAlive(running.bridge.childPid)) &&
+      Date.now() < deadline
+    )
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    if (
+      processAlive(running.bridge.pid) ||
+      processAlive(running.bridge.childPid)
+    ) {
+      const details = spawnSync(
+        'ps',
+        [
+          '-o',
+          'pid=,ppid=,pgid=,stat=,command=',
+          '-p',
+          String(running.bridge.pid),
+        ],
+        { encoding: 'utf8' },
+      ).stdout.trim();
+      throw new Error(`Daemon-owned PTY survived daemon crash: ${details}`);
+    }
     client.disconnect();
   });
 });

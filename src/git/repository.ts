@@ -61,6 +61,15 @@ export async function installRelayLocalExclusion(root: string): Promise<void> {
   let mode = 0o644;
   let handle;
   try {
+    const details = await lstat(excludePath);
+    if (details.isSymbolicLink())
+      throw new Error(
+        `Refusing to follow a symlinked Git exclude file: ${excludePath}`,
+      );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  try {
     handle = await open(
       excludePath,
       fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,

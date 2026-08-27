@@ -14,9 +14,10 @@ import { createRepository, removeRepository } from './helpers.js';
 const execFileAsync = promisify(execFile);
 const directories: string[] = [];
 const entrypoint = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-const tsxLoader = fileURLToPath(
-  new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url),
-);
+const tsxLoader = new URL(
+  '../node_modules/tsx/dist/loader.mjs',
+  import.meta.url,
+).href;
 
 async function relay(
   cwd: string,

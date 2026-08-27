@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { relayPath } from '../safety/path-policy.js';
 
 const LOCK_DIRECTORY = 'state.lock';
@@ -34,6 +41,32 @@ interface LockOwner {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function removeDirectory(directory: string): Promise<void> {
+  await rm(directory, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: ACQUIRE_INTERVAL_MS,
+  });
+}
+
+async function normalizeDestinationExistsError(
+  error: NodeJS.ErrnoException,
+  destination: string,
+): Promise<void> {
+  if (error.code === 'EEXIST' || error.code === 'ENOTEMPTY') {
+    error.code = 'EEXIST';
+    return;
+  }
+  if (error.code !== 'EPERM' || process.platform !== 'win32') return;
+  try {
+    await lstat(destination);
+    error.code = 'EEXIST';
+  } catch {
+    // Preserve a genuine permissions error when no competing lock exists.
+  }
 }
 
 function processIsAlive(pid: number): boolean {
@@ -89,9 +122,11 @@ async function createOwnedDirectory(directory: string): Promise<LockOwner> {
     });
     await rename(claimDirectory, directory);
   } catch (error) {
-    await rm(claimDirectory, { recursive: true, force: true });
-    if ((error as NodeJS.ErrnoException).code === 'ENOTEMPTY')
-      (error as NodeJS.ErrnoException).code = 'EEXIST';
+    await normalizeDestinationExistsError(
+      error as NodeJS.ErrnoException,
+      directory,
+    );
+    await removeDirectory(claimDirectory);
     throw error;
   }
   return owner;
@@ -104,7 +139,7 @@ async function removeIfOwned(
   const current = await readOwner(directory);
   if (current?.token !== owner.token) return;
   try {
-    await rm(directory, { recursive: true, force: true });
+    await removeDirectory(directory);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (
@@ -153,7 +188,7 @@ async function acquire(root: string): Promise<LockOwner> {
         if (lockIsStale(current)) {
           // The gate serializes acquire, release, and reclamation, so the owner
           // cannot change between this check and removal.
-          await rm(directory, { recursive: true, force: true });
+          await removeDirectory(directory);
           return await createOwnedDirectory(directory);
         }
         busy = true;

@@ -124,7 +124,8 @@ describe('local Relay exclusion', () => {
     const exclude = await gitExcludePath(root);
     await chmod(exclude, 0o600);
     await installRelayLocalExclusion(root);
-    expect((await stat(exclude)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32')
+      expect((await stat(exclude)).mode & 0o777).toBe(0o600);
   });
 
   it('handles a missing final newline', async () => {

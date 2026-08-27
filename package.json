@@ -44,7 +44,7 @@
     "lint": "eslint desktop src tests eslint.config.js",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
-    "verify": "npm run check && npm run lint && npm run format && npm test && npm run build",
+    "verify": "npm run check && npm run lint && npm run format && npm run build && npm test",
     "package:check": "node scripts/check-package.mjs",
     "smoke:packed": "node scripts/smoke-packed-install.mjs",
     "desktop:smoke": "node scripts/smoke-packaged-pty.mjs",

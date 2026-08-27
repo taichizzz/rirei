@@ -168,7 +168,15 @@ function outputAttentionKind(terminal, chunk) {
     terminal.attentionScan = '';
     return 'permission';
   }
-  return bell ? 'input' : null;
+  if (!bell) return null;
+  const possiblePermissionMarker = markers.some((marker) => {
+    const limit = Math.min(marker.length - 1, terminal.attentionScan.length);
+    for (let length = limit; length > 0; length -= 1) {
+      if (terminal.attentionScan.endsWith(marker.slice(0, length))) return true;
+    }
+    return false;
+  });
+  return possiblePermissionMarker ? null : 'input';
 }
 
 function outputSlice(terminal, cursor) {

@@ -29,27 +29,32 @@ describe('executable resolution', () => {
     expect(pathextList({}).length).toBeGreaterThan(0);
   });
 
-  it('resolves executables on Unix via PATH and X_OK permission', async () => {
-    const scriptPath = path.join(tempDir, 'sample-tool');
-    await writeFile(scriptPath, '#!/bin/sh\necho "hello"\n', 'utf8');
-    await chmod(scriptPath, 0o755);
+  const unixIt = process.platform === 'win32' ? it.skip : it;
 
-    const resolved = await resolveExecutable('sample-tool', {
-      platform: 'darwin',
-      env: { PATH: tempDir },
-    });
-    expect(resolved).toBe(scriptPath);
+  unixIt(
+    'resolves executables on Unix via PATH and X_OK permission',
+    async () => {
+      const scriptPath = path.join(tempDir, 'sample-tool');
+      await writeFile(scriptPath, '#!/bin/sh\necho "hello"\n', 'utf8');
+      await chmod(scriptPath, 0o755);
 
-    const nonExecutable = path.join(tempDir, 'not-executable');
-    await writeFile(nonExecutable, 'data', 'utf8');
-    await chmod(nonExecutable, 0o644);
+      const resolved = await resolveExecutable('sample-tool', {
+        platform: 'darwin',
+        env: { PATH: tempDir },
+      });
+      expect(resolved).toBe(scriptPath);
 
-    const unexecutable = await resolveExecutable('not-executable', {
-      platform: 'darwin',
-      env: { PATH: tempDir },
-    });
-    expect(unexecutable).toBeNull();
-  });
+      const nonExecutable = path.join(tempDir, 'not-executable');
+      await writeFile(nonExecutable, 'data', 'utf8');
+      await chmod(nonExecutable, 0o644);
+
+      const unexecutable = await resolveExecutable('not-executable', {
+        platform: 'darwin',
+        env: { PATH: tempDir },
+      });
+      expect(unexecutable).toBeNull();
+    },
+  );
 
   it('resolves Windows executables with PATHEXT extensions', async () => {
     const cmdPath = path.join(tempDir, 'claude.cmd');
@@ -75,12 +80,19 @@ describe('executable resolution', () => {
   });
 
   it('resolves direct paths with separators', async () => {
-    const binPath = path.join(tempDir, 'direct-bin');
-    await writeFile(binPath, '#!/bin/sh\n', 'utf8');
+    const binPath = path.join(
+      tempDir,
+      process.platform === 'win32' ? 'direct-bin.cmd' : 'direct-bin',
+    );
+    await writeFile(
+      binPath,
+      process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\n',
+      'utf8',
+    );
     await chmod(binPath, 0o755);
 
     const resolved = await resolveExecutable(binPath, {
-      platform: 'darwin',
+      platform: process.platform,
     });
     expect(resolved).toBe(binPath);
   });

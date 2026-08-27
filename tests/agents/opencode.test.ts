@@ -9,14 +9,34 @@ let binDir: string;
 const originalPath = process.env.PATH;
 
 async function writeFake(name: string, script: string) {
-  const file = path.join(binDir, name);
-  await writeFile(file, script);
-  await chmod(file, 0o755);
+  if (process.platform === 'win32') {
+    const shellScript = path.join(binDir, `${name}.sh`);
+    await writeFile(shellScript, script);
+    await writeFile(
+      path.join(binDir, `${name}.cmd`),
+      `@echo off\r\nbash "${shellScript}" %*\r\n`,
+    );
+    return;
+  }
+  const executable = path.join(binDir, name);
+  await writeFile(executable, script);
+  await chmod(executable, 0o755);
+}
+
+async function removeFake(name: string) {
+  await Promise.all(
+    process.platform === 'win32'
+      ? [
+          rm(path.join(binDir, `${name}.cmd`), { force: true }),
+          rm(path.join(binDir, `${name}.sh`), { force: true }),
+        ]
+      : [rm(path.join(binDir, name), { force: true })],
+  );
 }
 
 beforeAll(async () => {
   binDir = await mkdtemp(path.join(tmpdir(), 'rirei-opencode-'));
-  process.env.PATH = `${binDir}:${originalPath}`;
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath}`;
 });
 
 afterAll(async () => {
@@ -132,7 +152,7 @@ printf 'anthropic\\n'
     expect(parsed.status).toBe('unknown');
     expect(parsed.confidence).toBe('low');
 
-    await rm(path.join(binDir, 'opencode'), { force: true });
+    await removeFake('opencode');
     clearAuthenticationCache();
     const isolatedPath = process.env.PATH;
     process.env.PATH = binDir;
@@ -146,7 +166,7 @@ printf 'anthropic\\n'
   });
 
   it('reports the binary not installed when absent from PATH', async () => {
-    await rm(path.join(binDir, 'opencode'), { force: true });
+    await removeFake('opencode');
     const isolatedPath = process.env.PATH;
     process.env.PATH = binDir;
     try {

@@ -257,9 +257,26 @@ async function createOwnedDirectory(directory: string): Promise<LockOwner> {
     });
     await rename(claim, directory);
   } catch (error) {
-    await rm(claim, { recursive: true, force: true });
-    if ((error as NodeJS.ErrnoException).code === 'ENOTEMPTY')
-      (error as NodeJS.ErrnoException).code = 'EEXIST';
+    const filesystemError = error as NodeJS.ErrnoException;
+    if (
+      filesystemError.code === 'EEXIST' ||
+      filesystemError.code === 'ENOTEMPTY'
+    )
+      filesystemError.code = 'EEXIST';
+    else if (filesystemError.code === 'EPERM' && process.platform === 'win32') {
+      try {
+        await lstat(directory);
+        filesystemError.code = 'EEXIST';
+      } catch {
+        // Preserve a genuine permissions error when no competing lock exists.
+      }
+    }
+    await rm(claim, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: ACQUIRE_INTERVAL_MS,
+    });
     throw error;
   }
   return owner;
@@ -271,7 +288,12 @@ async function removeIfOwned(
 ): Promise<void> {
   if ((await readOwner(directory))?.token !== owner.token) return;
   try {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: ACQUIRE_INTERVAL_MS,
+    });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (
@@ -315,7 +337,12 @@ async function acquireActivityLock(): Promise<LockOwner> {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         const owner = await readOwner(directory);
         if (lockIsStale(owner)) {
-          await rm(directory, { recursive: true, force: true });
+          await rm(directory, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: ACQUIRE_INTERVAL_MS,
+          });
           return await createOwnedDirectory(directory);
         }
         busy = true;

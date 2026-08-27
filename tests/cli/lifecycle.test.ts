@@ -13,9 +13,10 @@ const directories: string[] = [];
 const entrypoint = fileURLToPath(
   new URL('../../src/index.ts', import.meta.url),
 );
-const tsxLoader = fileURLToPath(
-  new URL('../../node_modules/tsx/dist/loader.mjs', import.meta.url),
-);
+const tsxLoader = new URL(
+  '../../node_modules/tsx/dist/loader.mjs',
+  import.meta.url,
+).href;
 
 async function relay(
   cwd: string,
@@ -73,6 +74,24 @@ async function relayWithInput(
     });
     child.stdin.end(input);
   });
+}
+
+async function writeFakeExecutable(
+  directory: string,
+  name: string,
+  script: string,
+): Promise<string> {
+  if (process.platform === 'win32') {
+    const shellScript = path.join(directory, `${name}.sh`);
+    const executable = path.join(directory, `${name}.cmd`);
+    await writeFile(shellScript, script);
+    await writeFile(executable, `@echo off\r\nbash "${shellScript}" %*\r\n`);
+    return executable;
+  }
+  const executable = path.join(directory, name);
+  await writeFile(executable, script);
+  await chmod(executable, 0o700);
+  return executable;
 }
 
 afterEach(async () => {
@@ -559,11 +578,11 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'note', 'blocker', 'Refresh endpoint returns 401');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    await writeFile(
-      path.join(bin, 'codex'),
+    await writeFakeExecutable(
+      bin,
+      'codex',
       '#!/bin/sh\nfor arg do last="$arg"; done\nprintf "%s" "$last" > "$RELAY_FAKE_LOG"\n',
     );
-    await chmod(path.join(bin, 'codex'), 0o700);
     const log = path.join(root, 'switch-prompt.log');
     const result = await relayWithEnv(
       root,
@@ -604,11 +623,11 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Do not launch silently');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    await writeFile(
-      path.join(bin, 'codex'),
+    await writeFakeExecutable(
+      bin,
+      'codex',
       '#!/bin/sh\nprintf "launched" > "$RELAY_FAKE_LOG"\n',
     );
-    await chmod(path.join(bin, 'codex'), 0o700);
     const log = path.join(root, 'unapproved-launch.log');
 
     await expect(
@@ -632,11 +651,11 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Require continuation context');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    await writeFile(
-      path.join(bin, 'codex'),
+    await writeFakeExecutable(
+      bin,
+      'codex',
       '#!/bin/sh\nprintf "launched" > "$RELAY_FAKE_LOG"\n',
     );
-    await chmod(path.join(bin, 'codex'), 0o700);
     const log = path.join(root, 'empty-context-launch.log');
     const env = {
       PATH: `${bin}${path.delimiter}${process.env.PATH}`,
@@ -669,12 +688,11 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Use Gemini');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    const executable = path.join(bin, 'gemini');
-    await writeFile(
-      executable,
+    await writeFakeExecutable(
+      bin,
+      'gemini',
       '#!/bin/sh\nprintf "%s\\n" "$@" > "$RELAY_FAKE_LOG"\n',
     );
-    await chmod(executable, 0o700);
     const log = path.join(root, 'args.log');
     await relayWithEnv(
       root,
@@ -710,9 +728,7 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Track agent sessions');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    const executable = path.join(bin, 'codex');
-    await writeFile(executable, '#!/bin/sh\nexit 0\n');
-    await chmod(executable, 0o700);
+    await writeFakeExecutable(bin, 'codex', '#!/bin/sh\nexit 0\n');
     await relayWithEnv(
       root,
       { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
@@ -755,12 +771,11 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Retry provider launch safely');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    const executable = path.join(bin, 'codex');
-    await writeFile(
-      executable,
+    await writeFakeExecutable(
+      bin,
+      'codex',
       '#!/bin/sh\nprintf "launch\\n" >> "$RELAY_FAKE_LOG"\n',
     );
-    await chmod(executable, 0o700);
     const log = path.join(root, 'operation-launches.log');
     const env = {
       PATH: `${bin}${path.delimiter}${process.env.PATH}`,
@@ -802,11 +817,11 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Track Claude session identity');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    await writeFile(
-      path.join(bin, 'claude'),
+    await writeFakeExecutable(
+      bin,
+      'claude',
       '#!/bin/sh\nprintf "%s\\n" "$@" > "$RELAY_FAKE_LOG"\n',
     );
-    await chmod(path.join(bin, 'claude'), 0o700);
     const log = path.join(root, 'claude-args.log');
     await relayWithEnv(
       root,
@@ -850,11 +865,11 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Resume Claude safely');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    await writeFile(
-      path.join(bin, 'claude'),
+    await writeFakeExecutable(
+      bin,
+      'claude',
       '#!/bin/sh\nprintf "%s\\n" "$@" > "$RELAY_FAKE_LOG"\n',
     );
-    await chmod(path.join(bin, 'claude'), 0o700);
     const log = path.join(root, 'claude-resume-args.log');
     const env = {
       PATH: `${bin}${path.delimiter}${process.env.PATH}`,
@@ -922,11 +937,11 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Resume Codex safely');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    await writeFile(
-      path.join(bin, 'codex'),
+    await writeFakeExecutable(
+      bin,
+      'codex',
       '#!/bin/sh\nprintf "%s\\n" "$@" > "$RELAY_FAKE_LOG"\n',
     );
-    await chmod(path.join(bin, 'codex'), 0o700);
     const log = path.join(root, 'codex-resume-args.log');
     await relayWithEnv(
       root,
@@ -971,8 +986,7 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Archived title\nOriginal searchable phrase');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    await writeFile(path.join(bin, 'codex'), '#!/bin/sh\nexit 0\n');
-    await chmod(path.join(bin, 'codex'), 0o700);
+    await writeFakeExecutable(bin, 'codex', '#!/bin/sh\nexit 0\n');
     await relayWithEnv(
       root,
       { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
@@ -1222,9 +1236,7 @@ describe('Relay lifecycle commands', () => {
     await relay(root, 'start', 'Finish while agent exits');
     const bin = path.join(root, 'fake-bin');
     await mkdir(bin);
-    const executable = path.join(bin, 'codex');
-    await writeFile(executable, '#!/bin/sh\nsleep 1\n');
-    await chmod(executable, 0o700);
+    await writeFakeExecutable(bin, 'codex', '#!/bin/sh\nsleep 1\n');
     const running = relayWithEnv(
       root,
       { PATH: `${bin}${path.delimiter}${process.env.PATH}` },

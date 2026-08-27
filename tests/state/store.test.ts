@@ -160,8 +160,10 @@ describe('state store', () => {
     const fileMode = (
       await stat(relayPath(root, 'tasks', 'session', 'state.json'))
     ).mode;
-    expect(directoryMode & 0o777).toBe(0o700);
-    expect(fileMode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(directoryMode & 0o777).toBe(0o700);
+      expect(fileMode & 0o777).toBe(0o600);
+    }
   });
 
   it('migrates older archived tasks instead of hiding them', async () => {

@@ -7,6 +7,8 @@ import {
 } from '../../desktop/terminal-control.mjs';
 import { sanitizeWorkspaceList } from '../../desktop/workspace-projection.mjs';
 
+const mac = process.platform === 'darwin' ? test : test.skip;
+
 function processAlive(pid: number) {
   try {
     process.kill(pid, 0);
@@ -70,46 +72,49 @@ describe('desktop protocols', () => {
     ]);
   });
 
-  test('interrupts the provider while leaving its controller alive to finalize', async () => {
-    const controller = [
-      "const { spawn } = require('node:child_process');",
-      "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });",
-      "console.log('READY');",
-      "child.on('close', () => { console.log('FINALIZED'); process.exit(0); });",
-    ].join(' ');
-    const bridge = spawn(
-      '/usr/bin/python3',
-      [
-        path.resolve('desktop/pty_bridge.py'),
-        process.execPath,
-        '-e',
-        controller,
-      ],
-      { stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] },
-    );
-    let output = '';
-    const completed = new Promise<number | null>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        bridge.kill('SIGKILL');
-        reject(new Error('PTY bridge did not finalize after interrupt.'));
-      }, 10_000);
-      bridge.stdout.on('data', (data) => {
-        output += data.toString();
-        if (output.includes('READY'))
-          bridge.stdio[3]!.write(terminalControlFrame('interrupt'));
+  mac(
+    'interrupts the provider while leaving its controller alive to finalize',
+    async () => {
+      const controller = [
+        "const { spawn } = require('node:child_process');",
+        "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });",
+        "console.log('READY');",
+        "child.on('close', () => { console.log('FINALIZED'); process.exit(0); });",
+      ].join(' ');
+      const bridge = spawn(
+        '/usr/bin/python3',
+        [
+          path.resolve('desktop/pty_bridge.py'),
+          process.execPath,
+          '-e',
+          controller,
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] },
+      );
+      let output = '';
+      const completed = new Promise<number | null>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          bridge.kill('SIGKILL');
+          reject(new Error('PTY bridge did not finalize after interrupt.'));
+        }, 10_000);
+        bridge.stdout.on('data', (data) => {
+          output += data.toString();
+          if (output.includes('READY'))
+            bridge.stdio[3]!.write(terminalControlFrame('interrupt'));
+        });
+        bridge.once('error', reject);
+        bridge.once('close', (code) => {
+          clearTimeout(timer);
+          resolve(code);
+        });
       });
-      bridge.once('error', reject);
-      bridge.once('close', (code) => {
-        clearTimeout(timer);
-        resolve(code);
-      });
-    });
 
-    await expect(completed).resolves.toBe(0);
-    expect(output).toContain('FINALIZED');
-  });
+      await expect(completed).resolves.toBe(0);
+      expect(output).toContain('FINALIZED');
+    },
+  );
 
-  test('hosts a normal interactive shell in the PTY bridge', async () => {
+  mac('hosts a normal interactive shell in the PTY bridge', async () => {
     const bridge = spawn(
       '/usr/bin/python3',
       [path.resolve('desktop/pty_bridge.py'), '/bin/zsh', '-f'],
@@ -139,7 +144,7 @@ describe('desktop protocols', () => {
     expect(output).toContain('__RIREI_SHELL_OK__');
   });
 
-  test('reports parent control loss and stops descendants', async () => {
+  mac('reports parent control loss and stops descendants', async () => {
     const leaf = `setInterval(() => {}, 1000)`;
     const supervisor = [
       "const { spawn } = require('node:child_process');",

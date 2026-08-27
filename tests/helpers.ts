@@ -35,5 +35,10 @@ export async function createRepository(): Promise<string> {
 }
 
 export async function removeRepository(directory: string): Promise<void> {
-  await rm(directory, { recursive: true, force: true });
+  await rm(directory, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 50,
+  });
 }

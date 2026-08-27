@@ -43,11 +43,11 @@ jobs:
       - name: Format check
         run: npm run format
 
-      - name: Run test suite
-        run: npm test
-
       - name: Build binary
         run: npm run build
+
+      - name: Run test suite
+        run: npm test
 
       - name: Verify npm package contents
         run: npm run package:check

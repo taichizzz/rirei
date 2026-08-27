@@ -217,7 +217,9 @@ describe('terminal daemon', () => {
       terminal.id,
       second.endCursor,
     );
-    expect(reattached.startCursor).toBe(second.endCursor);
+    expect(reattached.startCursor).toBe(
+      Math.max(second.endCursor, reattached.oldestCursor),
+    );
     await expect(
       restartedMainClient.setWaiting(terminal.id),
     ).resolves.toMatchObject({ status: 'waiting' });
@@ -430,9 +432,15 @@ describe('terminal daemon', () => {
     });
     const running = await waitFor(
       () => client.inspect(terminal.id),
-      (item) => item.nextCursor > 0,
+      (item) => item.status === 'running',
     );
-    const replay = await client.attach(terminal.id, 0);
+    const replay = await waitFor(
+      () => client.attach(terminal.id, 0),
+      (item) =>
+        /CHILD_PID=(\d+)/.test(
+          Buffer.from(item.data, 'base64').toString('utf8'),
+        ),
+    );
     const childPid = Number.parseInt(
       Buffer.from(replay.data, 'base64')
         .toString('utf8')

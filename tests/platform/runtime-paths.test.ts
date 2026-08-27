@@ -77,7 +77,7 @@ describe('runtime paths', () => {
         home: fakeHome,
         env: { XDG_DATA_HOME: '/var/custom/share' },
       }),
-    ).toBe(path.join('/var/custom/share', 'rirei'));
+    ).toBe(path.posix.join('/var/custom/share', 'rirei'));
   });
 
   it('resolves Linux fallback to ~/.local/share/rirei', () => {

@@ -110,9 +110,10 @@ describe('provider plan usage', () => {
         }),
       ],
     });
-    expect(await stat(path.dirname(settingsPath!))).toMatchObject({
-      mode: 0o40700,
-    });
+    if (process.platform !== 'win32')
+      expect(await stat(path.dirname(settingsPath!))).toMatchObject({
+        mode: 0o40700,
+      });
     expect(claudeProviderUsagePath({ home })).toBe(
       path.join(home, '.relay', 'provider-usage', 'claude.json'),
     );
@@ -259,8 +260,10 @@ describe('provider plan usage', () => {
     expect(await readFile(outputPath, 'utf8')).not.toMatch(
       /session|transcript|prompt|secret/,
     );
-    expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
-    expect((await stat(path.dirname(outputPath))).mode & 0o777).toBe(0o700);
+    if (process.platform !== 'win32') {
+      expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
+      expect((await stat(path.dirname(outputPath))).mode & 0o777).toBe(0o700);
+    }
   });
 
   it('rejects out-of-range percentages, nonnumeric fields, and invalid resets', async () => {

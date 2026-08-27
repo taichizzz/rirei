@@ -23,10 +23,10 @@ describe('interactive shell resolution', () => {
 
   it('selects Unix shell with login flag', () => {
     const shell = defaultInteractiveShell({
-      platform: 'darwin',
-      env: { SHELL: '/bin/zsh' },
+      platform: 'linux',
+      env: { SHELL: process.execPath },
     });
-    expect(shell.executable).toBe('/bin/zsh');
+    expect(shell.executable).toBe(process.execPath);
     expect(shell.args).toEqual(['-l']);
   });
 

@@ -7,6 +7,10 @@ export interface PlatformPathOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+function pathForPlatform(platform: NodeJS.Platform): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
 /**
  * Resolve the persistent application data directory for Rirei.
  *
@@ -19,7 +23,7 @@ export interface PlatformPathOptions {
 export function rireiDataHome(options: PlatformPathOptions = {}): string {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
-  const p = platform === 'win32' ? path.win32 : path;
+  const p = pathForPlatform(platform);
   const home = options.home ?? homedir();
 
   const override = env.RIREI_DATA_HOME?.trim();
@@ -53,7 +57,7 @@ export function rireiDataHome(options: PlatformPathOptions = {}): string {
  */
 export function activityFilePath(options: PlatformPathOptions = {}): string {
   const platform = options.platform ?? process.platform;
-  const p = platform === 'win32' ? path.win32 : path;
+  const p = pathForPlatform(platform);
   return p.join(rireiDataHome(options), 'activity.json');
 }
 
@@ -64,7 +68,7 @@ export function activitySourcesFilePath(
   options: PlatformPathOptions = {},
 ): string {
   const platform = options.platform ?? process.platform;
-  const p = platform === 'win32' ? path.win32 : path;
+  const p = pathForPlatform(platform);
   return p.join(rireiDataHome(options), 'activity-sources.json');
 }
 
@@ -76,7 +80,7 @@ export function journalFilePath(
   options: PlatformPathOptions = {},
 ): string {
   const platform = options.platform ?? process.platform;
-  const p = platform === 'win32' ? path.win32 : path;
+  const p = pathForPlatform(platform);
   return p.join(rireiDataHome(options), `terminal-journal-${projectHash}.json`);
 }
 
@@ -88,6 +92,6 @@ export function daemonDescriptorPath(
   options: PlatformPathOptions = {},
 ): string {
   const platform = options.platform ?? process.platform;
-  const p = platform === 'win32' ? path.win32 : path;
+  const p = pathForPlatform(platform);
   return p.join(runtimeRootOrUserData, 'terminal-daemon-v1.json');
 }

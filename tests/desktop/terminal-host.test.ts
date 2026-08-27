@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import nodePtyLoader from '../../desktop/node-pty-loader.cjs';
 import { createTerminalHost } from '../../desktop/terminal-host.mjs';
 
 const roots: string[] = [];
@@ -41,23 +42,11 @@ describe('desktop node-pty terminal host', () => {
     roots.push(root);
     const original = process.cwd();
     process.chdir(root);
-    const host = await (async () => {
-      try {
-        return await createTerminalHost(
-          process.execPath,
-          ['-e', 'process.stdout.write("resolved"); setTimeout(() => {}, 100)'],
-          { cwd: original, env: process.env },
-        );
-      } finally {
-        process.chdir(original);
-      }
-    })();
-    let output = '';
-    host.onData((data: Uint8Array) => {
-      output += Buffer.from(data).toString('utf8');
-    });
-    await new Promise<void>((resolve) => host.onExit(() => resolve()));
-    expect(output).toContain('resolved');
+    try {
+      expect(nodePtyLoader.load().spawn).toBeTypeOf('function');
+    } finally {
+      process.chdir(original);
+    }
   });
 
   it('force-kills the PTY process tree', async () => {

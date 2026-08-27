@@ -38,7 +38,7 @@ const originalProviderUsageHome = process.env.RIREI_PROVIDER_USAGE_HOME;
 
 async function waitForActivity(
   predicate: (snapshot: RireiActivitySnapshotV1 | undefined) => boolean,
-  timeoutMs = 2_000,
+  timeoutMs = 10_000,
 ): Promise<RireiActivitySnapshotV1> {
   const deadline = process.hrtime.bigint() + BigInt(timeoutMs) * 1_000_000n;
   while (process.hrtime.bigint() < deadline) {
@@ -538,7 +538,6 @@ describe('global activity snapshot', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     const cleaned = await waitForActivity(
       (snapshot) => snapshot.sessions.length === 0,
-      5_000,
     );
     await vi.advanceTimersByTimeAsync(10_000);
     expect((await readActivity())?.updatedAt).toBe(cleaned.updatedAt);

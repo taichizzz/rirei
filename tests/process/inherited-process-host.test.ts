@@ -22,14 +22,14 @@ describe('inherited process host', () => {
       const marker = path.join(root, 'launched.txt');
       await writeFile(
         path.join(root, 'claude.cmd'),
-        '@echo off\r\n> "%RIREI_MARKER%" echo launched\r\nexit /b 0\r\n',
+        '@echo off\r\n> "%RIREI_MARKER%" echo %*\r\nexit /b 0\r\n',
       );
       const previousPath = process.env.PATH;
       process.env.PATH = `${root}${path.delimiter}${previousPath ?? ''}`;
       try {
         const command = await getAgent('claude').buildInteractiveCommand({
           projectRoot: root,
-          prompt: '',
+          prompt: 'first line\nsecond line',
         });
         expect(command.executable).toBe('claude');
         const host = new InheritedProcessHost();
@@ -45,7 +45,9 @@ describe('inherited process host', () => {
             }),
         );
         expect(result.exitCode).toBe(0);
-        expect(await readFile(marker, 'utf8')).toContain('launched');
+        const launchedArgs = await readFile(marker, 'utf8');
+        expect(launchedArgs).toContain('first line');
+        expect(launchedArgs).toContain('second line');
       } finally {
         if (previousPath === undefined) delete process.env.PATH;
         else process.env.PATH = previousPath;

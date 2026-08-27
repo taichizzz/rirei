@@ -19,7 +19,7 @@ describe('runtime paths', () => {
         home: fakeHome,
         env: { RIREI_DATA_HOME: override },
       }),
-    ).toBe(path.resolve(override));
+    ).toBe(path.posix.resolve(override));
 
     expect(
       rireiDataHome({
@@ -37,7 +37,7 @@ describe('runtime paths', () => {
         home: fakeHome,
         env: { RIREI_DATA_HOME: '.custom-rirei' },
       }),
-    ).toBe(path.resolve(fakeHome, '.custom-rirei'));
+    ).toBe(path.posix.resolve(fakeHome, '.custom-rirei'));
   });
 
   it('resolves macOS default to Library/Application Support/Rirei', () => {
@@ -47,7 +47,9 @@ describe('runtime paths', () => {
         home: fakeHome,
         env: {},
       }),
-    ).toBe(path.join(fakeHome, 'Library', 'Application Support', 'Rirei'));
+    ).toBe(
+      path.posix.join(fakeHome, 'Library', 'Application Support', 'Rirei'),
+    );
   });
 
   it('resolves Windows default using LOCALAPPDATA', () => {
@@ -87,22 +89,27 @@ describe('runtime paths', () => {
         home: fakeHome,
         env: {},
       }),
-    ).toBe(path.join(fakeHome, '.local', 'share', 'rirei'));
+    ).toBe(path.posix.join(fakeHome, '.local', 'share', 'rirei'));
   });
 
   it('builds activity, journal, and descriptor file paths', () => {
     const opts = { platform: 'darwin' as const, home: fakeHome, env: {} };
-    const base = path.join(fakeHome, 'Library', 'Application Support', 'Rirei');
+    const base = path.posix.join(
+      fakeHome,
+      'Library',
+      'Application Support',
+      'Rirei',
+    );
 
-    expect(activityFilePath(opts)).toBe(path.join(base, 'activity.json'));
+    expect(activityFilePath(opts)).toBe(path.posix.join(base, 'activity.json'));
     expect(activitySourcesFilePath(opts)).toBe(
-      path.join(base, 'activity-sources.json'),
+      path.posix.join(base, 'activity-sources.json'),
     );
     expect(journalFilePath('abc12345', opts)).toBe(
-      path.join(base, 'terminal-journal-abc12345.json'),
+      path.posix.join(base, 'terminal-journal-abc12345.json'),
     );
     expect(daemonDescriptorPath(base, opts)).toBe(
-      path.join(base, 'terminal-daemon-v1.json'),
+      path.posix.join(base, 'terminal-daemon-v1.json'),
     );
   });
 });

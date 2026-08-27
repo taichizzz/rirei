@@ -6,13 +6,23 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { TerminalDaemonClient } from '../../desktop/terminal-daemon-client.mjs';
 import { ensureDaemon } from '../../src/platform/daemon-manager.js';
+import { killProcessTree } from '../../src/platform/process-control.js';
 
 const roots: string[] = [];
 const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((c) => c()));
-  await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true })));
+  await Promise.all(
+    roots.splice(0).map((r) =>
+      rm(r, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 100,
+      }),
+    ),
+  );
 });
 
 async function temporaryPaths() {
@@ -52,11 +62,7 @@ describe('CLI daemon launcher', () => {
     );
 
     cleanups.push(async () => {
-      try {
-        process.kill(daemonProc.pid!, 'SIGTERM');
-      } catch {
-        // already stopped
-      }
+      if (daemonProc.pid) await killProcessTree(daemonProc.pid);
     });
 
     const deadline = Date.now() + 5000;
@@ -111,11 +117,7 @@ describe('CLI daemon launcher', () => {
       await readFile(firstResult.descriptorPath, 'utf8'),
     );
     cleanups.push(async () => {
-      try {
-        process.kill(descriptor.pid, 'SIGTERM');
-      } catch {
-        // Already stopped.
-      }
+      await killProcessTree(descriptor.pid);
     });
 
     // Second call: reuses existing healthy daemon

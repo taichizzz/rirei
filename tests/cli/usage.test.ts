@@ -41,7 +41,12 @@ async function relay(
     {
       cwd,
       encoding: 'utf8',
-      env: { ...process.env, HOME: home, CODEX_HOME: codexHome },
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        CODEX_HOME: codexHome,
+      },
     },
   );
 }

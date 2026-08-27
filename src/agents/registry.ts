@@ -72,15 +72,26 @@ function runExecutable(
       });
       reject(error);
     };
+    const abort = (code: string, message: string) => {
+      if (settled) return;
+      settled = true;
+      killed = true;
+      errorCode = code;
+      globalThis.clearTimeout(timer);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      if (child.pid) void killProcessTree(child.pid);
+      else child.kill();
+      fail(message, code);
+    };
     const append = (chunks: Buffer[], chunk: Buffer, current: number) => {
       const remaining = Math.max(0, maxBuffer - current);
       if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
-      if (chunk.length > remaining && !killed) {
-        killed = true;
-        errorCode = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
-        if (child.pid) void killProcessTree(child.pid);
-        else child.kill();
-      }
+      if (chunk.length > remaining)
+        abort(
+          'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+          `${executable} exceeded the output limit.`,
+        );
       return current + chunk.length;
     };
 
@@ -107,13 +118,10 @@ function runExecutable(
           errorCode ?? (code === null ? (signal ?? undefined) : String(code)),
         );
     });
-    const timer = globalThis.setTimeout(() => {
-      if (settled || killed) return;
-      killed = true;
-      errorCode = 'ETIMEDOUT';
-      if (child.pid) void killProcessTree(child.pid);
-      else child.kill();
-    }, options.timeout);
+    const timer = globalThis.setTimeout(
+      () => abort('ETIMEDOUT', `${executable} timed out.`),
+      options.timeout,
+    );
   });
 }
 

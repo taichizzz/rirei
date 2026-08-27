@@ -12,8 +12,8 @@ afterEach(async () => {
       rm(root, {
         recursive: true,
         force: true,
-        maxRetries: 5,
-        retryDelay: 50,
+        maxRetries: 20,
+        retryDelay: 100,
       }),
     ),
   );

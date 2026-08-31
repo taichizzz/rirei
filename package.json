@@ -71,7 +71,7 @@
     "@types/cross-spawn": "^6.0.6",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/xterm": "5.5.0",
-    "electron": "^43.3.0",
+    "electron": "^44.0.0",
     "electron-builder": "^26.0.12",
     "esbuild": "^0.28.1",
     "eslint": "^9.39.5",

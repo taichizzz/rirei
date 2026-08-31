@@ -14,5 +14,8 @@ describe('index.html', () => {
       'data-interactive="fork-latest" data-agent="opencode"',
     );
     expect(htmlContent).toContain('id="resumeRecovered"');
+    expect(htmlContent).toContain('id="onboardingModal"');
+    expect(htmlContent).toContain('id="onboardingProviders"');
+    expect(htmlContent).toContain('id="onboardingChoose"');
   });
 });

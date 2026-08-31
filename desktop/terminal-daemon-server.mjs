@@ -283,6 +283,8 @@ export async function runTerminalDaemon(options) {
   const daemonBootId = currentBootId();
   const token = randomBytes(32).toString('base64url');
   const terminals = new Map();
+  const startingClaims = new Set();
+  const terminalStartups = new Set();
   const connections = new Set();
   let closing = false;
   await prepareSocket(options.socketPath);
@@ -401,6 +403,7 @@ export async function runTerminalDaemon(options) {
     if (!options.registerBridge || terminal.bridgeRegistrationStarted) return;
     terminal.bridgeRegistrationStarted = true;
     const deadline = Date.now() + BRIDGE_REGISTRATION_TIMEOUT_MS;
+    let retryMs = options.bridgeRegistrationRetryMs ?? 250;
     while (!terminal.finalized && Date.now() < deadline) {
       try {
         await options.registerBridge(
@@ -414,9 +417,10 @@ export async function runTerminalDaemon(options) {
         await new Promise((resolve) =>
           globalThis.setTimeout(
             resolve,
-            options.bridgeRegistrationRetryMs ?? 250,
+            Math.min(retryMs, deadline - Date.now()),
           ),
         );
+        retryMs = Math.min(retryMs * 2, 2_000);
       }
     }
     if (!terminal.finalized) {
@@ -426,7 +430,7 @@ export async function runTerminalDaemon(options) {
     }
   };
 
-  const start = async (body) => {
+  const startTerminal = async (body) => {
     if (closing)
       throw Object.assign(new Error('Terminal daemon is shutting down.'), {
         daemonCode: 'shutting_down',
@@ -435,9 +439,12 @@ export async function runTerminalDaemon(options) {
       throw Object.assign(new Error('Invalid project.'), {
         daemonCode: 'invalid_start',
       });
+    const workspaceId = body.workspaceId || 'default';
+    const claimKey = JSON.stringify([body.project, workspaceId]);
     if (
-      [...terminals.values()].filter((item) => ACTIVE.has(item.status))
-        .length >= MAX_TERMINALS
+      [...terminals.values()].filter((item) => ACTIVE.has(item.status)).length +
+        startingClaims.size >=
+      MAX_TERMINALS
     )
       throw Object.assign(new Error('Maximum active terminals reached.'), {
         daemonCode: 'capacity',
@@ -446,13 +453,15 @@ export async function runTerminalDaemon(options) {
       [...terminals.values()].some(
         (item) =>
           item.project === body.project &&
-          item.workspaceId === body.workspaceId &&
+          item.workspaceId === workspaceId &&
           ACTIVE.has(item.status),
-      )
+      ) ||
+      startingClaims.has(claimKey)
     )
       throw Object.assign(new Error('This working tree is already claimed.'), {
         daemonCode: 'claimed',
       });
+    startingClaims.add(claimKey);
     const id = randomUUID();
     const size = validSize(body.size);
     const terminal = {
@@ -460,7 +469,7 @@ export async function runTerminalDaemon(options) {
       kind: body.kind === 'shell' ? 'shell' : 'agent',
       provider: body.kind === 'shell' ? 'shell' : body.agent,
       project: body.project,
-      workspaceId: body.workspaceId || 'default',
+      workspaceId,
       branchLabel: body.branchLabel || 'main',
       hidden: false,
       status: 'starting',
@@ -489,7 +498,13 @@ export async function runTerminalDaemon(options) {
       runtimeStartedAt: performance.now(),
       runtimeClock: () => performance.now(),
     };
-    const command = options.commandFor(body, id);
+    let command;
+    try {
+      command = options.commandFor(body, id);
+    } catch (error) {
+      startingClaims.delete(claimKey);
+      throw error;
+    }
     const terminalEnv = {
       ...process.env,
       PATH: options.pathValue ?? process.env.PATH,
@@ -516,19 +531,22 @@ export async function runTerminalDaemon(options) {
           }
         : {}),
     };
-
     if (options.forcePythonBridge && options.bridgePath) {
-      const child = spawn(
-        '/usr/bin/python3',
-        [options.bridgePath, ...command],
-        {
+      let child;
+      try {
+        child = spawn('/usr/bin/python3', [options.bridgePath, ...command], {
           cwd: body.project,
           env: terminalEnv,
           stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
-        },
-      );
+          windowsHide: true,
+        });
+      } catch (error) {
+        startingClaims.delete(claimKey);
+        throw error;
+      }
       terminal.child = child;
       terminals.set(id, terminal);
+      startingClaims.delete(claimKey);
       publish({ event: 'created', terminal: publicTerminal(terminal) });
       child.stdout.on('data', (data) => {
         if (terminal.status === 'starting')
@@ -586,13 +604,19 @@ export async function runTerminalDaemon(options) {
     }
 
     const [executable, ...args] = command;
-    const host = await createTerminalHost(executable, args, {
-      cwd: body.project,
-      env: terminalEnv,
-      cols: size.cols,
-      rows: size.rows,
-      parentGuardNodePath: options.nodePath,
-    });
+    let host;
+    try {
+      host = await createTerminalHost(executable, args, {
+        cwd: body.project,
+        env: terminalEnv,
+        cols: size.cols,
+        rows: size.rows,
+        parentGuardNodePath: options.nodePath,
+      });
+    } catch (error) {
+      startingClaims.delete(claimKey);
+      throw error;
+    }
     terminal.host = host;
     terminal.bridge = {
       instanceId: id,
@@ -601,6 +625,7 @@ export async function runTerminalDaemon(options) {
       protocolVersion: 1,
     };
     terminals.set(id, terminal);
+    startingClaims.delete(claimKey);
     publish({ event: 'created', terminal: publicTerminal(terminal) });
     transitionTerminal(terminal, 'running');
     void registerBridge(terminal);
@@ -631,6 +656,16 @@ export async function runTerminalDaemon(options) {
     });
 
     return publicTerminal(terminal);
+  };
+
+  const start = (body) => {
+    const startup = startTerminal(body);
+    terminalStartups.add(startup);
+    void startup.then(
+      () => terminalStartups.delete(startup),
+      () => terminalStartups.delete(startup),
+    );
+    return startup;
   };
 
   const stop = (terminal) => {
@@ -997,6 +1032,7 @@ export async function runTerminalDaemon(options) {
         closePromise = (async () => {
           closing = true;
           globalThis.clearInterval(heartbeatTimer);
+          await Promise.allSettled([...terminalStartups]);
           if (stopActive)
             for (const terminal of terminals.values())
               if (ACTIVE.has(terminal.status)) stop(terminal);

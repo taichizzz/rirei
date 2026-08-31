@@ -1,4 +1,13 @@
 import { TerminalTabsModel } from './terminal-tabs-model.mjs';
+import {
+  deriveProviderReadiness,
+  effortsForModel,
+  formatExactTimestamp,
+  launchProfileOverrides,
+  planStatusLabel,
+  selectedModelValue,
+  usageWindowPresentation,
+} from './provider-ui.mjs';
 /* global document, localStorage, window, Terminal, FitAddon */
 const tabsModel = new TerminalTabsModel();
 
@@ -15,6 +24,8 @@ let deepLinkProcessing = false;
 let rendererUnloading = false;
 let workspaceCreateOperationId = null;
 let launchDialogPending = false;
+let projectInitializing = true;
+let projectChoicePending = false;
 const projectButton = document.querySelector('#choose');
 const commandButtons = [...document.querySelectorAll('[data-command]')];
 const interactiveButtons = [...document.querySelectorAll('[data-interactive]')];
@@ -55,6 +66,21 @@ const checkpointList = document.querySelector('#checkpointList');
 const checkpointMeta = document.querySelector('#checkpointMeta');
 const checkpointWarnings = document.querySelector('#checkpointWarnings');
 const checkpointPatch = document.querySelector('#checkpointPatch');
+const onboardingModal = document.querySelector('#onboardingModal');
+const onboardingSkip = document.querySelector('#onboardingSkip');
+const onboardingChoose = document.querySelector('#onboardingChoose');
+const onboardingContinue = document.querySelector('#onboardingContinue');
+const onboardingProjectName = document.querySelector('#onboardingProjectName');
+const onboardingProjectPath = document.querySelector('#onboardingProjectPath');
+const onboardingProjectStep = document.querySelector('#onboardingProjectStep');
+const onboardingProviderStep = document.querySelector(
+  '#onboardingProviderStep',
+);
+const onboardingUsageStep = document.querySelector('#onboardingUsageStep');
+const onboardingChecks = document.querySelector('#onboardingChecks');
+const onboardingStatus = document.querySelector('#onboardingStatus');
+const onboardingProviders = document.querySelector('#onboardingProviders');
+const onboardingError = document.querySelector('#onboardingError');
 let agentHistory = [];
 let checkpoints = [];
 let historyRequest = 0;
@@ -469,6 +495,68 @@ document.getElementById('closeTabCancel').onclick = () => {
 
 // Launch Dialog
 const launchDialogModal = document.getElementById('launchDialogModal');
+const launchProvider = document.getElementById('launchProvider');
+const launchProviderStatus = document.getElementById('launchProviderStatus');
+const launchModel = document.getElementById('launchModel');
+const launchEffort = document.getElementById('launchEffort');
+const launchDialogRun = document.getElementById('launchDialogRun');
+const launchCustomModelRow = document.getElementById('launchCustomModelRow');
+const launchCustomModel = document.getElementById('launchCustomModel');
+let launchCatalog = [];
+
+function selectedLaunchModel() {
+  return selectedModelValue(launchModel.value, launchCustomModel.value);
+}
+
+function populateLaunchEfforts(preferred) {
+  const entry = launchCatalog.find((item) => item.id === launchProvider.value);
+  const model = selectedLaunchModel();
+  const efforts = effortsForModel(entry, model);
+  launchEffort.textContent = '';
+  addOption(launchEffort, '', 'Auto · provider default');
+  for (const effort of efforts) addOption(launchEffort, effort, effort);
+  launchEffort.disabled = efforts.length === 0;
+  launchEffort.value = efforts.includes(preferred) ? preferred : '';
+}
+
+function populateLaunchProvider(provider) {
+  const entry = launchCatalog.find((item) => item.id === provider);
+  const saved = agentProfiles[provider] ?? {};
+  launchModel.textContent = '';
+  addOption(launchModel, '', 'Auto · provider default');
+  for (const model of entry?.models?.values ?? [])
+    addOption(launchModel, model.id, model.label);
+  addOption(launchModel, '__custom', 'Custom model ID…');
+  const known = (entry?.models?.values ?? []).some(
+    (model) => model.id === saved.model,
+  );
+  launchModel.value = saved.model ? (known ? saved.model : '__custom') : '';
+  launchCustomModel.value = known ? '' : (saved.model ?? '');
+  launchCustomModelRow.hidden = launchModel.value !== '__custom';
+  launchModel.disabled = false;
+  populateLaunchEfforts(saved.effort);
+  launchProviderStatus.textContent = entry
+    ? entry.installed
+      ? `${entry.version ?? 'Installed'} · ${entry.models?.status ?? 'unknown'} model catalog · ${authStatusLabel(entry.authentication)}`
+      : entry.installation?.status === 'error'
+        ? (entry.installation.detail ?? 'CLI installation check failed.')
+        : 'CLI not installed. Install it before launching.'
+    : 'Capability catalog unavailable. Auto and custom model remain available.';
+  launchDialogRun.disabled = entry?.installed === false;
+}
+
+launchProvider.addEventListener('change', () =>
+  populateLaunchProvider(launchProvider.value),
+);
+launchModel.addEventListener('change', () => {
+  launchCustomModelRow.hidden = launchModel.value !== '__custom';
+  populateLaunchEfforts(launchEffort.value);
+  if (!launchCustomModelRow.hidden) launchCustomModel.focus();
+});
+launchCustomModel.addEventListener('input', () =>
+  populateLaunchEfforts(launchEffort.value),
+);
+
 document.getElementById('addTerminalBtn').onclick = async () => {
   if (!project)
     return show({ ok: false, output: 'Choose a project folder first.' });
@@ -476,23 +564,45 @@ document.getElementById('addTerminalBtn').onclick = async () => {
   launchDialogPending = true;
   document.getElementById('addTerminalBtn').disabled = true;
   workspaceCreateOperationId = window.crypto.randomUUID();
+  launchDialogModal.hidden = false;
+  launchDialogModal.setAttribute('aria-busy', 'true');
+  launchProviderStatus.classList.add('loading-status');
+  launchProviderStatus.textContent =
+    'Discovering provider models and checking workspaces…';
+  launchProvider.disabled = true;
+  launchModel.disabled = true;
+  launchEffort.disabled = true;
+  launchDialogRun.disabled = true;
+  document.getElementById('launchWorkspaceChoice').disabled = true;
+  document.getElementById('launchDialogClose').focus();
 
   try {
-    document.getElementById('launchProvider').value = 'claude';
+    launchProvider.value = 'claude';
     document.getElementById('launchRole').value = 'implement';
     document.getElementById('launchSlug').value = '';
     document.getElementById('launchRoleRow').hidden = true;
     document.getElementById('launchSlugRow').hidden = true;
 
     const requestedProject = project;
-    const workspaces = await window.relay.workspaceList({
-      project: requestedProject,
-    });
+    const [workspaces, catalogResult] = await Promise.all([
+      window.relay.workspaceList({ project: requestedProject }),
+      loadAgentCatalog().then(
+        (agents) => ({ agents, error: null }),
+        (error) => ({
+          agents: [],
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    ]);
     if (project !== requestedProject) return;
     if (!workspaces.ok) {
-      show(workspaces);
+      launchProviderStatus.textContent = workspaces.output;
       return;
     }
+    launchCatalog = catalogResult.agents;
+    populateLaunchProvider(launchProvider.value);
+    if (catalogResult.error)
+      launchProviderStatus.textContent = `${catalogResult.error} Auto and custom model remain available.`;
     const choice = document.getElementById('launchWorkspaceChoice');
     choice.textContent = '';
     const main = document.createElement('option');
@@ -519,27 +629,36 @@ document.getElementById('addTerminalBtn').onclick = async () => {
       choice.value !== '__create';
     document.getElementById('launchSlugRow').hidden =
       choice.value !== '__create';
-    launchDialogModal.hidden = false;
-    document.getElementById('launchProvider').focus();
+    choice.disabled = false;
+    launchProvider.disabled = false;
+    launchProvider.focus();
+  } catch (error) {
+    launchProviderStatus.textContent =
+      error instanceof Error ? error.message : String(error);
   } finally {
+    launchDialogModal.setAttribute('aria-busy', 'false');
+    launchProviderStatus.classList.remove('loading-status');
     launchDialogPending = false;
     document.getElementById('addTerminalBtn').disabled = false;
   }
 };
-document.getElementById('launchDialogClose').onclick = () => {
+function closeLaunchDialog() {
   launchDialogModal.hidden = true;
   document.getElementById('addTerminalBtn').focus();
-};
+}
+document.getElementById('launchDialogClose').onclick = closeLaunchDialog;
 document.getElementById('launchWorkspaceChoice').onchange = (e) => {
   const val = e.target.value;
   document.getElementById('launchRoleRow').hidden = val !== '__create';
   document.getElementById('launchSlugRow').hidden = val !== '__create';
 };
-document.getElementById('launchDialogRun').onclick = async () => {
+launchDialogRun.onclick = async () => {
   if (launchDialogPending || commandRunning) return;
   launchDialogPending = true;
-  document.getElementById('launchDialogRun').disabled = true;
+  launchDialogRun.disabled = true;
   const provider = document.getElementById('launchProvider').value;
+  const model = selectedLaunchModel();
+  const effort = launchEffort.value || undefined;
   let workspace = document.getElementById('launchWorkspaceChoice').value;
   if (workspace === '__main') workspace = undefined;
 
@@ -560,11 +679,18 @@ document.getElementById('launchDialogRun').onclick = async () => {
       workspace = res.data.id;
     }
 
-    const launched = await launchInteractive('run', provider, { workspace });
+    const launched = await launchInteractive('run', provider, {
+      workspace,
+      model,
+      effort,
+    });
     if (launched) launchDialogModal.hidden = true;
   } finally {
     launchDialogPending = false;
-    document.getElementById('launchDialogRun').disabled = false;
+    const entry = launchCatalog.find(
+      (item) => item.id === launchProvider.value,
+    );
+    launchDialogRun.disabled = entry?.installed === false;
   }
 };
 
@@ -590,15 +716,23 @@ function syncControls() {
   hiddenTerminalsButton.textContent = `Hidden (${counts.hidden})`;
   const locked = running || commandRunning;
 
-  projectButton.disabled = locked;
-  for (const button of commandButtons) button.disabled = locked || !project;
+  projectButton.disabled =
+    locked || projectInitializing || projectChoicePending;
+  for (const button of commandButtons)
+    button.disabled = locked || !project || projectInitializing;
   for (const button of interactiveButtons)
-    button.disabled = locked || !project || terminalStatusPending;
-  for (const button of profileButtons) button.disabled = locked || !project;
+    button.disabled =
+      locked || !project || projectInitializing || terminalStatusPending;
+  for (const button of profileButtons)
+    button.disabled = locked || !project || projectInitializing;
   document.getElementById('addTerminalBtn').disabled =
-    commandRunning || !project || terminalStatusPending;
+    commandRunning || !project || projectInitializing || terminalStatusPending;
   openShellButton.disabled =
-    commandRunning || !project || terminalStatusPending || counts.running >= 4;
+    commandRunning ||
+    !project ||
+    projectInitializing ||
+    terminalStatusPending ||
+    counts.running >= 4;
   const active = tabsModel.getActive();
   stopButton.disabled =
     !active ||
@@ -735,6 +869,156 @@ function showProject() {
   projectName.title = project;
 }
 
+function closeOnboarding() {
+  onboardingModal.hidden = true;
+  localStorage.setItem('rirei-onboarding-dismissed', '1');
+  projectButton.focus();
+}
+
+function openOnboarding() {
+  onboardingModal.hidden = false;
+  onboardingError.hidden = true;
+  onboardingChoose.focus();
+}
+
+function readinessCell(key, state) {
+  const cell = el('div', 'readiness-cell');
+  cell.append(
+    el('span', 'readiness-key', key),
+    el('strong', `readiness-badge ${state.tone}`, state.label),
+    el('small', null, state.detail ?? ''),
+  );
+  return cell;
+}
+
+function renderProviderReadiness(items) {
+  onboardingProviders.textContent = '';
+  for (const item of items) {
+    const row = el('article', 'readiness-row');
+    const provider = el('div', 'readiness-provider');
+    provider.append(
+      el('strong', null, item.displayName),
+      el('small', null, item.version ?? 'Version unavailable'),
+    );
+    row.append(
+      provider,
+      readinessCell('CLI', {
+        ...item.cli,
+        detail:
+          item.cli.tone === 'ready'
+            ? 'Available on PATH.'
+            : (item.cli.detail ?? 'Install it, then retry setup.'),
+      }),
+      readinessCell('Sign-in', item.authentication),
+      readinessCell('Usage', item.usage),
+    );
+    onboardingProviders.append(row);
+  }
+}
+
+async function runOnboardingChecks() {
+  if (!project) return;
+  const requestedProject = project;
+  onboardingChecks.setAttribute('aria-busy', 'true');
+  onboardingStatus.classList.add('loading-status');
+  onboardingStatus.textContent =
+    'Discovering provider models, versions, and sign-in status…';
+  onboardingProviders.textContent = '';
+  onboardingProviderStep.className = 'active';
+  onboardingUsageStep.className = '';
+  onboardingContinue.hidden = true;
+
+  const [catalogResult, usageResult] = await Promise.allSettled([
+    loadAgentCatalog(),
+    window.relay.usage({ project: requestedProject }),
+  ]);
+  if (project !== requestedProject) return;
+
+  const catalog =
+    catalogResult.status === 'fulfilled' ? catalogResult.value : [];
+  const catalogFailed = catalogResult.status === 'rejected';
+  const usageFailed =
+    usageResult.status === 'rejected' || !usageResult.value?.ok;
+  const plans =
+    usageResult.status === 'fulfilled' && usageResult.value.ok
+      ? usageResult.value.data.plans
+      : [];
+  const readiness = deriveProviderReadiness(catalog, plans);
+  renderProviderReadiness(readiness);
+
+  const setupItems = readiness.filter(
+    (item) =>
+      item.cli.tone === 'blocked' || item.authentication.tone === 'action',
+  ).length;
+  const checkWarnings = readiness.filter(
+    (item) =>
+      item.cli.tone === 'warning' || item.authentication.tone === 'warning',
+  ).length;
+  onboardingStatus.textContent =
+    readiness.length === 0
+      ? 'Provider discovery failed. You can continue and retry from a launch dialog.'
+      : catalogFailed || usageFailed || checkWarnings > 0
+        ? 'Some readiness checks could not be verified. Review the rows below and retry from a launch dialog or Usage.'
+        : setupItems > 0
+          ? `${setupItems} provider setup item${setupItems === 1 ? '' : 's'} need attention. Unsupported usage sources are informational.`
+          : 'Installed providers are ready. Usage limitations are shown below.';
+  onboardingStatus.classList.remove('loading-status');
+  onboardingChecks.setAttribute('aria-busy', 'false');
+  onboardingProviderStep.className = catalogFailed ? 'active' : 'complete';
+  onboardingUsageStep.className = usageFailed ? 'active' : 'complete';
+  onboardingContinue.hidden = false;
+  if (!onboardingModal.hidden) onboardingContinue.focus();
+}
+
+async function activateProject(nextProject) {
+  project = nextProject;
+  agentCatalogCache = null;
+  localStorage.setItem('relay-project', project);
+  window.relay.setActiveProject(project);
+  syncControls();
+  showProject();
+  showOutput();
+  output.textContent =
+    'Project selected. Initialize or start a task to continue.';
+  await refreshDashboard();
+}
+
+async function chooseProject({ onboarding = false } = {}) {
+  if (projectChoicePending) return null;
+  projectChoicePending = true;
+  onboardingChoose.disabled = true;
+  syncControls();
+  try {
+    const selected = await window.relay.selectProject();
+    if (!selected) return null;
+    if (!selected.ok) {
+      if (onboarding) {
+        onboardingError.textContent = selected.output;
+        onboardingError.hidden = false;
+      } else {
+        show(selected);
+      }
+      return null;
+    }
+    onboardingError.hidden = true;
+    await activateProject(selected.project);
+    if (onboarding) {
+      onboardingProjectName.textContent =
+        selected.project.split('/').filter(Boolean).at(-1) ?? selected.project;
+      onboardingProjectPath.textContent = selected.project;
+      onboardingChoose.textContent = 'Choose another';
+      onboardingProjectStep.className = 'complete';
+      await runOnboardingChecks();
+    }
+    return selected.project;
+  } finally {
+    projectChoicePending = false;
+    onboardingChoose.disabled = false;
+    syncControls();
+    if (onboarding && !onboardingError.hidden) onboardingChoose.focus();
+  }
+}
+
 function show(result) {
   output.textContent =
     result.output || (result.ok ? 'Command completed.' : 'Command failed.');
@@ -775,18 +1059,13 @@ async function execute(command) {
 
 document.querySelector('#choose').addEventListener('click', async () => {
   if (tabsModel.counts().running > 0 || commandRunning) return;
-  const selected = await window.relay.selectProject();
-  if (!selected) return;
-  project = selected;
-  localStorage.setItem('relay-project', project);
-  window.relay.setActiveProject(project);
-  syncControls();
-  showProject();
-  showOutput();
-  output.textContent =
-    'Project selected. Initialize or start a task to continue.';
-  await refreshDashboard();
+  await chooseProject();
 });
+onboardingChoose.addEventListener('click', () =>
+  chooseProject({ onboarding: true }),
+);
+onboardingSkip.addEventListener('click', closeOnboarding);
+onboardingContinue.addEventListener('click', closeOnboarding);
 document
   .querySelectorAll('[data-command]')
   .forEach((button) =>
@@ -809,8 +1088,13 @@ async function launchInteractive(command, agent, resume = {}) {
   commandRunning = true;
   syncControls();
   try {
-    const profile = agentProfiles[agent] ?? {};
-    const catalog = await loadAgentCatalog();
+    const { model, effort } = launchProfileOverrides(
+      agentProfiles[agent] ?? {},
+      resume,
+    );
+    showOutput();
+    output.textContent = `Discovering ${agent} models and launch capabilities…`;
+    const catalog = await loadAgentCatalog().catch(() => []);
     const capabilities = catalog.find((entry) => entry.id === agent);
     const defaultResumeKind =
       capabilities?.resumeCapabilities?.targets?.includes('picker')
@@ -821,8 +1105,8 @@ async function launchInteractive(command, agent, resume = {}) {
       project,
       command,
       agent,
-      model: profile.model,
-      effort: profile.effort,
+      model,
+      effort,
       resumeTargetKind: resume.kind ?? defaultResumeKind,
       resumeTargetValue: resume.value,
       fork: resume.fork === true,
@@ -1293,6 +1577,8 @@ const usageClose = document.querySelector('#usageClose');
 const usageGrid = document.querySelector('#usageGrid');
 const usageTask = document.querySelector('#usageTask');
 const usageSummary = document.querySelector('#usageSummary');
+let usageRequest = 0;
+let usageCapturedAt = 0;
 
 function relTime(iso) {
   if (!iso) return 'never';
@@ -1315,6 +1601,10 @@ function el(tag, cls, text) {
 }
 
 function renderUsage(data) {
+  usageCapturedAt = Math.max(
+    usageCapturedAt,
+    ...data.plans.map((plan) => Date.parse(plan.capturedAt ?? '') || 0),
+  );
   usageTask.textContent = '';
   usageTask.append(
     document.createTextNode(`${data.task.title}  `),
@@ -1322,7 +1612,9 @@ function renderUsage(data) {
   );
   usageGrid.textContent = '';
   usageSummary.textContent = '';
-  const reporting = data.plans.filter((plan) => plan.status !== 'unknown');
+  const reporting = data.plans.filter((plan) =>
+    ['available', 'stale'].includes(plan.status),
+  );
   const summary = el('div', 'plan-summary');
   summary.append(
     el('strong', null, `${reporting.length}/${data.plans.length}`),
@@ -1333,18 +1625,7 @@ function renderUsage(data) {
     const card = el('div', `usage-card plan-card ${plan.status}`);
     const name = el('div', 'agent');
     name.append(el('span', 'dot'), document.createTextNode(plan.displayName));
-    const statusLabels = {
-      available: 'Live',
-      stale: 'Stale',
-      unknown: 'Unknown',
-      unsupported: 'Unsupported',
-      error: 'Error',
-    };
-    const status = el(
-      'div',
-      'plan-status',
-      statusLabels[plan.status] ?? 'Unknown',
-    );
+    const status = el('div', 'plan-status', planStatusLabel(plan));
     const windows = el('div', 'agent-windows');
     const windowEntries =
       plan.metrics && plan.metrics.length > 0
@@ -1358,55 +1639,44 @@ function renderUsage(data) {
           ];
     for (const [label, window] of windowEntries) {
       const row = el('div', 'window-row');
+      const presentation = usageWindowPresentation(window);
+      if (presentation.stale) row.classList.add('stale');
       const track = el('span', 'usage-track');
       const fill = el('span', 'usage-fill');
-      const remaining = window?.remaining ?? window?.remainingPercentage;
-      const percent =
-        window?.unit === 'percent'
-          ? remaining
-          : window?.limit && remaining != null
-            ? (remaining / window.limit) * 100
-            : null;
+      const { percent } = presentation;
       fill.style.width = `${Math.max(0, Math.min(100, percent ?? 0))}%`;
       if (percent != null && percent < 20) fill.classList.add('critical');
       else if (percent != null && percent < 50) fill.classList.add('warning');
       track.append(fill);
+      const exactReset = formatExactTimestamp(window?.resetsAt);
+      const reset = el(
+        'small',
+        null,
+        exactReset ? `resets ${exactReset}` : 'reset unknown',
+      );
+      if (window?.resetsAt) reset.title = window.resetsAt;
       row.append(
         el('span', 'window-label', label),
         track,
-        el(
-          'strong',
-          null,
-          remaining == null
-            ? '—'
-            : `${Math.round(remaining)}${window?.unit === 'percent' || window?.remainingPercentage !== undefined ? '%' : ` ${window?.unit ?? ''}`}`,
-        ),
-        el(
-          'small',
-          null,
-          window?.resetsAt
-            ? `resets ${new Date(window.resetsAt).toLocaleString([], {
-                month: 'short',
-                day: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-              })}`
-            : 'reset unknown',
-        ),
+        el('strong', null, presentation.valueLabel),
+        reset,
       );
       windows.append(row);
     }
     const meta = el('div', 'meta');
+    const exactCapture = formatExactTimestamp(plan.capturedAt);
+    const capture = el(
+      'span',
+      null,
+      exactCapture
+        ? `updated ${exactCapture} (${relTime(plan.capturedAt)})`
+        : 'not reported',
+    );
+    if (plan.capturedAt) capture.title = plan.capturedAt;
     meta.append(
       el('span', null, plan.detail),
       el('span', null, `source: ${plan.source}`),
-      el(
-        'span',
-        null,
-        plan.capturedAt
-          ? `updated ${relTime(plan.capturedAt)}`
-          : 'not reported',
-      ),
+      capture,
     );
     card.append(name, status, windows, meta);
     usageGrid.append(card);
@@ -1416,14 +1686,37 @@ function renderUsage(data) {
 async function openUsage() {
   if (!project)
     return show({ ok: false, output: 'Choose a project folder first.' });
-  const res = await window.relay.usage({ project });
-  if (!res.ok) return show(res);
-  renderUsage(res.data);
+  const requestedProject = project;
+  const request = ++usageRequest;
+  usageCapturedAt = 0;
   usageModal.hidden = false;
+  usageModal.setAttribute('aria-busy', 'true');
+  usageTask.textContent = 'Reading verified provider usage sources…';
+  usageSummary.textContent = 'Loading usage';
+  usageSummary.classList.add('loading-status');
+  usageGrid.textContent = '';
+  usageClose.focus();
+  const res = await window.relay.usage({ project: requestedProject });
+  if (request !== usageRequest) return;
+  if (project !== requestedProject) return closeUsage();
+  usageModal.setAttribute('aria-busy', 'false');
+  usageSummary.classList.remove('loading-status');
+  if (!res.ok) {
+    usageTask.textContent = res.output || 'Could not read usage.';
+    usageSummary.textContent = '';
+    return;
+  }
+  const responseCapturedAt = Math.max(
+    0,
+    ...res.data.plans.map((plan) => Date.parse(plan.capturedAt ?? '') || 0),
+  );
+  if (responseCapturedAt >= usageCapturedAt) renderUsage(res.data);
 }
 
 function closeUsage() {
+  usageRequest += 1;
   usageModal.hidden = true;
+  usageBtn.focus();
 }
 
 usageBtn.addEventListener('click', openUsage);
@@ -1456,9 +1749,7 @@ function addOption(select, value, label) {
 }
 
 function selectedProfileModel() {
-  if (profileModel.value === '__custom')
-    return profileCustomModel.value.trim() || undefined;
-  return profileModel.value || undefined;
+  return selectedModelValue(profileModel.value, profileCustomModel.value);
 }
 
 function updateProfilePreview() {
@@ -1471,12 +1762,7 @@ function updateProfilePreview() {
 
 function populateEfforts(preferred) {
   const model = selectedProfileModel();
-  const modelOption = selectedCatalogAgent?.models?.values?.find(
-    (item) => item.id === model,
-  );
-  const efforts = modelOption?.efforts?.length
-    ? modelOption.efforts
-    : (selectedCatalogAgent?.efforts ?? []);
+  const efforts = effortsForModel(selectedCatalogAgent, model);
   profileEffort.textContent = '';
   addOption(profileEffort, '', 'Auto · provider default');
   for (const effort of efforts) addOption(profileEffort, effort, effort);
@@ -1486,16 +1772,22 @@ function populateEfforts(preferred) {
 }
 
 async function loadAgentCatalog() {
-  if (agentCatalogCache?.expiresAt > Date.now())
+  if (
+    agentCatalogCache?.project === project &&
+    agentCatalogCache.expiresAt > Date.now()
+  )
     return agentCatalogCache.agents;
-  const result = await window.relay.agentCatalog({ project });
+  const requestProject = project;
+  const result = await window.relay.agentCatalog({ project: requestProject });
   if (!result.ok)
     throw new Error(result.output || 'Could not load agent catalog.');
-  agentCatalogCache = {
-    agents: result.data.agents,
-    expiresAt: Date.now() + 45_000,
-  };
-  return agentCatalogCache.agents;
+  if (project === requestProject)
+    agentCatalogCache = {
+      project: requestProject,
+      agents: result.data.agents,
+      expiresAt: Date.now() + 45_000,
+    };
+  return result.data.agents;
 }
 
 function authStatusLabel(auth) {
@@ -1517,8 +1809,11 @@ async function openProfile(agent) {
   selectedProfileAgent = agent;
   selectedCatalogAgent = null;
   profileModal.hidden = false;
+  profileModal.setAttribute('aria-busy', 'true');
   profileTitle.textContent = agent;
-  profileStatus.textContent = 'Loading installed provider capabilities…';
+  profileStatus.classList.add('loading-status');
+  profileStatus.textContent =
+    'Discovering models and checking provider sign-in…';
   profileModel.disabled = true;
   profileEffort.disabled = true;
   try {
@@ -1528,8 +1823,11 @@ async function openProfile(agent) {
       throw new Error(`No adapter found for ${agent}.`);
     profileTitle.textContent = selectedCatalogAgent.displayName;
     profileStatus.textContent = selectedCatalogAgent.installed
-      ? `${selectedCatalogAgent.version ?? 'Installed'} · live model catalog · ${authStatusLabel(selectedCatalogAgent.authentication)}`
-      : 'CLI not installed · selections can be saved for later';
+      ? `${selectedCatalogAgent.version ?? 'Installed'} · ${selectedCatalogAgent.models.status} model catalog · ${authStatusLabel(selectedCatalogAgent.authentication)}`
+      : selectedCatalogAgent.installation?.status === 'error'
+        ? (selectedCatalogAgent.installation.detail ??
+          'CLI installation check failed · selections can be saved for later')
+        : 'CLI not installed · selections can be saved for later';
     if (selectedCatalogAgent.authentication?.detail) {
       profileStatus.title = selectedCatalogAgent.authentication.detail;
     }
@@ -1550,6 +1848,9 @@ async function openProfile(agent) {
   } catch (error) {
     profileStatus.textContent =
       error instanceof Error ? error.message : String(error);
+  } finally {
+    profileModal.setAttribute('aria-busy', 'false');
+    profileStatus.classList.remove('loading-status');
   }
 }
 
@@ -1598,18 +1899,24 @@ profileSave.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !launchDialogModal.hidden) {
-    launchDialogModal.hidden = true;
-    document.getElementById('addTerminalBtn').focus();
+  const modal = Array.from(document.querySelectorAll('.modal'))
+    .filter((candidate) => !candidate.hidden)
+    .at(-1);
+  if (event.key === 'Escape' && modal) {
+    const closeModal = {
+      closeTabModal: () => document.getElementById('closeTabCancel').click(),
+      onboardingModal: closeOnboarding,
+      launchDialogModal: closeLaunchDialog,
+      timelineModal: closeTimeline,
+      usageModal: closeUsage,
+      historyModal: closeHistory,
+      checkpointModal: closeCheckpointViewer,
+      profileModal: closeProfile,
+    }[modal.id];
+    closeModal?.();
+    event.preventDefault();
+    return;
   }
-  if (
-    event.key === 'Escape' &&
-    !document.getElementById('closeTabModal').hidden
-  )
-    document.getElementById('closeTabCancel').click();
-  const modal = Array.from(document.querySelectorAll('.modal')).find(
-    (candidate) => !candidate.hidden,
-  );
   if (event.key === 'Tab' && modal) {
     const focusable = Array.from(
       modal.querySelectorAll(
@@ -1627,12 +1934,6 @@ window.addEventListener('keydown', (event) => {
       first.focus();
     }
   }
-  if (event.key === 'Escape' && !usageModal.hidden) closeUsage();
-  if (event.key === 'Escape' && !profileModal.hidden) closeProfile();
-  if (event.key === 'Escape' && !timelineModal.hidden) closeTimeline();
-  if (event.key === 'Escape' && !historyModal.hidden) closeHistory();
-  if (event.key === 'Escape' && !checkpointModal.hidden)
-    closeCheckpointViewer();
 });
 
 window.addEventListener('resize', syncSize);
@@ -1647,19 +1948,56 @@ const removeTerminalExitListener = window.relay.onTerminalExit((event) =>
   receiveTerminalEvent({ ...event, type: 'exit' }),
 );
 const removeUsageUpdateListener = window.relay.onUsageUpdate((data) => {
-  if (!usageModal.hidden) renderUsage(data);
+  if (!usageModal.hidden) {
+    const incomingCapturedAt = Math.max(
+      0,
+      ...data.plans.map((plan) => Date.parse(plan.capturedAt ?? '') || 0),
+    );
+    if (incomingCapturedAt >= usageCapturedAt) {
+      usageModal.setAttribute('aria-busy', 'false');
+      usageSummary.classList.remove('loading-status');
+      renderUsage(data);
+    }
+  }
 });
 const removeDeepLinkListener = window.relay.onDeepLink(receiveDeepLink);
 
-// Show the steps up front so the terminal panel explains itself.
-if (!project) output.textContent = HOW_TO;
-window.relay.setActiveProject(project || null);
-showProject();
-syncControls();
-void refreshDashboard().catch(() =>
-  renderDashboardUnavailable('Could not read project status'),
-);
 updateProfileButtons();
+
+async function initializeProject() {
+  let invalidRememberedProject = false;
+  showProject();
+  syncControls();
+  if (project) {
+    const validation = await window.relay
+      .validateProject({ project })
+      .catch(() => ({ ok: false }));
+    if (validation.ok) {
+      project = validation.project;
+      localStorage.setItem('relay-project', project);
+    } else {
+      project = '';
+      invalidRememberedProject = true;
+      localStorage.removeItem('relay-project');
+    }
+  }
+  projectInitializing = false;
+  if (!project) output.textContent = HOW_TO;
+  window.relay.setActiveProject(project || null);
+  showProject();
+  syncControls();
+  await refreshDashboard().catch(() =>
+    renderDashboardUnavailable('Could not read project status'),
+  );
+  if (
+    !project &&
+    (invalidRememberedProject ||
+      localStorage.getItem('rirei-onboarding-dismissed') !== '1')
+  )
+    openOnboarding();
+}
+
+void initializeProject();
 
 function factory(item) {
   if (tabsModel.get(item.id)) return tabsModel.get(item.id);

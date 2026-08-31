@@ -265,6 +265,71 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
     </main>
 
     <div
+      id="onboardingModal"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="onboardingTitle"
+      hidden
+    >
+      <div class="modal-panel onboarding-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">First run</p>
+            <h2 id="onboardingTitle">Connect your coding workspace</h2>
+          </div>
+          <button id="onboardingSkip" aria-label="Skip setup for now">
+            Not now
+          </button>
+        </div>
+        <p class="onboarding-intro">
+          Rirei uses the provider CLIs already installed on this Mac. Choose a
+          Git project, then review what is ready and what each provider can
+          report.
+        </p>
+        <ol class="setup-progress" aria-label="Setup progress">
+          <li id="onboardingProjectStep" class="active">
+            <span>1</span> Project
+          </li>
+          <li id="onboardingProviderStep"><span>2</span> Providers</li>
+          <li id="onboardingUsageStep"><span>3</span> Usage</li>
+        </ol>
+        <section class="setup-project" aria-labelledby="setupProjectTitle">
+          <div>
+            <p class="label" id="setupProjectTitle">Git project</p>
+            <strong id="onboardingProjectName">No project selected</strong>
+            <p id="onboardingProjectPath">
+              Select a repository you want Rirei to coordinate.
+            </p>
+          </div>
+          <button id="onboardingChoose" class="primary">Choose project</button>
+        </section>
+        <p id="onboardingError" class="setup-error" role="alert" hidden></p>
+        <section
+          id="onboardingChecks"
+          class="setup-checks"
+          aria-labelledby="setupChecksTitle"
+          aria-busy="false"
+        >
+          <div class="setup-checks-head">
+            <div>
+              <p class="label" id="setupChecksTitle">Provider readiness</p>
+              <p id="onboardingStatus" role="status" aria-live="polite">
+                Choose a project to inspect provider CLIs and usage support.
+              </p>
+            </div>
+          </div>
+          <div id="onboardingProviders" class="provider-readiness"></div>
+        </section>
+        <div class="profile-actions">
+          <button id="onboardingContinue" class="primary" hidden>
+            Continue to workspace
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
       id="closeTabModal"
       class="modal"
       role="dialog"
@@ -319,6 +384,21 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
               <option value="antigravity">Antigravity</option>
               <option value="opencode">OpenCode</option>
             </select>
+          </label>
+          <p id="launchProviderStatus" class="profile-status">
+            Loading provider capabilities…
+          </p>
+          <label>
+            <span>Model</span>
+            <select id="launchModel"></select>
+          </label>
+          <label id="launchCustomModelRow" hidden>
+            <span>Custom model ID</span>
+            <input id="launchCustomModel" placeholder="provider-model-id" />
+          </label>
+          <label>
+            <span>Effort</span>
+            <select id="launchEffort"></select>
           </label>
           <label>
             <span>Workspace</span>

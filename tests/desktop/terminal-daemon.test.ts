@@ -158,6 +158,45 @@ describe('terminal daemon', () => {
     await daemon.close({ stopActive: false });
   });
 
+  test('preserves desktop model and effort selections through the daemon protocol', async () => {
+    let launchRequest: Record<string, unknown> | null = null;
+    const { daemon, descriptorPath, root, socketPath } = await startDaemon(
+      (body, terminalId) => {
+        launchRequest = { ...body, terminalId };
+        return [
+          process.execPath,
+          '-e',
+          'process.stdin.resume(); setInterval(() => {}, 1000)',
+        ];
+      },
+    );
+    const client = new TerminalDaemonClient({ descriptorPath, socketPath });
+    await client.connect();
+
+    const terminal = await client.start({
+      kind: 'agent',
+      command: 'run',
+      agent: 'codex',
+      model: 'vendor/model-v2',
+      effort: 'high',
+      project: root,
+      workspaceId: 'default',
+    });
+
+    expect(launchRequest).toMatchObject({
+      kind: 'agent',
+      command: 'run',
+      agent: 'codex',
+      model: 'vendor/model-v2',
+      effort: 'high',
+      project: root,
+      workspaceId: 'default',
+      terminalId: terminal.id,
+    });
+    client.disconnect();
+    await daemon.close({ stopActive: true });
+  });
+
   test('replays bounded slices and reports output truncated from the ring', async () => {
     const outputBytes = 2 * 1024 * 1024 + 1024;
     const outputCompleteMarker = 'RIREI_OUTPUT_COMPLETE';
@@ -518,6 +557,82 @@ describe('terminal daemon', () => {
 
     client.disconnect();
     await daemon.close({ stopActive: true });
+  });
+
+  test('reserves a working tree before asynchronous terminal startup', async () => {
+    const { daemon, descriptorPath, root, socketPath } = await startDaemon(
+      () => [process.execPath, '-e', `setInterval(() => {}, 1000)`],
+    );
+    const client = new TerminalDaemonClient({ descriptorPath, socketPath });
+    await client.connect();
+
+    const starts = await Promise.allSettled([
+      client.start({
+        kind: 'agent',
+        agent: 'codex',
+        project: root,
+        workspaceId: 'default',
+      }),
+      client.start({
+        kind: 'agent',
+        agent: 'claude',
+        project: root,
+        workspaceId: 'default',
+      }),
+    ]);
+
+    expect(
+      starts.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    const rejected = starts.find((result) => result.status === 'rejected');
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'claimed' },
+    });
+    expect(
+      (await client.refreshInventory()).filter((terminal) =>
+        ['starting', 'running', 'waiting', 'stopping'].includes(
+          terminal.status,
+        ),
+      ),
+    ).toHaveLength(1);
+
+    client.disconnect();
+    await daemon.close({ stopActive: true });
+  });
+
+  test('waits for an in-flight terminal startup during shutdown', async () => {
+    let observeStartup!: () => void;
+    const startupObserved = new Promise<void>((resolve) => {
+      observeStartup = resolve;
+    });
+    const { daemon, descriptorPath, root, socketPath } = await startDaemon(
+      () => {
+        observeStartup();
+        return [process.execPath, '-e', `setInterval(() => {}, 1000)`];
+      },
+    );
+    const client = new TerminalDaemonClient({ descriptorPath, socketPath });
+    await client.connect();
+
+    const pendingStart = client.start({
+      kind: 'agent',
+      agent: 'codex',
+      project: root,
+      workspaceId: 'default',
+    });
+    await startupObserved;
+    await daemon.close({ stopActive: true });
+    await Promise.allSettled([pendingStart]);
+
+    expect(
+      [...daemon.terminals.values()].filter((terminal) =>
+        ['starting', 'running', 'waiting', 'stopping'].includes(
+          terminal.status,
+        ),
+      ),
+    ).toHaveLength(0);
+    client.disconnect();
   });
 
   test('accepts only the owning terminal lifecycle hook token', async () => {

@@ -5,7 +5,7 @@ import type {
   RunLifecycleStatus,
   RunLeaseStatus,
 } from '../state/schema.js';
-import { updateState } from '../state/store.js';
+import { readState, updateState } from '../state/store.js';
 
 const terminalStatuses = new Set([
   'starting',
@@ -152,9 +152,28 @@ export function bridgeCommand(): Command {
                 bootId: options.daemonBootId!,
               }
             : undefined;
+          const state = await readState(projectRoot);
+          if (
+            !state.runs.some(
+              (lease) => lease.terminalId === options.terminalId,
+            ) &&
+            !state.agentHistory.some(
+              (run) => run.terminalId === options.terminalId,
+            )
+          )
+            throw new Error('The terminal-owned run is not ready yet.');
           let updated = false;
           const now = new Date().toISOString();
           await updateState(projectRoot, (current) => {
+            if (
+              !current.runs.some(
+                (lease) => lease.terminalId === options.terminalId,
+              ) &&
+              !current.agentHistory.some(
+                (run) => run.terminalId === options.terminalId,
+              )
+            )
+              throw new Error('The terminal-owned run is not ready yet.');
             const runs = current.runs.map((lease) => {
               if (lease.terminalId !== options.terminalId) return lease;
               updated = true;
@@ -224,23 +243,36 @@ export function bridgeCommand(): Command {
         const protocolVersion = Number.parseInt(options.protocolVersion, 10);
         if (!Number.isInteger(pid) || pid <= 0 || protocolVersion !== 1)
           throw new Error('Invalid bridge identity.');
+        const state = await readState(projectRoot);
+        if (
+          !state.runs.some((lease) => lease.terminalId === options.terminalId)
+        )
+          throw new Error('The terminal-owned run is not ready yet.');
         let registered = false;
-        await updateState(projectRoot, (current) => ({
-          ...current,
-          runs: current.runs.map((lease) =>
-            lease.terminalId === options.terminalId
-              ? ((registered = true),
-                {
-                  ...lease,
-                  bridgeIdentity: {
-                    instanceId,
-                    pid,
-                    protocolVersion: 1 as const,
-                  },
-                })
-              : lease,
-          ),
-        }));
+        await updateState(projectRoot, (current) => {
+          if (
+            !current.runs.some(
+              (lease) => lease.terminalId === options.terminalId,
+            )
+          )
+            throw new Error('The terminal-owned run is not ready yet.');
+          return {
+            ...current,
+            runs: current.runs.map((lease) =>
+              lease.terminalId === options.terminalId
+                ? ((registered = true),
+                  {
+                    ...lease,
+                    bridgeIdentity: {
+                      instanceId,
+                      pid,
+                      protocolVersion: 1 as const,
+                    },
+                  })
+                : lease,
+            ),
+          };
+        });
         if (!registered)
           throw new Error('The terminal-owned run is not ready yet.');
       },

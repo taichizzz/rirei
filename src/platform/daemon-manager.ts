@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, readFile, rm } from 'node:fs/promises';
+import { lstat, readFile, realpath, rm } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import {
@@ -109,7 +109,7 @@ export async function ensureDaemon(
   const defaultCli = process.argv[1]
     ? path.resolve(process.argv[1])
     : path.resolve(process.cwd(), 'dist', 'index.cjs');
-  const cliPath = options.cliPath ?? defaultCli;
+  const cliPath = await realpath(options.cliPath ?? defaultCli);
 
   // 4. Spawn detached daemon process
   const child = spawn(
@@ -130,6 +130,7 @@ export async function ensureDaemon(
     {
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
       env: { ...process.env },
     },
   );

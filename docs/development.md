@@ -98,9 +98,11 @@ self-contained artifact.
 - `mac.target`: `dmg` and `zip`.
 
 The npm source package is deliberately smaller than the desktop bundle. The top-level `files`
-allowlist includes only the bundled CLI and required license/readme files. `npm run
-package:check` fails if local state, source trees, tests, desktop assets, private keys, or local
-user paths enter that tarball.
+allowlist includes the bundled CLI, license/readme files, and the three lifecycle helpers needed
+by packed daemon launches (`provider-lifecycle-hook.cjs`, `codex-lifecycle-wrapper.mjs`, and
+`opencode-lifecycle-wrapper.mjs`). `npm run package:check` enforces that exact allowlist and fails
+if local state, source trees, tests, unrelated desktop assets, private keys, or local user paths
+enter the tarball.
 
 ## Keeping docs in sync
 

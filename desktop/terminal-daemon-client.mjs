@@ -122,6 +122,7 @@ export class TerminalDaemonClient extends EventEmitter {
       const child = spawn(executable, args, {
         detached: true,
         stdio: 'ignore',
+        windowsHide: true,
         env: {
           ...process.env,
           ...(this.options.pathValue ? { PATH: this.options.pathValue } : {}),

@@ -109,6 +109,7 @@ export async function findListeningPorts(
         encoding: 'utf8',
         timeout,
         maxBuffer: 512 * 1024,
+        windowsHide: true,
       });
       return parseNetstatOutput(stdout, pid);
     } catch {

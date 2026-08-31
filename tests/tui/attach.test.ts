@@ -90,11 +90,15 @@ class MockDaemonClient extends EventEmitter {
   }
 }
 
-function fixture(client = new MockDaemonClient()) {
+function fixture(
+  client = new MockDaemonClient(),
+  options: { clearOnExit?: boolean } = {},
+) {
   const stdin = new FakeInput();
   const stdout = new FakeOutput();
   const signals = new EventEmitter();
   const attached = attachTerminalSession(client, 'terminal-id', {
+    ...options,
     stdin: stdin as unknown as NodeJS.ReadStream,
     stdout: stdout as unknown as NodeJS.WriteStream,
     signalEmitter: signals as NodeJS.Process,
@@ -183,5 +187,17 @@ describe('terminal passthrough attachment', () => {
     state.signals.emit('SIGTERM');
     await state.attached;
     expect(client.maxActiveFetches).toBe(1);
+  });
+
+  it('can preserve the caller screen when returning to a dashboard', async () => {
+    const state = fixture(new MockDaemonClient(), { clearOnExit: false });
+    await ready(state.client);
+    state.stdin.emit('data', Buffer.from([0x1d]));
+    await state.attached;
+
+    const clearScreen = Buffer.from('\x1b[2J\x1b[H');
+    expect(
+      state.stdout.chunks.filter((chunk) => chunk.equals(clearScreen)),
+    ).toHaveLength(1);
   });
 });

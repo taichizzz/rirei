@@ -311,6 +311,36 @@ describe('Relay lifecycle commands', () => {
     });
   });
 
+  it('does not rewrite state while bridge registration waits for a run', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Wait for bridge registration');
+    const before = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    );
+
+    await expect(
+      relay(
+        root,
+        'bridge',
+        '--terminal-id',
+        'terminal-not-ready',
+        '--instance-id',
+        'bridge-not-ready',
+        '--pid',
+        String(process.pid),
+        '--protocol-version',
+        '1',
+      ),
+    ).rejects.toThrow('terminal-owned run is not ready');
+
+    const after = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    );
+    expect(after.revision).toBe(before.revision);
+  });
+
   it('requires explicit acknowledgement of a dirty baseline', async () => {
     const root = await createRepository();
     directories.push(root);

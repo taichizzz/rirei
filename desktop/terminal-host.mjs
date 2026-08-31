@@ -22,7 +22,9 @@ function stop(force) {
     if (!child) return process.exit(force ? 1 : 0);
     const args = ['/PID', String(child.pid), '/T'];
     if (force) args.push('/F');
-    execFile('taskkill', args, () => process.exit(force ? 1 : 0));
+    execFile('taskkill', args, { windowsHide: true }, () =>
+      process.exit(force ? 1 : 0),
+    );
     setTimeout(() => process.exit(1), 5000).unref();
     return;
   }
@@ -142,7 +144,10 @@ async function signalProcessTree(pid, signal, force = false) {
     const args = ['/PID', String(pid), '/T'];
     if (force) args.push('/F');
     try {
-      await execFileAsync('taskkill', args, { timeout: 5000 });
+      await execFileAsync('taskkill', args, {
+        timeout: 5000,
+        windowsHide: true,
+      });
     } catch {
       // The tree is already gone or inaccessible.
     }

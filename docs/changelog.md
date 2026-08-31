@@ -4,6 +4,30 @@ This file records user-visible changes made to Relay and its Rirei desktop app. 
 CLI command and `.relay/` state directory retain their existing names when the desktop app
 branding changes.
 
+## 0.1.0-alpha.4.1 - 2026-08-31
+
+### Provider-aware control room hardening
+
+- Added a skippable desktop first-run flow that validates the selected Git repository and
+  reports installed CLIs, sign-in checks, installation probe failures, and each provider's
+  verified usage-reporting capability.
+- Added visible model-catalog discovery states to desktop onboarding, launch dialogs, profiles,
+  and TUI startup/refresh so slow provider probes no longer look like a frozen interface.
+- Added provider-aware model and effort selectors to desktop and TUI launches, including custom
+  model IDs and backend validation of model-specific effort levels.
+- Rebuilt `relay tui` as a responsive, mouse-capable control room with clickable launch/session
+  actions, bounded session lists, safe alternate-screen cleanup, and raw attach/detach behavior.
+- Added a dedicated TUI usage view and clearer desktop plan cards that show remaining capacity,
+  stale/read-error/unsupported states, exact capture times, and exact quota reset times.
+- Hardened detached terminal startup against duplicate worktree claims, shutdown races, delayed
+  lifecycle reports, and premature bridge updates; bridge registration now uses bounded retry.
+- Improved Windows behavior by hiding helper process windows and retaining ConPTY-safe process,
+  port, shell, and daemon handling across CLI and desktop launch paths.
+- Added packed lifecycle wrappers for Claude-adjacent hooks, Codex, and OpenCode, plus integration
+  tests for TUI interaction payloads, desktop provider presentation, and daemon forwarding.
+- Bundled the JSX runtime required by packaged desktop CLI launches and added an isolated packaged
+  CLI smoke check so the app does not depend on the development `node_modules` tree.
+
 ## 0.1.0-alpha.4 - 2026-08-26
 
 ### Cross-platform terminal dashboard

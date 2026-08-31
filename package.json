@@ -1,6 +1,6 @@
 {
   "name": "@taichizzz/rirei",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.4.1",
   "private": true,
   "description": "Local orchestration and durable handoffs for officially installed coding-agent CLIs.",
   "license": "MIT",
@@ -30,6 +30,9 @@
   },
   "files": [
     "dist/index.cjs",
+    "desktop/provider-lifecycle-hook.cjs",
+    "desktop/codex-lifecycle-wrapper.mjs",
+    "desktop/opencode-lifecycle-wrapper.mjs",
     "LICENSE",
     "README.md",
     "THIRD_PARTY_NOTICES.md"

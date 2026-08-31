@@ -25,7 +25,8 @@ export type ProviderPlanStatusReason =
   | 'all_windows_stale'
   | 'not_collected'
   | 'unsupported_auth'
-  | 'unsupported_provider';
+  | 'unsupported_provider'
+  | 'collector_error';
 
 export interface ProviderPlanUsage {
   id: AgentId;
@@ -162,10 +163,16 @@ export async function readProviderPlanUsage(
   await Promise.all(
     agents.map(async (agent) => {
       if (!agent.readUsage) return;
-      const snapshots = await agent
-        .readUsage(context)
-        .then((result) => result)
-        .catch(() => []);
+      const snapshots = await agent.readUsage(context).catch(() => [
+        {
+          adapterId: agent.id,
+          status: 'error' as const,
+          capturedAt: null,
+          source: `${agent.displayName} usage reader`,
+          metrics: [],
+          detail: 'Provider usage could not be read safely.',
+        },
+      ]);
       collected.set(agent.id, snapshots);
     }),
   );
@@ -183,9 +190,12 @@ export async function readProviderPlanUsage(
             : snapshot?.status === 'error'
               ? 'error'
               : 'unknown',
-        statusReason: FALLBACK_REASONS[agent.id],
-        source: 'Unavailable',
-        capturedAt: null,
+        statusReason:
+          snapshot?.status === 'error'
+            ? 'collector_error'
+            : FALLBACK_REASONS[agent.id],
+        source: snapshot?.source ?? 'Unavailable',
+        capturedAt: snapshot?.capturedAt ?? null,
         metrics: [],
         detail: snapshot?.detail ?? FALLBACK_DETAILS[agent.id],
       };

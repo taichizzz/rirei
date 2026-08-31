@@ -154,7 +154,11 @@ function repositoryRoot(project) {
   const result = spawnSync(
     'git',
     ['-C', project, 'rev-parse', '--show-toplevel'],
-    { encoding: 'utf8', timeout: 5000 },
+    {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { ...process.env, PATH: providerPath() },
+    },
   );
   if (result.status !== 0) return null;
   const root = result.stdout.trim();
@@ -165,6 +169,7 @@ function currentBranchLabel(project) {
   const result = spawnSync('git', ['-C', project, 'branch', '--show-current'], {
     encoding: 'utf8',
     timeout: 5000,
+    env: { ...process.env, PATH: providerPath() },
   });
   return result.status === 0 && result.stdout.trim()
     ? result.stdout.trim()
@@ -212,8 +217,9 @@ function runCli(project, command, args = []) {
   return new Promise((resolve) => {
     const child = spawn(nodePath(), [cliPath(), command, ...args], {
       cwd: project,
-      env: process.env,
+      env: { ...process.env, PATH: providerPath() },
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     let stdout = '';
     let stderr = '';
@@ -389,8 +395,9 @@ function sanitizeUsage(value) {
         numeric[key] = metric[key];
       }
       if (!valid) continue;
-      const resetsAt = safeIso(metric.resetsAt);
-      if (resetsAt === undefined) continue;
+      const resetsAt =
+        metric.resetsAt === undefined ? undefined : safeIso(metric.resetsAt);
+      if (metric.resetsAt !== undefined && resetsAt === undefined) continue;
       const window =
         metric.window &&
         typeof metric.window.label === 'string' &&
@@ -410,15 +417,32 @@ function sanitizeUsage(value) {
         unit: metric.unit,
         ...(window ? { window } : {}),
         ...numeric,
-        resetsAt,
+        ...(resetsAt !== undefined ? { resetsAt } : {}),
         status: metric.status,
         statusReason: metric.statusReason,
       });
     }
+    const fallbackStatusReasons = {
+      available: 'live_window',
+      stale: 'all_windows_stale',
+      unknown: 'not_collected',
+      unsupported: 'unsupported_provider',
+      error: 'collector_error',
+    };
     const sanitized = {
       id: plan.id,
       displayName: providerNames[plan.id],
       status: plan.status,
+      statusReason: [
+        'live_window',
+        'all_windows_stale',
+        'not_collected',
+        'unsupported_auth',
+        'unsupported_provider',
+        'collector_error',
+      ].includes(plan.statusReason)
+        ? plan.statusReason
+        : fallbackStatusReasons[plan.status],
       capturedAt,
       source:
         typeof plan.source === 'string' && plan.source.length <= 120
@@ -952,7 +976,21 @@ function registerIpc() {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
     });
-    return result.canceled ? null : result.filePaths[0];
+    if (result.canceled) return null;
+    const selected = result.filePaths[0];
+    const root = repositoryRoot(selected);
+    return root
+      ? { ok: true, project: root }
+      : {
+          ok: false,
+          output: 'Choose a folder inside a valid Git repository.',
+        };
+  });
+  ipcMain.handle('relay:validate-project', (_event, request) => {
+    const root = repositoryRoot(request?.project);
+    return root
+      ? { ok: true, project: root }
+      : { ok: false, output: 'Choose a valid Git project folder.' };
   });
   ipcMain.handle('relay:command', async (event, request) => {
     if (

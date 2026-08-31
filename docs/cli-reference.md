@@ -369,9 +369,11 @@ relay tui
 
 Features:
 
-- Live list of active Relay projects, git branches, and worktree roles.
-- Running agent sessions with active runtime accounting and attention badges.
-- 5-hour and 7-day provider plan limits and reset times.
+- Responsive active-session list with git branches, runtime accounting, and attention badges.
+- Provider-aware model/effort launch profiles, including custom model IDs.
+- A clickable mouse interface with keyboard fallback and bounded 80×24 rendering.
+- Remaining provider plan capacity with stale/error/unsupported states and exact UTC capture/reset
+  timestamps.
 - Hotkeys:
   - `c`: Launch Claude session
   - `o`: Launch Codex session
@@ -380,7 +382,8 @@ Features:
   - `p`: Launch OpenCode session
   - `s`: Open new shell terminal
   - `Enter`: Attach to selected session (raw passthrough mode; press `Ctrl+]` to detach)
-  - `u`: Refresh dashboard state
+  - `u`: Open provider usage details
+  - `r`: Refresh dashboard state and provider model catalogs
   - `q`: Quit dashboard (leaves daemon and agents running)
 
 ---

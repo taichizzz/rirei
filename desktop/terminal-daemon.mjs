@@ -74,7 +74,11 @@ const daemon = await runTerminalDaemon({
       String(bridge.protocolVersion),
     ];
     await new Promise((resolve, reject) => {
-      const child = spawn(nodePath, args, { cwd: project, stdio: 'ignore' });
+      const child = spawn(nodePath, args, {
+        cwd: project,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
       let settled = false;
       const finish = (error) => {
         if (settled) return;
@@ -121,7 +125,11 @@ const daemon = await runTerminalDaemon({
         : []),
     ];
     await new Promise((resolve) => {
-      const child = spawn(nodePath, args, { cwd: project, stdio: 'ignore' });
+      const child = spawn(nodePath, args, {
+        cwd: project,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
       const timer = globalThis.setTimeout(() => child.kill('SIGKILL'), 5_000);
       child.once('close', () => {
         globalThis.clearTimeout(timer);
@@ -139,6 +147,7 @@ const daemon = await runTerminalDaemon({
       const child = spawn(nodePath, [cliPath, 'status', '--json'], {
         cwd: project,
         stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
       });
       let output = '';
       const timer = globalThis.setTimeout(() => child.kill('SIGKILL'), 5_000);

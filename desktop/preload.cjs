@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('relay', {
   selectProject: () => ipcRenderer.invoke('relay:select-project'),
+  validateProject: (request) =>
+    ipcRenderer.invoke('relay:validate-project', request),
   command: (request) => ipcRenderer.invoke('relay:command', request),
   usage: (request) => ipcRenderer.invoke('relay:usage', request),
   setActiveProject: (project) =>

@@ -8,7 +8,7 @@ await build({
   platform: 'node',
   format: 'cjs',
   target: 'node22',
-  external: ['node-pty', 'ink', 'react', 'yoga-layout'],
+  external: ['node-pty', 'ink', 'yoga-layout'],
   outfile: 'dist/index.cjs',
 });
 

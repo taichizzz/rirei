@@ -18,6 +18,9 @@ const expected = [
   'LICENSE',
   'README.md',
   'THIRD_PARTY_NOTICES.md',
+  'desktop/codex-lifecycle-wrapper.mjs',
+  'desktop/opencode-lifecycle-wrapper.mjs',
+  'desktop/provider-lifecycle-hook.cjs',
   'dist/index.cjs',
   'package.json',
 ].sort();

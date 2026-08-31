@@ -46,7 +46,10 @@ export async function killProcessTree(
     try {
       const args = ['/PID', String(pid), '/T'];
       if (force) args.push('/F');
-      await execFileAsync('taskkill', args, { timeout: 5000 });
+      await execFileAsync('taskkill', args, {
+        timeout: 5000,
+        windowsHide: true,
+      });
     } catch {
       // Process already terminated or inaccessible.
     }

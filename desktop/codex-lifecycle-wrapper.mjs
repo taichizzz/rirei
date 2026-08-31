@@ -63,6 +63,7 @@ function reportLifecycle(state, previous) {
   const child = spawn(node, [hook, state], {
     env: process.env,
     stdio: 'ignore',
+    windowsHide: true,
   });
   child.on('error', () => undefined);
   child.unref();
@@ -92,6 +93,7 @@ function startAppServer(token) {
   const child = spawn('codex', codexAppServerArgs(token), {
     env: { ...process.env, NO_COLOR: '1' },
     stdio: ['ignore', 'ignore', 'pipe'],
+    windowsHide: true,
   });
   return new Promise((resolve, reject) => {
     let buffer = '';

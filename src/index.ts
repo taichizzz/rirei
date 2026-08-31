@@ -26,7 +26,7 @@ import { tuiCommand } from './cli/tui.js';
 const program = new Command()
   .name('relay')
   .description('Durable coding-task handoffs between official agent CLIs')
-  .version('0.1.0-alpha.4')
+  .version('0.1.0-alpha.4.1')
   .addCommand(initCommand())
   .addCommand(startCommand())
   .addCommand(statusCommand())

@@ -1,4 +1,4 @@
-import { readdir, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +24,7 @@ async function findApp(directory) {
 const app = await findApp(path.resolve('dist'));
 if (!app) throw new Error('No packaged Rirei.app found under dist/.');
 const executable = path.join(app, 'Contents', 'MacOS', 'Rirei');
+const cli = path.join(app, 'Contents', 'Resources', 'cli', 'index.cjs');
 const hostUrl = pathToFileURL(
   path.join(
     app,
@@ -46,6 +47,29 @@ process.stdout.write('RIREI_PACKAGED_PTY_OK\\n');
 `;
 
 try {
+  const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cli, '--version'], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    child.once('error', reject);
+    child.once('close', (exitCode) => {
+      if (exitCode === 0 && stdout.trim() === version) resolve();
+      else
+        reject(
+          new Error(
+            stderr ||
+              stdout ||
+              `Packaged CLI exited ${exitCode}; expected ${version}.`,
+          ),
+        );
+    });
+  });
   await new Promise((resolve, reject) => {
     const child = spawn(executable, ['--input-type=module', '-e', code], {
       cwd,
@@ -74,6 +98,7 @@ try {
         );
     });
   });
+  process.stdout.write('Packaged CLI smoke passed.\n');
   process.stdout.write('Packaged Electron node-pty smoke passed.\n');
 } finally {
   await rm(cwd, { recursive: true, force: true });

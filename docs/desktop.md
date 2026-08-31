@@ -18,6 +18,12 @@ chooser), one control band (Task / Agents / Session groups), a compact task dash
 integrated terminal that fills all remaining window height. See
 [Window material](#window-material) for how the translucency is built.
 
+On first run, a skippable setup dialog validates the selected Git repository before saving it.
+It then checks the same executable path used by provider launches and reports each CLI's
+installation state, conservative sign-in status, and usage-reporting support. A missing CLI or
+verified sign-in failure is actionable; providers that do not expose machine-readable sign-in or
+quota status are labeled as unsupported or checked on launch rather than guessed.
+
 1. **Project** (top right) — choose your Git repository folder.
 2. **Initialize** (Session group) — runs `relay init` (creates `.relay/`). Required once per repo.
 3. **Describe a task** and click **Start task** — runs `relay start` (creates the active
@@ -44,7 +50,8 @@ machine-readable source is available:
 
 Provider values captured more than 15 minutes ago, from an invalid/future timestamp, or past
 their reset time remain visible but are labeled `Stale`. Each window is evaluated separately,
-and unchanged status-line payloads do not refresh the sample timestamp.
+and unchanged status-line payloads do not refresh the sample timestamp. Cards show the exact
+local capture and reset timestamps with seconds and timezone, alongside relative freshness.
 
 The **Task dashboard** reads `relay status --json` and shows the active task/status, current
 agent, branch and changed-file count, latest checkpoint/test, remaining work, decisions, and
@@ -90,6 +97,11 @@ versions and current model catalogs, offers only provider-supported effort level
 custom model ID, previews the launch selection, and stores preferences per provider in desktop
 `localStorage`. Auto delegates model/effort selection to the provider. Saved selections are
 passed only for that launch and never rewrite the provider's global configuration.
+
+The terminal header's **+** button opens a per-session launch dialog with the same provider-aware
+model and effort choices plus workspace selection. Onboarding, profiles, and launch dialogs show
+an explicit loading state while model catalogs and sign-in capabilities are being discovered;
+catalog failure still leaves provider-default and custom model launches available.
 
 - Claude: `--model` and `--effort` (`low`, `medium`, `high`, `xhigh`, `max`).
 - Codex: `--model` and a session-only `model_reasoning_effort` config override; effort options

@@ -109,6 +109,7 @@ function reportLifecycle(state) {
   const child = spawn(node, [hook, state], {
     env: process.env,
     stdio: 'ignore',
+    windowsHide: true,
   });
   child.on('error', () => undefined);
   child.unref();
@@ -197,6 +198,7 @@ async function findListeningPortsForPid(pid) {
         encoding: 'utf8',
         timeout: 1000,
         maxBuffer: 512 * 1024,
+        windowsHide: true,
       });
       const ports = [];
       const pidStr = String(pid);

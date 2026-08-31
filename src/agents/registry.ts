@@ -300,7 +300,7 @@ class OfficialCliAdapter implements AgentAdapter {
   async buildInteractiveCommand(
     context: AgentRunContext,
   ): Promise<CommandSpec> {
-    this.validateSelection(context);
+    await this.validateSelection(context);
     const args = this.promptArgs(context);
     return (
       this.commandWrapper?.(args) ?? {
@@ -322,7 +322,7 @@ class OfficialCliAdapter implements AgentAdapter {
       throw new Error(
         `${this.displayName} session pickers cannot accept an initial prompt; use --latest or --id.`,
       );
-    this.validateSelection(context);
+    await this.validateSelection(context);
     const args = this.resumeArgs(context);
     return (
       this.commandWrapper?.(args) ?? {
@@ -331,7 +331,7 @@ class OfficialCliAdapter implements AgentAdapter {
       }
     );
   }
-  private validateSelection(context: AgentRunContext): void {
+  private async validateSelection(context: AgentRunContext): Promise<void> {
     if (
       context.model &&
       (context.model.length > 120 || context.model.startsWith('-'))
@@ -341,6 +341,13 @@ class OfficialCliAdapter implements AgentAdapter {
       throw new Error(
         `Unsupported effort for ${this.displayName}: ${context.effort}.`,
       );
+    if (context.model && context.effort) {
+      const modelEfforts = await this.getEffortLevels(context.model);
+      if (!modelEfforts.includes(context.effort))
+        throw new Error(
+          `Unsupported effort for ${this.displayName} model ${context.model}: ${context.effort}.`,
+        );
+    }
   }
   classifyExit(result: ProcessResult): Promise<ExitClassification> {
     return Promise.resolve(classifyProcessExit(result));
@@ -1017,6 +1024,7 @@ export function isAgentId(value: string): value is AgentId {
 export interface AgentCatalogEntry {
   id: AgentId;
   displayName: string;
+  installation: InstallationResult;
   installed: boolean;
   version: string | null;
   capabilities: AgentCapabilities;
@@ -1026,24 +1034,39 @@ export interface AgentCatalogEntry {
   efforts: string[];
 }
 
-export async function agentCatalog(): Promise<AgentCatalogEntry[]> {
+export interface AgentCatalogOptions {
+  includeAuthentication?: boolean;
+}
+
+export async function agentCatalog(
+  options: AgentCatalogOptions = {},
+): Promise<AgentCatalogEntry[]> {
   return Promise.all(
     agents.map(async (agent) => {
       const installation = await agent.detectInstallation();
       const installed = installation.status === 'ready';
       const [version, models] = installed
         ? await Promise.all([agent.getVersion(), agent.getModels()])
-        : [null, unavailableModels(`${agent.executable} not installed`)];
+        : [
+            null,
+            unavailableModels(
+              installation.status === 'error'
+                ? `${agent.executable} installation check failed`
+                : `${agent.executable} not installed`,
+            ),
+          ];
       return {
         id: agent.id,
         displayName: agent.displayName,
+        installation,
         installed,
         version,
         capabilities: agent.capabilities,
         resumeCapabilities: agent.resumeCapabilities,
-        authentication: installed
-          ? await agent.detectAuthentication()
-          : undefined,
+        authentication:
+          installed && options.includeAuthentication !== false
+            ? await agent.detectAuthentication()
+            : undefined,
         models,
         efforts: await agent.getEffortLevels(),
       };

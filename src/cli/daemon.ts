@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { runTerminalDaemon } from '../../desktop/terminal-daemon-server.mjs';
 import { ensureDaemon } from '../platform/daemon-manager.js';
@@ -82,13 +83,32 @@ export function daemonCommand(): Command {
 
       const nodePath = options.node ?? process.execPath;
       const defaultCli = path.resolve(process.cwd(), 'dist', 'index.cjs');
-      const cliPath = options.cli ?? process.argv[1] ?? defaultCli;
+      const cliPath = await realpath(
+        options.cli ?? process.argv[1] ?? defaultCli,
+      );
+      const desktopSupportPath = path.resolve(
+        path.dirname(cliPath),
+        '..',
+        'desktop',
+      );
 
       const daemon = await runTerminalDaemon({
         socketPath,
         descriptorPath,
         bridgePath: options.bridge,
         nodePath,
+        lifecycleHookPath: path.join(
+          desktopSupportPath,
+          'provider-lifecycle-hook.cjs',
+        ),
+        codexLifecycleWrapperPath: path.join(
+          desktopSupportPath,
+          'codex-lifecycle-wrapper.mjs',
+        ),
+        openCodeLifecycleWrapperPath: path.join(
+          desktopSupportPath,
+          'opencode-lifecycle-wrapper.mjs',
+        ),
         pathValue: process.env.PATH ?? '',
         commandFor(body: DaemonStartBody, terminalId: string) {
           if (body.kind === 'shell') {
@@ -141,6 +161,7 @@ export function daemonCommand(): Command {
             const child = spawn(nodePath, args, {
               cwd: project,
               stdio: 'ignore',
+              windowsHide: true,
             });
             let settled = false;
             const finish = (error: Error | null) => {
@@ -197,6 +218,7 @@ export function daemonCommand(): Command {
             const child = spawn(nodePath, args, {
               cwd: project,
               stdio: 'ignore',
+              windowsHide: true,
             });
             const timer = globalThis.setTimeout(
               () => child.kill('SIGKILL'),
@@ -218,6 +240,7 @@ export function daemonCommand(): Command {
             const child = spawn(nodePath, [cliPath, 'status', '--json'], {
               cwd: project,
               stdio: ['ignore', 'pipe', 'ignore'],
+              windowsHide: true,
             });
             let output = '';
             const timer = globalThis.setTimeout(

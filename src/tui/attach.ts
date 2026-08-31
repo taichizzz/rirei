@@ -48,6 +48,7 @@ export interface TerminalDaemonClientLike {
 
 export interface AttachOptions {
   escapeKeyByte?: number;
+  clearOnExit?: boolean;
   stdin?: NodeJS.ReadStream;
   stdout?: NodeJS.WriteStream;
   signalEmitter?: NodeJS.Process;
@@ -153,7 +154,7 @@ export async function attachTerminalSession(
       if (wasPaused) stdin.pause();
       else stdin.resume();
       if (attached) await client.detach(terminalId).catch(() => undefined);
-      stdout.write('\x1b[2J\x1b[H');
+      if (options.clearOnExit !== false) stdout.write('\x1b[2J\x1b[H');
     })();
     return cleanupPromise;
   };

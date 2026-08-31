@@ -21,7 +21,7 @@ export async function gitExcludePath(root: string): Promise<string> {
   const { stdout: rootOutput } = await execFileAsync(
     'git',
     ['rev-parse', '--path-format=absolute', '--show-toplevel'],
-    { cwd: root, encoding: 'utf8' },
+    { cwd: root, encoding: 'utf8', windowsHide: true },
   );
   const canonicalRoot = rootOutput.trim();
   if (!canonicalRoot)
@@ -32,10 +32,12 @@ export async function gitExcludePath(root: string): Promise<string> {
       execFileAsync('git', [...GIT_EXCLUDE_ABSOLUTE_ARGS], {
         cwd: canonicalRoot,
         encoding: 'utf8',
+        windowsHide: true,
       }),
       execFileAsync('git', ['rev-parse', '--git-path', 'info/exclude'], {
         cwd: canonicalRoot,
         encoding: 'utf8',
+        windowsHide: true,
       }),
     ]);
   const absolutePath = absoluteOutput.trim();
@@ -147,6 +149,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
     cwd,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true,
   });
   return stdout.trim();
 }

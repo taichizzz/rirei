@@ -82,7 +82,7 @@
     "tsx": "^4.23.11",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.66.0",
-    "vitest": "^3.2.4"
+    "vitest": "^5.0.0"
   },
   "build": {
     "appId": "dev.rirei.desktop",

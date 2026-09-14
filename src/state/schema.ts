@@ -158,6 +158,18 @@ export const orphanBidSchema = z.object({
 });
 export type OrphanBid = z.infer<typeof orphanBidSchema>;
 
+export const sessionDisplayLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .regex(
+    // eslint-disable-next-line no-control-regex
+    /^[^\x00-\x1F\x7F\r\n]+$/,
+    'Session label must not contain control characters or newlines.',
+  );
+export type SessionDisplayLabel = z.infer<typeof sessionDisplayLabelSchema>;
+
 /**
  * An explicit claim on a working tree by one provider run. Leases replace the
  * single `currentAgent`/`currentRunId` pair so several agents can run in one
@@ -165,6 +177,7 @@ export type OrphanBid = z.infer<typeof orphanBidSchema>;
  */
 const runLeaseSchema = z.object({
   runId: z.string().min(1),
+  displayLabel: sessionDisplayLabelSchema,
   /** Set by terminal-owning hosts; absent for inherited-stdio CLI runs. */
   terminalId: z.string().min(1).optional(),
   /** Absent means the main working tree rather than a Rirei workspace. */
@@ -243,6 +256,7 @@ const exitClassificationSchema = z.object({
 
 const agentRunSchema = z.object({
   id: z.string().min(1).optional(),
+  displayLabel: sessionDisplayLabelSchema,
   agent: z.string().min(1),
   model: z.string().min(1).optional(),
   effort: z.string().min(1).optional(),
@@ -267,7 +281,7 @@ const agentRunSchema = z.object({
   runtimeSequence: z.number().int().nonnegative().optional(),
 });
 
-export const LATEST_STATE_SCHEMA = 8;
+export const LATEST_STATE_SCHEMA = 9;
 
 export const relayStateSchema = z.object({
   schemaVersion: z.literal(LATEST_STATE_SCHEMA),

@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   stat,
   symlink,
@@ -16,6 +17,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   discoverRepository,
+  discoverRepositoryAuthority,
   ensureRelayLocalExclusion,
   GIT_EXCLUDE_ABSOLUTE_ARGS,
   gitExcludePath,
@@ -43,6 +45,26 @@ describe('repository discovery', () => {
       branch: 'main',
       dirty: false,
     });
+  });
+
+  it('resolves linked worktrees to the primary Relay authority root', async () => {
+    const root = await createRepository();
+    const container = await mkdtemp(path.join(tmpdir(), 'relay-linked-'));
+    directories.push(root, container);
+    const linked = path.join(container, 'workspace');
+    await execFileAsync(
+      'git',
+      ['worktree', 'add', '-b', 'linked-test', linked],
+      {
+        cwd: root,
+      },
+    );
+    expect(await realpath((await discoverRepository(linked))!)).toBe(
+      await realpath(linked),
+    );
+    expect(await realpath((await discoverRepositoryAuthority(linked))!)).toBe(
+      await realpath(root),
+    );
   });
 
   it('reports a dirty baseline', async () => {

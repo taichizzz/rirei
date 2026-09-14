@@ -237,7 +237,7 @@ describe('state migrations', () => {
         },
       ],
     });
-    expect(migrated.schemaVersion).toBe(8);
+    expect(migrated.schemaVersion).toBe(LATEST_STATE_SCHEMA);
     expect(migrated.runs[0]?.controller).toMatchObject({
       kind: 'cli',
       instanceId: '4242',
@@ -264,7 +264,53 @@ describe('state migrations', () => {
       notes: [],
       runs: [],
     });
-    expect(migrated.schemaVersion).toBe(8);
+    expect(migrated.schemaVersion).toBe(LATEST_STATE_SCHEMA);
+  });
+
+  it('migrates v8 to v9 by assigning deterministic display labels in launch order', () => {
+    const now = '2026-01-01T00:00:00.000Z';
+    const v8State = {
+      ...legacyV1(),
+      schemaVersion: 8,
+      revision: 1,
+      recentOperations: [],
+      notes: [],
+      agentHistory: [
+        { id: 'run-1', agent: 'claude', startedAt: now },
+        { id: 'run-2', agent: 'codex', startedAt: now },
+        { id: 'run-3', agent: 'claude', startedAt: now },
+        { id: 'run-4', agent: 'opencode', startedAt: now },
+      ],
+      runs: [
+        {
+          runId: 'run-3',
+          worktreePath: '/tmp/project',
+          projectRoot: '/tmp/project',
+          agent: 'claude',
+          launchMode: 'new',
+          controller: {
+            kind: 'cli',
+            instanceId: '1',
+            bootId: 'host:1',
+          },
+          controllerId: 'cli:host:1:1',
+          lifecycleStatus: 'working',
+          activeRuntimeSeconds: 0,
+          runtimeSequence: 0,
+          startedAt: now,
+          lastSeenAt: now,
+          status: 'running',
+        },
+      ],
+    };
+
+    const migrated = migrateState(v8State);
+    expect(migrated.schemaVersion).toBe(9);
+    expect(migrated.agentHistory[0]?.displayLabel).toBe('Claude 1');
+    expect(migrated.agentHistory[1]?.displayLabel).toBe('Codex 1');
+    expect(migrated.agentHistory[2]?.displayLabel).toBe('Claude 2');
+    expect(migrated.agentHistory[3]?.displayLabel).toBe('OpenCode 1');
+    expect(migrated.runs[0]?.displayLabel).toBe('Claude 2');
   });
 
   it('rejects a schema version newer than this build supports', () => {

@@ -236,6 +236,27 @@ export async function discoverRepository(cwd: string): Promise<string | null> {
   }
 }
 
+/** Resolve the primary worktree that owns shared Relay state for linked worktrees. */
+export async function discoverRepositoryAuthority(
+  cwd: string,
+): Promise<string | null> {
+  const worktreeRoot = await discoverRepository(cwd);
+  if (!worktreeRoot) return null;
+  try {
+    const commonDirectory = await git(worktreeRoot, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ]);
+    const absoluteCommonDirectory = path.resolve(worktreeRoot, commonDirectory);
+    if (path.basename(absoluteCommonDirectory) === '.git')
+      return path.dirname(absoluteCommonDirectory);
+  } catch {
+    // Older Git versions fall back to the current worktree root.
+  }
+  return worktreeRoot;
+}
+
 /** The URL of the `origin` remote, or `null` when no remote is configured. */
 export async function firstRemoteUrl(root: string): Promise<string | null> {
   try {

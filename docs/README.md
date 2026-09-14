@@ -18,6 +18,7 @@ say so explicitly rather than describing aspirational behavior.
 | [state-and-events.md](state-and-events.md)               | The `RelayState` schema, migrations, atomic writes, and activity projection.       |
 | [checkpoints-and-handoff.md](checkpoints-and-handoff.md) | Checkpoint contents, size bounding, and the handoff format.                        |
 | [agents.md](agents.md)                                   | The adapter contract, executable/exit detection, and how to add an adapter.        |
+| [relay-threads.md](relay-threads.md)                     | Local run messaging, capability checks, limits, and delivery semantics.            |
 | [desktop.md](desktop.md)                                 | The Electron app, the integrated xterm.js terminal, and the PTY bridge.            |
 | [security.md](security.md)                               | Authentication boundary, Git safety rules, path policy, and secret handling.       |
 | [approval-protocol.md](approval-protocol.md)             | Versioned local permission-decision boundary and provider activation requirements. |

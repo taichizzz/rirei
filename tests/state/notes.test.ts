@@ -8,7 +8,10 @@ import {
   parseNoteType,
   type NoteImportItem,
 } from '../../src/state/notes.js';
-import { type RelayState } from '../../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type RelayState,
+} from '../../src/state/schema.js';
 import { readState, writeState } from '../../src/state/store.js';
 import { createRepository, removeRepository } from '../helpers.js';
 
@@ -17,7 +20,7 @@ const directories: string[] = [];
 function state(root: string): RelayState {
   const now = '2026-01-01T00:00:00.000Z';
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],

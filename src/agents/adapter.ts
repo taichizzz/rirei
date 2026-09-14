@@ -137,6 +137,13 @@ export interface ExitClassification {
   retryAt?: string;
 }
 
+export interface AgentMessageDeliveryCapabilities {
+  inbox: true;
+  nextSafeTurn: boolean;
+  wake: boolean;
+  source: 'relay_inbox' | 'official_hook' | 'official_protocol';
+}
+
 /**
  * Advertised capabilities describe what a provider adapter can do without
  * hard-coding provider names in CLI or desktop validation layers.
@@ -149,6 +156,7 @@ export interface AgentCapabilities {
   authenticationDiscovery: boolean;
   usageCollection: boolean;
   structuredEvents: boolean;
+  messageDelivery: AgentMessageDeliveryCapabilities;
 }
 
 export interface ResumeCapabilities {

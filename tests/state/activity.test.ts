@@ -27,7 +27,11 @@ import {
   syncActivity,
   type RireiActivitySnapshotV1,
 } from '../../src/state/activity.js';
-import type { RelayState, RunLease } from '../../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type RelayState,
+  type RunLease,
+} from '../../src/state/schema.js';
 import { readState, updateState, writeState } from '../../src/state/store.js';
 import { writeRegistry } from '../../src/worktrees/registry.js';
 
@@ -67,7 +71,7 @@ async function project(
   await mkdir(relayPath(root), { recursive: true });
   const now = new Date().toISOString();
   const state: RelayState = {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -110,6 +114,7 @@ function lease(
   const now = new Date().toISOString();
   return {
     runId: `run-${index}`,
+    displayLabel: overrides.displayLabel ?? `Codex ${index}`,
     terminalId: `terminal-${index}`,
     workspaceId: `workspace-${index}`,
     branchLabel: `rirei/task-${index}`,

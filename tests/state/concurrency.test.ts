@@ -2,7 +2,10 @@ import { hostname } from 'node:os';
 import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { relayPath } from '../../src/safety/path-policy.js';
-import { type RelayState } from '../../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type RelayState,
+} from '../../src/state/schema.js';
 import { RelayConflictError, RelayLockError } from '../../src/state/lock.js';
 import { readState, updateState, writeState } from '../../src/state/store.js';
 import { createRepository, removeRepository } from '../helpers.js';
@@ -12,7 +15,7 @@ const directories: string[] = [];
 function seed(root: string): RelayState {
   const now = '2026-01-01T00:00:00.000Z';
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -128,7 +131,7 @@ describe('updateState', () => {
     const backups = await readdir(relayPath(root, 'backups'));
     expect(backups.some((name) => name.startsWith('state.v1.'))).toBe(true);
     const migrated = await readState(root);
-    expect(migrated.schemaVersion).toBe(8);
+    expect(migrated.schemaVersion).toBe(LATEST_STATE_SCHEMA);
     expect(migrated.revision).toBe(1);
   });
 

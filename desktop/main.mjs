@@ -15,6 +15,10 @@ import { createUsageAlertPolicy } from './usage-alert-policy.mjs';
 import { TerminalDaemonClient } from './terminal-daemon-client.mjs';
 import { listTerminalJournalProjects } from './terminal-journal.mjs';
 import { sanitizeWorkspaceList } from './workspace-projection.mjs';
+import {
+  scopeThreadsIpcRequest,
+  THREADS_STDIN_MAX_BYTES,
+} from './threads-ipc.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const agents = new Set([
@@ -31,6 +35,8 @@ const deepLinkIntents = new DeepLinkIntentQueue();
 const readyRenderers = new Set();
 let appReady = false;
 let daemonReconnectTimer = null;
+let daemonThreadSync = Promise.resolve();
+const daemonThreadProjects = new Set();
 
 const usageSubscriptions = new Map();
 const usageAlertPolicy = createUsageAlertPolicy();
@@ -165,6 +171,33 @@ function repositoryRoot(project) {
   return path.isAbsolute(root) && validProjectDirectory(root) ? root : null;
 }
 
+function relayProjectRoot(project) {
+  const worktreeRoot = repositoryRoot(project);
+  if (!worktreeRoot) return null;
+  const result = spawnSync(
+    'git',
+    [
+      '-C',
+      worktreeRoot,
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { ...process.env, PATH: providerPath() },
+    },
+  );
+  if (result.status !== 0) return worktreeRoot;
+  const commonDirectory = path.resolve(worktreeRoot, result.stdout.trim());
+  const authorityRoot =
+    path.basename(commonDirectory) === '.git'
+      ? path.dirname(commonDirectory)
+      : worktreeRoot;
+  return validProjectDirectory(authorityRoot) ? authorityRoot : worktreeRoot;
+}
+
 function currentBranchLabel(project) {
   const result = spawnSync('git', ['-C', project, 'branch', '--show-current'], {
     encoding: 'utf8',
@@ -213,12 +246,33 @@ function validSelection(value, maxLength = 120) {
   );
 }
 
-function runCli(project, command, args = []) {
+function hasControlCharacters(value) {
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
+function runCli(project, command, args = [], stdin) {
   return new Promise((resolve) => {
+    if (
+      stdin !== undefined &&
+      (typeof stdin !== 'string' ||
+        Buffer.byteLength(stdin, 'utf8') > THREADS_STDIN_MAX_BYTES)
+    ) {
+      resolve({
+        ok: false,
+        stdout: '',
+        stderr: '',
+        output: 'Invalid CLI input.',
+      });
+      return;
+    }
     const child = spawn(nodePath(), [cliPath(), command, ...args], {
       cwd: project,
       env: { ...process.env, PATH: providerPath() },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
     let stdout = '';
@@ -231,6 +285,10 @@ function runCli(project, command, args = []) {
     };
     child.stdout.on('data', (data) => (stdout += data));
     child.stderr.on('data', (data) => (stderr += data));
+    if (child.stdin) {
+      child.stdin.on('error', () => undefined);
+      child.stdin.end(stdin);
+    }
     child.once('error', (error) =>
       finish({
         ok: false,
@@ -472,6 +530,7 @@ function clearUsageSubscription(senderId) {
   if (!subscription) return;
   if (subscription.timer) globalThis.clearTimeout(subscription.timer);
   usageSubscriptions.delete(senderId);
+  void syncDaemonThreadProjects();
 }
 
 async function pollUsage(subscription) {
@@ -518,20 +577,79 @@ async function pollUsage(subscription) {
 
 function setActiveProject(event, project) {
   clearUsageSubscription(event.sender.id);
-  if (!validProjectDirectory(project)) return;
+  const root = relayProjectRoot(project);
+  if (!root) return;
   const window = BrowserWindow.fromWebContents(event.sender);
   if (!window || window.isDestroyed()) return;
   const subscription = {
     senderId: event.sender.id,
     sender: event.sender,
     window,
-    project,
+    project: root,
     timer: null,
     polling: false,
   };
   usageSubscriptions.set(event.sender.id, subscription);
-  void reconcileProjectWithDaemon(project);
+  void syncDaemonThreadProjects();
+  void reconcileProjectWithDaemon(root);
   void pollUsage(subscription);
+}
+
+function syncDaemonThreadProjects({ reset = false } = {}) {
+  daemonThreadSync = daemonThreadSync
+    .catch(() => undefined)
+    .then(async () => {
+      if (!terminalDaemon?.connected) return;
+      if (reset) daemonThreadProjects.clear();
+      const desired = new Set(
+        [...usageSubscriptions.values()].map(
+          (subscription) => subscription.project,
+        ),
+      );
+      for (const projectRoot of daemonThreadProjects) {
+        if (!desired.has(projectRoot)) {
+          await terminalDaemon.watchThreads(projectRoot, false);
+          daemonThreadProjects.delete(projectRoot);
+        }
+      }
+      for (const projectRoot of desired) {
+        if (!daemonThreadProjects.has(projectRoot)) {
+          await terminalDaemon.watchThreads(projectRoot, true);
+          daemonThreadProjects.add(projectRoot);
+        }
+      }
+    });
+  return daemonThreadSync;
+}
+
+function activeThreadsRequest(event, kind, request) {
+  const activeRoot = usageSubscriptions.get(event.sender.id)?.project;
+  return scopeThreadsIpcRequest(kind, request, activeRoot, relayProjectRoot);
+}
+
+async function supportsMessageDelivery(projectRoot, to, delivery) {
+  if (delivery === 'inbox') return true;
+  const [statusResult, catalogResult] = await Promise.all([
+    runCli(projectRoot, 'status', ['--json']),
+    runCli(projectRoot, 'agents', ['--json']),
+  ]);
+  if (!statusResult.ok || !catalogResult.ok) return false;
+  try {
+    const runId = to.slice(4);
+    const status = JSON.parse(statusResult.stdout);
+    const run = [...(status.runs ?? []), ...(status.agentHistory ?? [])].find(
+      (entry) => entry.runId === runId || entry.id === runId,
+    );
+    const agent = JSON.parse(catalogResult.stdout).agents?.find(
+      (entry) => entry.id === run?.agent,
+    );
+    const capabilities = agent?.capabilities?.messageDelivery;
+    return delivery === 'next_safe_turn'
+      ? capabilities?.nextSafeTurn === true
+      : delivery === 'wake' && capabilities?.wake === true;
+  } catch {
+    return false;
+  }
 }
 
 function daemonReconciliationArgs() {
@@ -644,6 +762,9 @@ function publicRendererTerminal(
     error: terminal.error,
     providerResult: terminal.providerResult,
     bridgeStatus: terminal.bridgeStatus,
+    readOnly: terminalDaemon?.hasControl
+      ? !terminalDaemon.hasControl(terminal.id)
+      : false,
   };
 }
 
@@ -697,6 +818,12 @@ function resetRendererDeliveries(senderId) {
 }
 
 function releaseRenderer(senderId) {
+  const terminals = rendererTerminals.get(senderId);
+  if (terminals && terminalDaemon) {
+    for (const terminalId of terminals) {
+      void terminalDaemon.releaseControl(terminalId).catch(() => undefined);
+    }
+  }
   readyRenderers.delete(senderId);
   rendererTerminals.delete(senderId);
   resetRendererDeliveries(senderId);
@@ -816,6 +943,44 @@ function forwardTerminalStatus(terminal) {
   }
 }
 
+function forwardTerminalControl(terminalId, readOnly, reason) {
+  for (const [senderId, terminalIds] of rendererTerminals) {
+    if (!terminalIds.has(terminalId) || !readyRenderers.has(senderId)) continue;
+    rendererSender(senderId)?.send('relay:terminal-control', {
+      terminalId,
+      readOnly,
+      reason,
+    });
+  }
+}
+
+async function restoreRendererTerminalControl() {
+  const terminalIds = new Set();
+  for (const claimed of rendererTerminals.values())
+    for (const terminalId of claimed) terminalIds.add(terminalId);
+
+  for (const terminalId of terminalIds) {
+    const terminal = terminalDaemon.inventory.get(terminalId);
+    if (!terminal || finalTerminal(terminal.status)) continue;
+    try {
+      if (!terminalDaemon.hasControl(terminalId))
+        await terminalDaemon.acquireControl(terminalId);
+      if (terminalOwnerId(terminalId) === null) {
+        await terminalDaemon.releaseControl(terminalId).catch(() => undefined);
+        continue;
+      }
+      forwardTerminalControl(terminalId, false, 'reconnected');
+    } catch (error) {
+      forwardTerminalControl(terminalId, true, 'control_unavailable');
+      if (
+        error?.code !== 'control_busy' &&
+        error?.daemonCode !== 'control_busy'
+      )
+        scheduleDaemonReconnect();
+    }
+  }
+}
+
 function queueTerminalExit(terminal) {
   for (const [senderId, terminalIds] of rendererTerminals) {
     if (!terminalIds.has(terminal.id)) continue;
@@ -873,8 +1038,30 @@ function wireTerminalDaemon() {
     for (const terminalIds of rendererTerminals)
       terminalIds[1].delete(event.terminalId);
   });
+  terminalDaemon.on('control_revoked', (event) => {
+    forwardTerminalControl(event.terminalId, true, event.reason);
+  });
+  terminalDaemon.on('threads_changed', (event) => {
+    for (const senderId of readyRenderers) {
+      const sender = rendererSender(senderId);
+      const activeRoot = usageSubscriptions.get(senderId)?.project;
+      if (
+        sender &&
+        !sender.isDestroyed() &&
+        activeRoot &&
+        event.projectRoot === activeRoot
+      ) {
+        sender.send('relay:threads-changed', event);
+      }
+    }
+  });
   terminalDaemon.on('connected', () => {
+    void syncDaemonThreadProjects({ reset: true }).catch(
+      scheduleDaemonReconnect,
+    );
     reconcileDaemonProjects();
+    globalThis.setTimeout(() => reconcileDaemonProjects(), 1_000).unref();
+    void restoreRendererTerminalControl();
     for (const [senderId, terminalIds] of rendererTerminals) {
       const sender = rendererSender(senderId);
       if (!sender) continue;
@@ -893,7 +1080,14 @@ function wireTerminalDaemon() {
       }
     }
   });
-  terminalDaemon.on('disconnected', scheduleDaemonReconnect);
+  terminalDaemon.on('disconnected', () => {
+    const terminalIds = new Set();
+    for (const claimed of rendererTerminals.values())
+      for (const terminalId of claimed) terminalIds.add(terminalId);
+    for (const terminalId of terminalIds)
+      forwardTerminalControl(terminalId, true, 'disconnected');
+    scheduleDaemonReconnect();
+  });
 }
 
 function terminalPreflight(project) {
@@ -943,6 +1137,7 @@ async function startTerminal(event, project, command, agent, size, selection) {
       shell: loginShellPath(),
       size: terminalSize(size),
     });
+    await terminalDaemon.acquireControl(terminal.id).catch(() => undefined);
     terminalDaemon.inventory.set(terminal.id, terminal);
     if (!rendererTerminals.has(event.sender.id))
       rendererTerminals.set(event.sender.id, new Set());
@@ -1320,6 +1515,225 @@ function registerIpc() {
     }
   });
 
+  ipcMain.handle('relay:threads', async (event, request) => {
+    const parsed = activeThreadsRequest(event, 'list', request);
+    if (!parsed)
+      return { ok: false, output: 'Invalid or inactive Threads request.' };
+    const args = ['threads', '--json'];
+    if (parsed.filter) args.push('--filter', parsed.filter);
+    const result = await runCli(parsed.projectRoot, 'message', args);
+    if (!result.ok) return result;
+    try {
+      return { ok: true, data: JSON.parse(result.stdout) };
+    } catch {
+      return { ok: false, output: 'Could not read threads.' };
+    }
+  });
+
+  ipcMain.handle('relay:thread', async (event, request) => {
+    const parsed = activeThreadsRequest(event, 'thread', request);
+    if (!parsed)
+      return { ok: false, output: 'Invalid or inactive Threads request.' };
+    const result = await runCli(parsed.projectRoot, 'message', [
+      'thread',
+      parsed.threadId,
+      '--json',
+    ]);
+    if (!result.ok) return result;
+    try {
+      return { ok: true, data: JSON.parse(result.stdout) };
+    } catch {
+      return { ok: false, output: 'Could not read thread.' };
+    }
+  });
+
+  ipcMain.handle('relay:send-message', async (event, request) => {
+    const parsed = activeThreadsRequest(event, 'send', request);
+    if (!parsed)
+      return { ok: false, output: 'Invalid or inactive Threads request.' };
+    if (
+      !(await supportsMessageDelivery(
+        parsed.projectRoot,
+        parsed.to,
+        parsed.delivery,
+      ))
+    )
+      return {
+        ok: false,
+        output: 'The selected agent does not support that delivery mode.',
+      };
+    const args = [
+      'send',
+      '--to',
+      parsed.to,
+      '--intent',
+      parsed.intent,
+      '--delivery',
+      parsed.delivery,
+      '--stdin',
+      '--json',
+    ];
+    for (const noteId of parsed.contextNotes)
+      args.push('--context-note', noteId);
+    for (const checkpointId of parsed.contextCheckpoints)
+      args.push('--context-checkpoint', checkpointId);
+    if (parsed.redact) args.push('--redact');
+    if (parsed.operationId) args.push('--operation-id', parsed.operationId);
+
+    const result = await runCli(
+      parsed.projectRoot,
+      'message',
+      args,
+      parsed.text,
+    );
+    if (!result.ok) return result;
+    try {
+      const data = JSON.parse(result.stdout);
+      if (terminalDaemon?.connected) {
+        void terminalDaemon.notifyThreads({
+          projectRoot: parsed.projectRoot,
+          threadId: data.message?.threadId,
+          messageId: data.message?.id,
+          revision: data.revision,
+        });
+      }
+      return { ok: true, data };
+    } catch {
+      return { ok: false, output: 'Could not parse send response.' };
+    }
+  });
+
+  ipcMain.handle('relay:reply-message', async (event, request) => {
+    const parsed = activeThreadsRequest(event, 'reply', request);
+    if (!parsed)
+      return { ok: false, output: 'Invalid or inactive Threads request.' };
+    if (parsed.delivery !== 'inbox')
+      return {
+        ok: false,
+        output: 'Desktop replies currently support inbox delivery only.',
+      };
+    const args = [
+      'reply',
+      parsed.parentMessageId,
+      '--intent',
+      parsed.intent,
+      '--delivery',
+      parsed.delivery,
+      '--stdin',
+      '--json',
+    ];
+    for (const noteId of parsed.contextNotes)
+      args.push('--context-note', noteId);
+    for (const checkpointId of parsed.contextCheckpoints)
+      args.push('--context-checkpoint', checkpointId);
+    if (parsed.redact) args.push('--redact');
+    if (parsed.operationId) args.push('--operation-id', parsed.operationId);
+
+    const result = await runCli(
+      parsed.projectRoot,
+      'message',
+      args,
+      parsed.text,
+    );
+    if (!result.ok) return result;
+    try {
+      const data = JSON.parse(result.stdout);
+      if (terminalDaemon?.connected) {
+        void terminalDaemon.notifyThreads({
+          projectRoot: parsed.projectRoot,
+          threadId: data.message?.threadId,
+          messageId: data.message?.id,
+          revision: data.revision,
+        });
+      }
+      return { ok: true, data };
+    } catch {
+      return { ok: false, output: 'Could not parse reply response.' };
+    }
+  });
+
+  ipcMain.handle('relay:mark-message-read', async (event, request) => {
+    const parsed = activeThreadsRequest(event, 'read', request);
+    if (!parsed)
+      return { ok: false, output: 'Invalid or inactive Threads request.' };
+    const result = await runCli(parsed.projectRoot, 'message', [
+      'read',
+      parsed.messageId,
+      '--json',
+    ]);
+    if (!result.ok) return result;
+    try {
+      const data = JSON.parse(result.stdout);
+      if (terminalDaemon?.connected) {
+        void terminalDaemon.notifyThreads({
+          projectRoot: parsed.projectRoot,
+          threadId: data.message?.threadId,
+          messageId: parsed.messageId,
+        });
+      }
+      return { ok: true, data };
+    } catch {
+      return { ok: false, output: 'Could not mark message read.' };
+    }
+  });
+
+  ipcMain.handle('relay:acknowledge-message', async (event, request) => {
+    const parsed = activeThreadsRequest(event, 'acknowledge', request);
+    if (!parsed)
+      return { ok: false, output: 'Invalid or inactive Threads request.' };
+    const result = await runCli(parsed.projectRoot, 'message', [
+      'acknowledge',
+      parsed.messageId,
+      '--json',
+    ]);
+    if (!result.ok) return result;
+    try {
+      const data = JSON.parse(result.stdout);
+      if (terminalDaemon?.connected) {
+        void terminalDaemon.notifyThreads({
+          projectRoot: parsed.projectRoot,
+          threadId: data.message?.threadId,
+          messageId: parsed.messageId,
+        });
+      }
+      return { ok: true, data };
+    } catch {
+      return { ok: false, output: 'Could not acknowledge message.' };
+    }
+  });
+
+  ipcMain.handle('relay:rename-session', async (event, request) => {
+    const projectRoot = request && relayProjectRoot(request.project);
+    const activeRoot = usageSubscriptions.get(event.sender.id)?.project;
+    if (
+      !projectRoot ||
+      projectRoot !== activeRoot ||
+      typeof request.runId !== 'string' ||
+      !request.runId.startsWith('run:') ||
+      request.runId.length < 5 ||
+      request.runId.length > 516 ||
+      /\s/u.test(request.runId) ||
+      hasControlCharacters(request.runId) ||
+      typeof request.label !== 'string' ||
+      request.label.length < 1 ||
+      request.label.length > 80 ||
+      hasControlCharacters(request.label)
+    )
+      return { ok: false, output: 'Invalid request.' };
+    const result = await runCli(projectRoot, 'session', [
+      'label',
+      request.runId,
+      request.label,
+      '--json',
+    ]);
+    if (!result.ok) return result;
+    try {
+      return { ok: true, data: JSON.parse(result.stdout) };
+    } catch {
+      return { ok: false, output: 'Could not rename session.' };
+    }
+  });
+
   ipcMain.on('relay:set-active-project', setActiveProject);
   ipcMain.on('relay:terminal-input', (event, request) => {
     if (
@@ -1329,13 +1743,43 @@ function registerIpc() {
     )
       void terminalDaemon
         .write(request.terminalId, request.data)
-        .catch(scheduleDaemonReconnect);
+        .catch((error) => {
+          if (
+            error?.code === 'not_controller' ||
+            error?.daemonCode === 'not_controller' ||
+            error?.code === 'control_busy' ||
+            error?.daemonCode === 'control_busy'
+          ) {
+            forwardTerminalControl(
+              request.terminalId,
+              true,
+              'control_unavailable',
+            );
+            return;
+          }
+          scheduleDaemonReconnect();
+        });
   });
   ipcMain.on('relay:terminal-resize', (event, request) => {
     if (!ownedTerminal(event, request?.terminalId)) return;
     void terminalDaemon
       .resize(request.terminalId, terminalSize(request?.size))
-      .catch(scheduleDaemonReconnect);
+      .catch((error) => {
+        if (
+          error?.code === 'not_controller' ||
+          error?.daemonCode === 'not_controller' ||
+          error?.code === 'control_busy' ||
+          error?.daemonCode === 'control_busy'
+        ) {
+          forwardTerminalControl(
+            request.terminalId,
+            true,
+            'control_unavailable',
+          );
+          return;
+        }
+        scheduleDaemonReconnect();
+      });
   });
   ipcMain.on('relay:terminal-attention', (event, request) => {
     const terminal = ownedTerminal(event, request?.terminalId);
@@ -1376,6 +1820,25 @@ function registerIpc() {
       };
     }
   });
+  ipcMain.handle('relay:terminal-stop-all', async () => {
+    try {
+      const result = await terminalDaemon.stopAll();
+      return {
+        ok: true,
+        count: result.count,
+        output:
+          result.count === 0
+            ? 'No terminal sessions are running.'
+            : `Stopping ${result.count} terminal session${result.count === 1 ? '' : 's'}.`,
+      };
+    } catch (error) {
+      scheduleDaemonReconnect();
+      return {
+        ok: false,
+        output: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
   ipcMain.handle('relay:terminal-inventory', async (event) => {
     const inventory = await terminalDaemon.refreshInventory();
     if (!rendererTerminals.has(event.sender.id))
@@ -1387,6 +1850,13 @@ function registerIpc() {
       const ownerId = terminalOwnerId(terminal.id);
       if (ownerId !== null && ownerId !== event.sender.id) continue;
       owned.add(terminal.id);
+      if (
+        !finalTerminal(terminal.status) &&
+        terminalDaemon?.hasControl &&
+        !terminalDaemon.hasControl(terminal.id)
+      ) {
+        await terminalDaemon.acquireControl(terminal.id).catch(() => undefined);
+      }
       const cursor = terminal.oldestCursor ?? 0;
       terminalDeliveries.set(deliveryKey(event.sender.id, terminal.id), {
         cursor,
@@ -1414,6 +1884,7 @@ function registerIpc() {
     const terminal = ownedTerminal(event, request?.terminalId);
     if (!terminal || !finalTerminal(terminal.status)) return { ok: false };
     try {
+      await terminalDaemon.releaseControl(terminal.id).catch(() => undefined);
       await terminalDaemon.forget(terminal.id);
       rendererTerminals.get(event.sender.id)?.delete(terminal.id);
       terminalDeliveries.delete(deliveryKey(event.sender.id, terminal.id));

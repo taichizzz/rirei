@@ -13,195 +13,161 @@
   </head>
   <body>
     <a class="skip-link" href="#mainContent">Skip to workspace</a>
-    <header class="bar">
-      <div class="wordmark">
-        <svg
-          class="wordmark-logo"
-          viewBox="0 0 133 35"
-          role="img"
-          aria-labelledby="wordmark-title"
-        >
-          <title id="wordmark-title">Rirei</title>
-          <defs>
-            <path
-              id="wordmark-glyphs"
-              d="M0 3h16v4H5v7h11v4H5v14H0V3Zm16 4h5v7h-5V7Zm-5 11h5v4h3v5h3v5h-6v-5h-3v-5h-2v-4ZM28 3h21v4h-8v21h8v4H28v-4h8V7h-8V3Zm28 0h16v4H61v7h11v4H61v14h-5V3Zm16 4h5v7h-5V7Zm-5 11h5v4h3v5h3v5h-6v-5h-3v-5h-2v-4ZM84 3h21v4H89v7h13v4H89v10h16v4H84V3Zm28 0h21v4h-8v21h8v4h-21v-4h8V7h-8V3Z"
-            />
-          </defs>
-          <use class="wordmark-shadow" href="#wordmark-glyphs" y="3" />
-          <use class="wordmark-face" href="#wordmark-glyphs" />
-        </svg>
-      </div>
-      <div class="bar-tools">
-        <div class="dashboard-actions" aria-label="Project navigation">
-          <button id="historyOpen" aria-label="Search task history">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-              <path d="M3 3v5h5M12 7v5l3 2" />
-            </svg>
-            <span class="action-label">History</span>
-          </button>
-          <button id="timelineOpen" aria-label="Open agent session timeline">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="3" y="4" width="18" height="16" rx="2" />
-              <path d="m7 9 2 2-2 2M12 15h5" />
-            </svg>
-            <span class="action-label">Sessions</span>
-            <span id="timelineCount">0</span>
-          </button>
-          <button id="dashboardRefresh" aria-label="Refresh dashboard">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M20 6v5h-5" />
-              <path d="M19 11a8 8 0 1 0-2 6" />
-            </svg>
-            <span class="action-label">Refresh</span>
-          </button>
-        </div>
-        <button id="choose" class="project" aria-label="Choose active project">
-          <span>Active project</span
-          ><strong id="projectName">Choose folder</strong>
-        </button>
-      </div>
-    </header>
 
-    <main id="mainContent" class="app-shell">
-      <aside class="controls" aria-label="Session controls">
-        <div class="group task-group">
-          <p class="label">Task</p>
-          <div class="task-row">
+    <div class="shell">
+      <nav class="rail" aria-label="Primary sections">
+        <div class="rail-mark">
+          <svg
+            class="wordmark-logo"
+            viewBox="0 0 133 35"
+            role="img"
+            aria-labelledby="wordmark-title"
+          >
+            <title id="wordmark-title">Rirei</title>
+            <defs>
+              <path
+                id="wordmark-glyphs"
+                d="M0 3h16v4H5v7h11v4H5v14H0V3Zm16 4h5v7h-5V7Zm-5 11h5v4h3v5h3v5h-6v-5h-3v-5h-2v-4ZM28 3h21v4h-8v21h8v4H28v-4h8V7h-8V3Zm28 0h16v4H61v7h11v4H61v14h-5V3Zm16 4h5v7h-5V7Zm-5 11h5v4h3v5h3v5h-6v-5h-3v-5h-2v-4ZM84 3h21v4H89v7h13v4H89v10h16v4H84V3Zm28 0h21v4h-8v21h8v4h-21v-4h8V7h-8V3Z"
+              />
+            </defs>
+            <use class="wordmark-shadow" href="#wordmark-glyphs" y="3" />
+            <use class="wordmark-face" href="#wordmark-glyphs" />
+          </svg>
+        </div>
+
+        <button
+          class="rail-item is-active"
+          data-panel="task"
+          data-section="record"
+          aria-pressed="true"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="m7 10 2 2-2 2M13 14h4" />
+          </svg>
+          <span>Task</span>
+        </button>
+        <button
+          class="rail-item"
+          data-panel="agents"
+          data-section="launch"
+          aria-pressed="false"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h10" />
+          </svg>
+          <span>Agents</span>
+        </button>
+        <button
+          class="rail-item"
+          data-panel="notes"
+          data-section="record"
+          aria-pressed="false"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1Z" />
+          </svg>
+          <span>Notes</span>
+        </button>
+        <button
+          id="threadsOpen"
+          class="rail-item"
+          aria-label="Open coordination threads"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+            />
+          </svg>
+          <span>Threads</span>
+          <span id="threadsBadge" class="threads-badge" hidden>0</span>
+        </button>
+        <button
+          id="usageBtn"
+          class="rail-item"
+          aria-label="Open provider usage"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 20V10M12 20V4M19 20v-7" />
+          </svg>
+          <span>Usage</span>
+        </button>
+
+        <div class="rail-spacer"></div>
+
+        <button data-command="finish" class="rail-item rail-finish">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m5 13 4 4L19 7" />
+          </svg>
+          <span>Finish</span>
+        </button>
+      </nav>
+
+      <div class="stage">
+        <header class="topbar">
+          <div class="topbar-project">
+            <button
+              id="choose"
+              class="project-name"
+              aria-label="Choose active project"
+            >
+              <strong id="projectName">Choose folder</strong>
+            </button>
+            <span id="topbarGit" class="topbar-git">—</span>
+            <span id="dashboardStatus" class="status-pill">Idle</span>
+          </div>
+          <div class="topbar-tools">
+            <div class="dashboard-actions" aria-label="Project navigation">
+              <button id="historyOpen" aria-label="Search task history">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                  <path d="M3 3v5h5M12 7v5l3 2" />
+                </svg>
+                <span class="action-label">History</span>
+              </button>
+              <button
+                id="timelineOpen"
+                aria-label="Open agent session timeline"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                  <path d="m7 9 2 2-2 2M12 15h5" />
+                </svg>
+                <span class="action-label">Sessions</span>
+                <span id="timelineCount">0</span>
+              </button>
+              <button id="dashboardRefresh" aria-label="Refresh dashboard">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 6v5h-5" />
+                  <path d="M19 11a8 8 0 1 0-2 6" />
+                </svg>
+                <span class="action-label">Refresh</span>
+              </button>
+            </div>
+            <button id="drawerToggle" class="topbar-relay" aria-expanded="true">
+              Relay
+            </button>
+          </div>
+        </header>
+
+        <div class="command-band">
+          <div class="command-bar">
+            <span class="command-caret" aria-hidden="true">▸</span>
             <textarea
               id="task"
-              rows="2"
+              rows="1"
               aria-label="Task description"
               placeholder="Describe the task for the next agent…"
             ></textarea>
+            <label class="check"
+              ><input id="dirty" type="checkbox" /> Allow dirty tree</label
+            >
             <button data-command="start" class="primary">Start task</button>
           </div>
-          <label class="check"
-            ><input id="dirty" type="checkbox" /> Allow dirty working
-            tree</label
-          >
-        </div>
 
-        <div class="group">
-          <p class="label">Agents</p>
-          <div class="agent-list">
-            <article>
-              <span class="agent-identity">
-                <b>Claude</b>
-                <button class="profile-trigger" data-profile-agent="claude">
-                  Auto · Auto
-                </button>
-              </span>
-              <span>
-                <button data-interactive="run" data-agent="claude">Run</button>
-                <button data-interactive="resume" data-agent="claude">
-                  Resume
-                </button>
-                <button data-interactive="switch" data-agent="claude">
-                  Switch
-                </button>
-              </span>
-            </article>
-            <article>
-              <span class="agent-identity">
-                <b>Codex</b>
-                <button class="profile-trigger" data-profile-agent="codex">
-                  Auto · Auto
-                </button>
-              </span>
-              <span>
-                <button data-interactive="run" data-agent="codex">Run</button>
-                <button data-interactive="resume" data-agent="codex">
-                  Resume
-                </button>
-                <button data-interactive="switch" data-agent="codex">
-                  Switch
-                </button>
-              </span>
-            </article>
-            <article>
-              <span class="agent-identity">
-                <b>Antigravity</b>
-                <button
-                  class="profile-trigger"
-                  data-profile-agent="antigravity"
-                >
-                  Auto · Auto
-                </button>
-              </span>
-              <span>
-                <button data-interactive="run" data-agent="antigravity">
-                  Run</button
-                ><button data-interactive="switch" data-agent="antigravity">
-                  Switch
-                </button>
-              </span>
-            </article>
-            <article>
-              <span class="agent-identity">
-                <b>OpenCode</b>
-                <button class="profile-trigger" data-profile-agent="opencode">
-                  Auto · Auto
-                </button>
-              </span>
-              <span>
-                <button data-interactive="run" data-agent="opencode">Run</button
-                ><button data-interactive="resume" data-agent="opencode">
-                  Resume Latest
-                </button>
-                <button data-interactive="fork-latest" data-agent="opencode">
-                  Fork Latest
-                </button>
-                <button data-interactive="switch" data-agent="opencode">
-                  Switch
-                </button>
-              </span>
-            </article>
-          </div>
-        </div>
+          <h2 id="dashboardTitle" class="task-title">No project selected</h2>
 
-        <div class="group">
-          <p class="label">Session</p>
-          <div class="ops-row">
-            <button data-command="init">Initialize</button>
-            <button data-command="status">Status</button>
-            <button data-command="doctor">Doctor</button>
-            <button data-command="handoff">Handoff</button>
-            <button id="usageBtn">Usage</button>
-          </div>
-          <div class="ops-row">
-            <input
-              id="checkpoint"
-              aria-label="Checkpoint label"
-              placeholder="Checkpoint label"
-            />
-            <button data-command="checkpoint">Checkpoint</button>
-          </div>
-          <div class="ops-row">
-            <button data-command="finish" class="finish">Finish task</button>
-          </div>
-        </div>
-      </aside>
-
-      <section class="main-stage" aria-label="Project workspace">
-        <section id="dashboard" class="dashboard" aria-live="polite">
-          <div class="dashboard-head">
-            <div>
-              <p class="label">Task dashboard</p>
-              <div class="dashboard-title-row">
-                <h2 id="dashboardTitle">No project selected</h2>
-                <span id="dashboardStatus" class="status-pill">Idle</span>
-              </div>
-            </div>
-            <div class="dashboard-recovery-actions">
-              <button id="recoverRun" hidden>Recover stale run</button>
-              <button id="resumeRecovered" hidden>
-                Resume in new terminal
-              </button>
-            </div>
-          </div>
-          <div class="dashboard-metrics">
+          <div id="dashboard" class="metrics" aria-live="polite">
             <div><span>Agent</span><strong id="dashboardAgent">—</strong></div>
             <div>
               <span>Branch</span><strong id="dashboardBranch">—</strong>
@@ -215,54 +181,217 @@
             </div>
             <div><span>Tests</span><strong id="dashboardTest">—</strong></div>
           </div>
-          <div class="dashboard-memory">
-            <div>
-              <span>Remaining</span>
-              <ul id="dashboardRemaining">
-                <li>No task loaded</li>
-              </ul>
-            </div>
-            <div>
-              <span>Decisions</span>
-              <ul id="dashboardDecisions">
-                <li>None recorded</li>
-              </ul>
-            </div>
-            <div>
-              <span>Blockers</span>
-              <ul id="dashboardBlockers">
-                <li>None recorded</li>
-              </ul>
-            </div>
-          </div>
-        </section>
 
-        <section class="terminal-card">
-          <div class="output-head">
-            <div class="terminal-tabs" id="terminalTabs">
-              <button
-                id="addTerminalBtn"
-                class="tab-btn add-btn"
-                title="Launch new agent"
-                aria-label="Launch new agent"
-              >
-                +
+          <div class="recovery-actions">
+            <button id="recoverRun" hidden>Recover stale run</button>
+            <button id="resumeRecovered" hidden>Resume in new terminal</button>
+          </div>
+        </div>
+
+        <main id="mainContent" class="workspace" aria-label="Project workspace">
+          <section class="terminal-card">
+            <div class="output-head">
+              <div class="terminal-tabs" id="terminalTabs">
+                <button
+                  id="addTerminalBtn"
+                  class="tab-btn add-btn"
+                  title="Launch new agent"
+                  aria-label="Launch new agent"
+                >
+                  +
+                </button>
+              </div>
+              <div class="terminal-actions">
+                <button id="openShell">Shell</button>
+                <button id="hiddenTerminals" hidden>Hidden (0)</button>
+                <button id="showTerminal" hidden>Show terminal</button>
+                <button id="stop" disabled>Stop Session</button>
+                <button id="stopAll" class="danger" disabled>Stop All</button
+                ><button id="clear">Clear</button>
+              </div>
+            </div>
+            <pre id="output" tabindex="0">
+Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
+            <div id="terminalsContainer"></div>
+          </section>
+
+          <aside class="drawer" aria-label="Launch agent and task record">
+            <div class="drawer-head">
+              <p class="label">Launch agent</p>
+              <span class="drawer-meta">4 ready</span>
+              <button class="drawer-close" aria-label="Hide panel">✕</button>
+            </div>
+
+            <div class="launch-list">
+              <article class="launch-row">
+                <span class="launch-badge" aria-hidden="true">CL</span>
+                <span class="launch-identity">
+                  <b>Claude</b>
+                  <button class="profile-trigger" data-profile-agent="claude">
+                    Auto · Auto
+                  </button>
+                </span>
+                <button
+                  data-interactive="run"
+                  data-agent="claude"
+                  class="launch-run"
+                >
+                  Run
+                </button>
+                <details class="launch-more">
+                  <summary aria-label="More Claude actions">⌄</summary>
+                  <div class="launch-menu">
+                    <button data-interactive="resume" data-agent="claude">
+                      Resume
+                    </button>
+                    <button data-interactive="switch" data-agent="claude">
+                      Switch
+                    </button>
+                  </div>
+                </details>
+              </article>
+
+              <article class="launch-row">
+                <span class="launch-badge" aria-hidden="true">CX</span>
+                <span class="launch-identity">
+                  <b>Codex</b>
+                  <button class="profile-trigger" data-profile-agent="codex">
+                    Auto · Auto
+                  </button>
+                </span>
+                <button
+                  data-interactive="run"
+                  data-agent="codex"
+                  class="launch-run"
+                >
+                  Run
+                </button>
+                <details class="launch-more">
+                  <summary aria-label="More Codex actions">⌄</summary>
+                  <div class="launch-menu">
+                    <button data-interactive="resume" data-agent="codex">
+                      Resume
+                    </button>
+                    <button data-interactive="switch" data-agent="codex">
+                      Switch
+                    </button>
+                  </div>
+                </details>
+              </article>
+
+              <article class="launch-row">
+                <span class="launch-badge" aria-hidden="true">AG</span>
+                <span class="launch-identity">
+                  <b>Antigravity</b>
+                  <button
+                    class="profile-trigger"
+                    data-profile-agent="antigravity"
+                  >
+                    Auto · Auto
+                  </button>
+                </span>
+                <button
+                  data-interactive="run"
+                  data-agent="antigravity"
+                  class="launch-run"
+                >
+                  Run
+                </button>
+                <details class="launch-more">
+                  <summary aria-label="More Antigravity actions">⌄</summary>
+                  <div class="launch-menu">
+                    <button data-interactive="switch" data-agent="antigravity">
+                      Switch
+                    </button>
+                  </div>
+                </details>
+              </article>
+
+              <article class="launch-row">
+                <span class="launch-badge" aria-hidden="true">OC</span>
+                <span class="launch-identity">
+                  <b>OpenCode</b>
+                  <button class="profile-trigger" data-profile-agent="opencode">
+                    Auto · Auto
+                  </button>
+                </span>
+                <button
+                  data-interactive="run"
+                  data-agent="opencode"
+                  class="launch-run"
+                >
+                  Run
+                </button>
+                <details class="launch-more">
+                  <summary aria-label="More OpenCode actions">⌄</summary>
+                  <div class="launch-menu">
+                    <button data-interactive="resume" data-agent="opencode">
+                      Resume Latest
+                    </button>
+                    <button
+                      data-interactive="fork-latest"
+                      data-agent="opencode"
+                    >
+                      Fork Latest
+                    </button>
+                    <button data-interactive="switch" data-agent="opencode">
+                      Switch
+                    </button>
+                  </div>
+                </details>
+              </article>
+            </div>
+
+            <div class="drawer-head drawer-head-sub">
+              <p class="label">Task record</p>
+            </div>
+
+            <div class="record">
+              <div>
+                <span>Remaining</span>
+                <ul id="dashboardRemaining">
+                  <li>No task loaded</li>
+                </ul>
+              </div>
+              <div>
+                <span>Decisions</span>
+                <ul id="dashboardDecisions">
+                  <li>None recorded</li>
+                </ul>
+              </div>
+              <div>
+                <span>Blockers</span>
+                <ul id="dashboardBlockers">
+                  <li>None recorded</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="drawer-head drawer-head-sub">
+              <p class="label">Session</p>
+            </div>
+
+            <div class="drawer-ops">
+              <button data-command="init">Initialize</button>
+              <button data-command="status">Status</button>
+              <button data-command="doctor">Doctor</button>
+              <button data-command="handoff">Handoff</button>
+            </div>
+
+            <div class="drawer-checkpoint">
+              <input
+                id="checkpoint"
+                aria-label="Checkpoint label"
+                placeholder="Checkpoint label"
+              />
+              <button data-command="checkpoint" class="primary">
+                Save checkpoint
               </button>
             </div>
-            <div class="terminal-actions">
-              <button id="openShell">Shell</button>
-              <button id="hiddenTerminals" hidden>Hidden (0)</button>
-              <button id="showTerminal" hidden>Show terminal</button>
-              <button id="stop" disabled>Stop</button
-              ><button id="clear">Clear</button>
-            </div>
-          </div>
-          <pre id="output" tabindex="0">
-Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
-          <div id="terminalsContainer"></div>
-        </section>
-      </section>
-    </main>
+          </aside>
+        </main>
+      </div>
+    </div>
 
     <div
       id="onboardingModal"
@@ -350,7 +479,7 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
         </p>
         <div class="profile-actions">
           <button id="closeTabHide">Keep running and hide</button>
-          <button id="closeTabInterrupt" class="danger">Send interrupt</button>
+          <button id="closeTabInterrupt" class="danger">Stop session</button>
           <button id="closeTabCancel">Cancel</button>
         </div>
       </div>
@@ -580,6 +709,148 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
         <div class="profile-actions">
           <button id="profileReset">Reset to Auto</button>
           <button id="profileSave" class="primary">Save profile</button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="threadsModal"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="threadsModalTitle"
+      hidden
+    >
+      <div class="modal-panel threads-panel">
+        <div class="modal-head">
+          <div>
+            <p class="label">Task coordination</p>
+            <h2 id="threadsModalTitle">Threads</h2>
+          </div>
+          <button id="threadsClose" aria-label="Close threads">Close</button>
+        </div>
+        <div class="threads-layout">
+          <aside class="threads-sidebar">
+            <div class="threads-sidebar-actions">
+              <button id="threadsNewBtn" class="primary small">
+                New message
+              </button>
+              <label class="threads-filter-label" for="threadsFilter"
+                >Filter threads</label
+              >
+              <input
+                id="threadsFilter"
+                class="threads-filter-input"
+                placeholder="Agent, message, or thread ID"
+              />
+            </div>
+            <section class="attention-center" aria-labelledby="attentionTitle">
+              <p id="attentionTitle" class="label">Attention center</p>
+              <ul id="attentionList" class="attention-list">
+                <li>No items need attention.</li>
+              </ul>
+            </section>
+            <ol
+              id="threadsList"
+              class="threads-list"
+              aria-label="Coordination threads"
+            ></ol>
+          </aside>
+          <section class="threads-main">
+            <div id="threadEmptyState" class="thread-empty-state">
+              <p>Select a thread or compose a new coordination message.</p>
+            </div>
+            <div
+              id="threadMessagesContainer"
+              class="thread-messages-container"
+              hidden
+            >
+              <div id="threadHeader" class="thread-header"></div>
+              <div
+                id="threadMessagesList"
+                class="thread-messages-list"
+                aria-live="polite"
+              ></div>
+              <form id="threadReplyForm" class="thread-reply-form">
+                <label class="field-label" for="threadReplyBody">Reply</label>
+                <textarea
+                  id="threadReplyBody"
+                  placeholder="Type a reply…"
+                  rows="2"
+                  required
+                ></textarea>
+                <div class="thread-composer-actions">
+                  <label class="check">
+                    <input id="threadReplyRedact" type="checkbox" checked />
+                    Redact secrets
+                  </label>
+                  <button type="submit" class="primary">Send reply</button>
+                </div>
+              </form>
+            </div>
+            <div
+              id="threadComposerContainer"
+              class="thread-composer-container"
+              hidden
+            >
+              <h3>New message</h3>
+              <form id="threadNewForm" class="thread-new-form">
+                <div class="composer-fields">
+                  <label>
+                    <span>To</span>
+                    <select id="composerTo" required></select>
+                  </label>
+                  <label>
+                    <span>Intent</span>
+                    <select id="composerIntent">
+                      <option value="request">
+                        Request (ask for work or review)
+                      </option>
+                      <option value="inform">
+                        Inform (provide status or context)
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Delivery</span>
+                    <select id="composerDelivery">
+                      <option value="inbox">
+                        Inbox (pull-based, standard)
+                      </option>
+                    </select>
+                    <small id="composerDeliveryHint"
+                      >Available modes follow the selected agent's advertised
+                      capabilities.</small
+                    >
+                  </label>
+                </div>
+                <label class="composer-body-label">
+                  <span>Message body</span>
+                  <textarea
+                    id="composerBody"
+                    placeholder="Describe what the agent should do or check…"
+                    rows="4"
+                    required
+                  ></textarea>
+                </label>
+                <div class="composer-attachments">
+                  <label class="check">
+                    <input id="composerRedact" type="checkbox" checked />
+                    Auto-redact secrets
+                  </label>
+                  <span
+                    id="composerTokenEstimate"
+                    class="composer-token-estimate"
+                    >~0 tokens</span
+                  >
+                </div>
+                <div class="composer-actions">
+                  <button type="button" id="composerCancel">Cancel</button>
+                  <button type="submit" class="primary">Send message</button>
+                </div>
+              </form>
+            </div>
+          </section>
         </div>
       </div>
     </div>

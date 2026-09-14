@@ -5,6 +5,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import net from 'node:net';
 import { hostname, uptime } from 'node:os';
 import {
+  DAEMON_MAX_IO_BYTES,
   DAEMON_PROTOCOL_VERSION,
   DaemonFrameDecoder,
   encodeDaemonFrame,
@@ -39,6 +40,12 @@ function recoverableConnectionError(error) {
   return ['ENOENT', 'ECONNREFUSED'].includes(error?.code);
 }
 
+function controlRejected(error) {
+  return ['not_controller', 'control_busy', 'not_running'].includes(
+    error?.code ?? error?.daemonCode,
+  );
+}
+
 function currentBootId(now = Date.now()) {
   return `${hostname()}:${Math.round((now - uptime() * 1000) / 60_000)}`;
 }
@@ -70,9 +77,11 @@ export class TerminalDaemonClient extends EventEmitter {
     this.daemonId = null;
     this.daemonPid = null;
     this.daemonBootId = null;
+    this.controlledTerminals = new Set();
   }
 
   async connectOrStart() {
+    if (this.options?.locateOnly) return this.connect();
     if (this.starting) return this.starting;
     const starting = this.openOrStart();
     this.starting = starting;
@@ -88,6 +97,11 @@ export class TerminalDaemonClient extends EventEmitter {
       await this.connect();
       return;
     } catch (error) {
+      if (
+        error?.code === 'protocol_mismatch' ||
+        error?.daemonCode === 'protocol_mismatch'
+      )
+        throw error;
       if (!recoverableConnectionError(error)) throw error;
       await this.spawnDaemon();
     }
@@ -158,6 +172,18 @@ export class TerminalDaemonClient extends EventEmitter {
     const descriptor = JSON.parse(
       await readFile(this.options.descriptorPath, 'utf8'),
     );
+    if (
+      descriptor &&
+      typeof descriptor.protocolVersion === 'number' &&
+      descriptor.protocolVersion !== DAEMON_PROTOCOL_VERSION
+    ) {
+      throw Object.assign(
+        new Error(
+          `Terminal daemon protocol version mismatch (found v${descriptor.protocolVersion}, expected v${DAEMON_PROTOCOL_VERSION}). Please restart the old daemon.`,
+        ),
+        { code: 'protocol_mismatch', daemonCode: 'protocol_mismatch' },
+      );
+    }
     if (!validDescriptor(descriptor, this.options.socketPath))
       throw new Error('Invalid terminal daemon descriptor.');
     const queuedFrames = [];
@@ -254,6 +280,7 @@ export class TerminalDaemonClient extends EventEmitter {
       pending.reject(new Error('Terminal daemon disconnected.'));
     }
     this.pending.clear();
+    this.controlledTerminals.clear();
     if (wasConnected) this.emit('disconnected');
   }
 
@@ -300,8 +327,17 @@ export class TerminalDaemonClient extends EventEmitter {
             nextCursor: frame.nextCursor,
           });
       }
-      if (frame.event === 'forgotten' && typeof frame.terminalId === 'string')
+      if (frame.event === 'forgotten' && typeof frame.terminalId === 'string') {
         this.inventory.delete(frame.terminalId);
+        this.controlledTerminals.delete(frame.terminalId);
+      }
+      if (frame.event === 'exit' && typeof frame.terminal?.id === 'string')
+        this.controlledTerminals.delete(frame.terminal.id);
+      if (
+        frame.event === 'control_revoked' &&
+        typeof frame.terminalId === 'string'
+      )
+        this.controlledTerminals.delete(frame.terminalId);
       this.emit(frame.event, frame);
     }
   }
@@ -321,6 +357,7 @@ export class TerminalDaemonClient extends EventEmitter {
     }
     if (op === 'forget') {
       this.inventory.delete(requestBody.terminalId);
+      this.controlledTerminals.delete(requestBody.terminalId);
       return;
     }
     const terminal = responseBody?.terminal ?? responseBody;
@@ -408,17 +445,57 @@ export class TerminalDaemonClient extends EventEmitter {
   attach(terminalId, cursor = 0) {
     return this.request('attach', { terminalId, cursor });
   }
-  detach(terminalId) {
-    return this.request('detach', { terminalId });
+  async detach(terminalId) {
+    const result = await this.request('detach', { terminalId });
+    this.controlledTerminals.delete(terminalId);
+    return result;
   }
-  write(terminalId, data) {
-    return this.request('write', {
+  async acquireControl(terminalId, { takeover = false } = {}) {
+    const result = await this.request('acquire_control', {
       terminalId,
-      data: Buffer.from(data).toString('base64'),
+      takeover,
     });
+    this.controlledTerminals.add(terminalId);
+    return result;
   }
-  resize(terminalId, size) {
-    return this.request('resize', { terminalId, ...size });
+  async releaseControl(terminalId) {
+    const result = await this.request('release_control', { terminalId });
+    this.controlledTerminals.delete(terminalId);
+    return result;
+  }
+  hasControl(terminalId) {
+    return this.controlledTerminals.has(terminalId);
+  }
+  async write(terminalId, data) {
+    const buffer = Buffer.from(data);
+    if (buffer.length === 0) return { ok: true };
+    let result = { ok: true };
+    try {
+      for (
+        let offset = 0;
+        offset < buffer.length;
+        offset += DAEMON_MAX_IO_BYTES
+      ) {
+        result = await this.request('write', {
+          terminalId,
+          data: buffer
+            .subarray(offset, offset + DAEMON_MAX_IO_BYTES)
+            .toString('base64'),
+        });
+      }
+    } catch (error) {
+      if (controlRejected(error)) this.controlledTerminals.delete(terminalId);
+      throw error;
+    }
+    return result;
+  }
+  async resize(terminalId, size) {
+    try {
+      return await this.request('resize', { terminalId, ...size });
+    } catch (error) {
+      if (controlRejected(error)) this.controlledTerminals.delete(terminalId);
+      throw error;
+    }
   }
   setWaiting(terminalId, attentionKind = 'input') {
     return this.request('set_waiting', {
@@ -435,10 +512,19 @@ export class TerminalDaemonClient extends EventEmitter {
   stop(terminalId) {
     return this.request('stop', { terminalId });
   }
+  stopAll() {
+    return this.request('stop_all');
+  }
   setHidden(terminalId, hidden) {
     return this.request('set_hidden', { terminalId, hidden });
   }
   forget(terminalId) {
     return this.request('forget', { terminalId });
+  }
+  notifyThreads(details) {
+    return this.request('notify_threads', details);
+  }
+  watchThreads(projectRoot, enabled = true) {
+    return this.request('watch_threads', { projectRoot, enabled });
   }
 }

@@ -281,6 +281,10 @@ describe('terminal daemon', () => {
       Math.max(second.endCursor, reattached.oldestCursor),
     );
     await expect(
+      restartedMainClient.write(terminal.id, 'x'),
+    ).rejects.toMatchObject({ code: 'not_controller' });
+    await restartedMainClient.acquireControl(terminal.id);
+    await expect(
       restartedMainClient.setWaiting(terminal.id),
     ).resolves.toMatchObject({ status: 'waiting' });
     await expect(restartedMainClient.write(terminal.id, 'x')).resolves.toEqual({
@@ -354,6 +358,7 @@ describe('terminal daemon', () => {
     );
 
     await client.attach(terminal.id, 0);
+    await client.acquireControl(terminal.id);
     await client.write(terminal.id, 'y');
     const resumed = await waitFor(
       () => client.inspect(terminal.id),
@@ -406,6 +411,7 @@ describe('terminal daemon', () => {
         attentionKind: 'permission',
       });
       await client.attach(terminal.id, 0);
+      await client.acquireControl(terminal.id);
       await client.setWaiting(terminal.id, 'input');
       await client.write(terminal.id, 'navigation-key');
       await new Promise((resolve) => globalThis.setTimeout(resolve, 50));
@@ -469,6 +475,124 @@ describe('terminal daemon', () => {
 
     client.disconnect();
     await daemon.close({ stopActive: true });
+  });
+
+  test('stops every active terminal and retries final state synchronization', async () => {
+    const finalSyncAttempts = new Map<string, number>();
+    const { daemon, descriptorPath, root, socketPath } = await startDaemon(
+      () => [
+        process.execPath,
+        '-e',
+        `process.stdin.resume(); setInterval(() => {}, 1000)`,
+      ],
+      {
+        stopTerminateMs: 50,
+        stopKillMs: 100,
+        updateProviderStatus: async (
+          _project: string,
+          terminalId: string,
+          observation: Record<string, unknown>,
+        ) => {
+          if (observation.status !== 'cancelled') return;
+          const attempts = (finalSyncAttempts.get(terminalId) ?? 0) + 1;
+          finalSyncAttempts.set(terminalId, attempts);
+          if (attempts === 1) throw new Error('temporary state lock');
+        },
+      },
+    );
+    const client = new TerminalDaemonClient({ descriptorPath, socketPath });
+    await client.connect();
+    const first = await client.start({
+      kind: 'agent',
+      agent: 'codex',
+      project: root,
+      workspaceId: 'workspace-1',
+    });
+    const second = await client.start({
+      kind: 'agent',
+      agent: 'claude',
+      project: root,
+      workspaceId: 'workspace-2',
+    });
+
+    await expect(client.stopAll()).resolves.toMatchObject({
+      count: 2,
+      terminals: [
+        { id: first.id, status: 'stopping' },
+        { id: second.id, status: 'stopping' },
+      ],
+    });
+    for (const terminalId of [first.id, second.id]) {
+      const terminal = await waitFor(
+        () => client.inspect(terminalId),
+        (item) => item.status === 'cancelled' && !item.cleanupPending,
+      );
+      expect(terminal.cleanupPending).toBe(false);
+      expect(finalSyncAttempts.get(terminalId)).toBe(2);
+    }
+    await expect(client.stopAll()).resolves.toMatchObject({ count: 0 });
+
+    client.disconnect();
+    await daemon.close({ stopActive: false });
+  });
+
+  test('stops provider descendants while leaving the controller alive to finalize', async () => {
+    const provider = [
+      `process.on('SIGTERM', () => process.exit(0));`,
+      `setInterval(() => {}, 1000);`,
+    ].join('');
+    const controller = [
+      `const { spawn } = require('node:child_process');`,
+      `const child = spawn(process.execPath, ['-e', ${JSON.stringify(provider)}], { stdio: 'ignore' });`,
+      `process.on('SIGUSR2', () => console.log('STOP_INTENT'));`,
+      `console.log('CHILD_PID=' + child.pid);`,
+      `child.on('close', () => { console.log('FINALIZED'); process.exit(0); });`,
+      `setInterval(() => {}, 1000);`,
+    ].join('');
+    const { daemon, descriptorPath, root, socketPath } = await startDaemon(
+      () => [process.execPath, '-e', controller],
+      {
+        nodePath: process.execPath,
+        stopTerminateMs: 500,
+        stopKillMs: 1000,
+      },
+    );
+    const client = new TerminalDaemonClient({ descriptorPath, socketPath });
+    await client.connect();
+    const terminal = await client.start({
+      kind: 'agent',
+      agent: 'codex',
+      project: root,
+      workspaceId: 'default',
+    });
+    const ready = await waitFor(
+      () => client.attach(terminal.id, 0),
+      (item) =>
+        Buffer.from(item.data, 'base64')
+          .toString('utf8')
+          .includes('CHILD_PID='),
+    );
+    const childPid = Number.parseInt(
+      Buffer.from(ready.data, 'base64')
+        .toString('utf8')
+        .match(/CHILD_PID=(\d+)/)?.[1] ?? '0',
+      10,
+    );
+    expect(processAlive(childPid)).toBe(true);
+
+    await client.stop(terminal.id);
+    await waitFor(
+      () => client.inspect(terminal.id),
+      (item) => item.status === 'cancelled',
+    );
+    const replay = await client.attach(terminal.id, 0);
+    const output = Buffer.from(replay.data, 'base64').toString('utf8');
+    expect(output).toContain('STOP_INTENT');
+    expect(output).toContain('FINALIZED');
+    expect(processAlive(childPid)).toBe(false);
+
+    client.disconnect();
+    await daemon.close({ stopActive: false });
   });
 
   test('awaits bounded process-tree shutdown before daemon close returns', async () => {
@@ -704,7 +828,7 @@ describe('terminal daemon', () => {
       descriptorPath,
       JSON.stringify({
         schemaVersion: 1,
-        protocolVersion: 1,
+        protocolVersion: 2,
         daemonId,
         pid: process.pid,
         socketPath,

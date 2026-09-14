@@ -2,6 +2,8 @@ import { PassThrough } from 'node:stream';
 import type { AgentCatalogEntry } from '../../src/agents/registry.js';
 import { createApp } from '../../src/tui/app.js';
 import type { DashboardData } from '../../src/tui/state.js';
+import { buildThreadsData } from '../../src/tui/threads.js';
+import type { ThreadsJournal } from '../../src/messages/schema.js';
 import * as ink from 'ink';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
@@ -72,9 +74,107 @@ const dashboard: DashboardData = {
       detail: 'Provider usage could not be read safely.',
     },
   },
+  threads: {
+    status: 'ready',
+    writable: true,
+    projectRoot: '/work/rirei',
+    sessionId: 'session-1',
+    actor: { kind: 'operator' },
+    actorRef: 'operator',
+    peers: [],
+    summaries: [],
+    messages: [],
+    unreadCount: 0,
+    revision: 0,
+  },
 };
 
-function renderDashboard() {
+function dashboardWithThreads(): DashboardData {
+  const firstThread = '11111111-1111-4111-8111-111111111111';
+  const journal: ThreadsJournal = {
+    schemaVersion: 1,
+    sessionId: 'session-1',
+    revision: 3,
+    nextSequence: 4,
+    recentOperations: [],
+    messages: [
+      {
+        id: firstThread,
+        sequence: 1,
+        threadId: firstThread,
+        from: { kind: 'operator' },
+        to: { kind: 'run', runId: 'worker-1' },
+        intent: 'request',
+        body: 'Please verify the terminal workflow.',
+        contextCards: [],
+        deliveryMode: 'inbox',
+        createdAt: '2026-08-30T12:00:00.000Z',
+        delivery: {
+          state: 'delivered',
+          attemptCount: 1,
+          deliveredAt: '2026-08-30T12:00:01.000Z',
+        },
+        redactions: [],
+      },
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        sequence: 2,
+        threadId: firstThread,
+        replyToId: firstThread,
+        from: { kind: 'run', runId: 'worker-1' },
+        to: { kind: 'operator' },
+        intent: 'inform',
+        body: 'Verification completed without errors.',
+        contextCards: [],
+        deliveryMode: 'inbox',
+        createdAt: '2026-08-30T12:01:00.000Z',
+        delivery: {
+          state: 'delivered',
+          attemptCount: 1,
+          deliveredAt: '2026-08-30T12:01:01.000Z',
+        },
+        redactions: [],
+      },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        sequence: 3,
+        threadId: '33333333-3333-4333-8333-333333333333',
+        from: { kind: 'operator' },
+        to: { kind: 'run', runId: 'worker-1' },
+        intent: 'inform',
+        body: 'Alpha follow-up is queued.',
+        contextCards: [],
+        deliveryMode: 'inbox',
+        createdAt: '2026-08-30T12:02:00.000Z',
+        delivery: { state: 'queued', attemptCount: 0 },
+        redactions: [],
+      },
+    ],
+  };
+  return {
+    ...dashboard,
+    threads: buildThreadsData({
+      journal,
+      actor: { kind: 'operator' },
+      peerRuns: [{ runId: 'worker-1', agent: 'claude' }],
+      projectRoot: '/work/rirei',
+    }),
+  };
+}
+
+function renderDashboard(
+  data: DashboardData = dashboard,
+  columns = 80,
+  rows = 24,
+  terminals: Array<{
+    id: string;
+    provider: string;
+    project: string;
+    workspaceId: string;
+    branchLabel: string;
+    status: string;
+  }> = [],
+) {
   const stdin = new PassThrough() as PassThrough & {
     isTTY: boolean;
     isRaw: boolean;
@@ -96,24 +196,37 @@ function renderDashboard() {
     rows: number;
     isTTY: boolean;
   };
-  stdout.columns = 80;
-  stdout.rows = 24;
+  stdout.columns = columns;
+  stdout.rows = rows;
   stdout.isTTY = false;
   const frames: string[] = [];
   stdout.on('data', (chunk) => frames.push(stripAnsi(chunk.toString())));
 
   const onLaunchAgent = vi.fn(async () => undefined);
+  const onStop = vi.fn(async () => undefined);
+  const onStopAll = vi.fn(async () => undefined);
+  const onSendMessage = vi.fn(async () => data.threads);
+  const onReplyMessage = vi.fn(async () => data.threads);
+  const onMarkMessageRead = vi.fn(async () => data.threads);
+  const onAcknowledgeMessage = vi.fn(async () => data.threads);
   const App = createApp(ink, React);
   const instance = ink.render(
     React.createElement(App, {
-      initialData: dashboard,
+      initialData: data,
       agentCatalog: catalog,
-      terminals: [],
+      terminals,
       daemonConnected: true,
       onLaunchAgent,
       onLaunchShell: async () => undefined,
       onAttach: () => undefined,
+      onStop,
+      onStopAll,
       onRefresh: async () => undefined,
+      onRefreshThreads: async () => data.threads,
+      onSendMessage,
+      onReplyMessage,
+      onMarkMessageRead,
+      onAcknowledgeMessage,
       onQuit: () => undefined,
     }),
     {
@@ -135,7 +248,18 @@ function renderDashboard() {
     frames.findLast((frame) => frame.includes(marker)) ?? '';
   const latestFrame = () => frames.at(-1) ?? '';
 
-  return { frameContaining, latestFrame, onLaunchAgent, send };
+  return {
+    frameContaining,
+    latestFrame,
+    onAcknowledgeMessage,
+    onLaunchAgent,
+    onMarkMessageRead,
+    onReplyMessage,
+    onSendMessage,
+    onStop,
+    onStopAll,
+    send,
+  };
 }
 
 describe('TUI rendered interactions', () => {
@@ -216,5 +340,139 @@ describe('TUI rendered interactions', () => {
         Math.max(...frame.split('\n').map((line) => [...line].length)),
       ).toBeLessThanOrEqual(80);
     });
+  });
+
+  test('shows inbox attention, filters threads, and renders detail receipts', async () => {
+    const app = renderDashboard(dashboardWithThreads());
+
+    await vi.waitFor(() =>
+      expect(app.latestFrame()).toContain('1 UNREAD / M INBOX'),
+    );
+    await app.send('m');
+    await vi.waitFor(() => {
+      expect(app.latestFrame()).toContain('RELAY THREADS');
+      expect(app.latestFrame()).toContain('operator <-> run:worker-1');
+    });
+    await app.send('/');
+    await app.send('completed');
+    await app.send('\r');
+    await vi.waitFor(() => {
+      expect(app.latestFrame()).toContain('Verification completed');
+      expect(app.latestFrame()).not.toContain('Alpha follow-up');
+    });
+    await app.send('\r');
+    await vi.waitFor(() => {
+      expect(app.latestFrame()).toContain(
+        'Verification completed without errors.',
+      );
+      expect(app.latestFrame()).toContain(
+        'RECEIPT DELIVERED 2026-08-30T12:01:01.000Z',
+      );
+    });
+    await app.send('m');
+    await vi.waitFor(() =>
+      expect(app.onMarkMessageRead).toHaveBeenCalledWith(
+        '22222222-2222-4222-8222-222222222222',
+      ),
+    );
+    await app.send('a');
+    await vi.waitFor(() =>
+      expect(app.onAcknowledgeMessage).toHaveBeenCalledWith(
+        '22222222-2222-4222-8222-222222222222',
+      ),
+    );
+  });
+
+  test('composes inbox-only messages and replies with canonical refs', async () => {
+    const app = renderDashboard(dashboardWithThreads());
+
+    await app.send('m');
+    await app.send('n');
+    await vi.waitFor(() => {
+      const frame = app.latestFrame();
+      expect(frame).toContain('NEW MESSAGE');
+      expect(frame).toContain('run:worker-1');
+      expect(frame).toContain('INBOX ONLY');
+      expect(frame).not.toContain('next_safe_turn');
+      expect(frame).not.toContain('wake');
+    });
+    await app.send('\t');
+    await app.send('\t');
+    await app.send('Please inspect the latest changes.');
+    await app.send('\r');
+    await vi.waitFor(() =>
+      expect(app.onSendMessage).toHaveBeenCalledWith({
+        to: 'run:worker-1',
+        intent: 'request',
+        body: 'Please inspect the latest changes.',
+        deliveryMode: 'inbox',
+      }),
+    );
+
+    await app.send('\r');
+    await app.send('r');
+    await app.send('\t');
+    await app.send('Reply from the operator.');
+    await app.send('\r');
+    await vi.waitFor(() =>
+      expect(app.onReplyMessage).toHaveBeenCalledWith({
+        parentMessageId: '33333333-3333-4333-8333-333333333333',
+        intent: 'inform',
+        body: 'Reply from the operator.',
+        deliveryMode: 'inbox',
+      }),
+    );
+  });
+
+  test('keeps the thread list bounded in a narrow terminal', async () => {
+    const app = renderDashboard(dashboardWithThreads(), 52, 16);
+    await app.send('m');
+
+    await vi.waitFor(() => {
+      const frame = app.latestFrame();
+      expect(frame.split('\n')).toHaveLength(16);
+      expect(
+        Math.max(...frame.split('\n').map((line) => [...line].length)),
+      ).toBeLessThanOrEqual(52);
+    });
+  });
+
+  test('confirms selected and all-session stop actions', async () => {
+    const terminals = [
+      {
+        id: 'terminal-1',
+        provider: 'codex',
+        project: '/work/rirei',
+        workspaceId: 'main',
+        branchLabel: 'main',
+        status: 'running',
+      },
+      {
+        id: 'terminal-2',
+        provider: 'claude',
+        project: '/work/rirei',
+        workspaceId: 'workspace-2',
+        branchLabel: 'feature/two',
+        status: 'waiting',
+      },
+    ];
+    const app = renderDashboard(dashboard, 80, 24, terminals);
+
+    await app.send('x');
+    await vi.waitFor(() =>
+      expect(app.latestFrame()).toContain('STOP SESSION?'),
+    );
+    await app.send('y');
+    await vi.waitFor(() =>
+      expect(app.onStop).toHaveBeenCalledWith('terminal-1'),
+    );
+
+    await app.send('X');
+    await vi.waitFor(() =>
+      expect(app.latestFrame()).toContain('STOP ALL SESSIONS?'),
+    );
+    expect(app.latestFrame()).toContain('Stop 2 active sessions');
+    await app.send('\r');
+    await vi.waitFor(() => expect(app.onStopAll).toHaveBeenCalledOnce());
   });
 });

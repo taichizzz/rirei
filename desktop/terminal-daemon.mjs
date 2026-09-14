@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runTerminalDaemon } from './terminal-daemon-server.mjs';
+import { DaemonBridgeWorker } from './daemon-bridge-worker.mjs';
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -14,6 +15,8 @@ const cliPath = option('--cli');
 const nodePath = option('--node');
 if (![socketPath, descriptorPath, bridgePath, cliPath, nodePath].every(Boolean))
   throw new Error('Terminal daemon paths are required.');
+
+const bridgeWorker = new DaemonBridgeWorker({ nodePath, cliPath });
 
 const daemon = await runTerminalDaemon({
   socketPath,
@@ -60,86 +63,10 @@ const daemon = await runTerminalDaemon({
     ];
   },
   async registerBridge(project, terminalId, bridge) {
-    const { spawn } = await import('node:child_process');
-    const args = [
-      cliPath,
-      'bridge',
-      '--terminal-id',
-      terminalId,
-      '--instance-id',
-      bridge.instanceId,
-      '--pid',
-      String(bridge.pid),
-      '--protocol-version',
-      String(bridge.protocolVersion),
-    ];
-    await new Promise((resolve, reject) => {
-      const child = spawn(nodePath, args, {
-        cwd: project,
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      let settled = false;
-      const finish = (error) => {
-        if (settled) return;
-        settled = true;
-        globalThis.clearTimeout(timer);
-        if (error) reject(error);
-        else resolve();
-      };
-      const timer = globalThis.setTimeout(() => {
-        child.kill('SIGKILL');
-        finish(new Error('Bridge registration timed out.'));
-      }, 5_000);
-      child.once('error', () =>
-        finish(new Error('Bridge registration could not start.')),
-      );
-      child.once('close', (code) =>
-        finish(code === 0 ? null : new Error('Bridge registration failed.')),
-      );
-    });
+    return bridgeWorker.registerBridge(project, terminalId, bridge);
   },
   async updateProviderStatus(project, terminalId, observation) {
-    const { spawn } = await import('node:child_process');
-    const args = [
-      cliPath,
-      'bridge',
-      '--terminal-id',
-      terminalId,
-      '--status',
-      observation.status,
-      '--lifecycle-state',
-      observation.lifecycleState,
-      '--active-runtime-seconds',
-      String(observation.activeRuntimeSeconds),
-      '--runtime-sequence',
-      String(observation.runtimeSequence),
-      '--daemon-id',
-      observation.daemon.instanceId,
-      '--daemon-pid',
-      String(observation.daemon.pid),
-      '--daemon-boot-id',
-      observation.daemon.bootId,
-      ...(observation.attentionKind
-        ? ['--attention-kind', observation.attentionKind]
-        : []),
-    ];
-    await new Promise((resolve) => {
-      const child = spawn(nodePath, args, {
-        cwd: project,
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      const timer = globalThis.setTimeout(() => child.kill('SIGKILL'), 5_000);
-      child.once('close', () => {
-        globalThis.clearTimeout(timer);
-        resolve();
-      });
-      child.once('error', () => {
-        globalThis.clearTimeout(timer);
-        resolve();
-      });
-    });
+    return bridgeWorker.updateProviderStatus(project, terminalId, observation);
   },
   async readProviderResult(project, terminalId) {
     const { spawn } = await import('node:child_process');
@@ -175,7 +102,10 @@ const daemon = await runTerminalDaemon({
 });
 
 const shutdown = () =>
-  void daemon.close({ stopActive: true }).then(() => process.exit(0));
+  void daemon.close({ stopActive: true }).then(() => {
+    bridgeWorker.stop();
+    process.exit(0);
+  });
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 

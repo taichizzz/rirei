@@ -25,6 +25,9 @@ import {
   publicDaemonError,
   validCursor,
   validSize,
+  validStartRequest,
+  validThreadNotification,
+  validThreadWatch,
   validTerminalId,
 } from './terminal-daemon-protocol.mjs';
 import {
@@ -51,6 +54,7 @@ const ATTENTION_MARKERS = new Map([
 ]);
 const MAX_TERMINALS = 4;
 const OUTPUT_RING_BYTES = 2 * 1024 * 1024;
+const OUTPUT_CHUNK_BYTES = DAEMON_MAX_IO_BYTES;
 const AUTH_TIMEOUT_MS = 2_000;
 const BRIDGE_REGISTRATION_TIMEOUT_MS = 60_000;
 
@@ -82,10 +86,6 @@ function writeStream(stream, data) {
       reject(error);
     }
   });
-}
-
-function safeString(value, max = 255) {
-  return typeof value === 'string' && value.length > 0 && value.length <= max;
 }
 
 function currentBootId(now = Date.now()) {
@@ -136,28 +136,83 @@ function publicTerminal(terminal) {
     error: terminal.exit?.error ?? null,
     providerResult: terminal.exit?.providerResult,
     bridgeStatus: terminal.exit?.bridgeStatus,
+    cleanupPending: terminal.stateSyncPending,
   };
 }
 
-function appendOutput(terminal, chunk) {
-  const data = Buffer.from(chunk);
-  terminal.output = Buffer.concat([terminal.output, data]);
+function appendOutput(terminal, data) {
+  if (!data || data.length === 0) return;
+  const outputStart = terminal.nextCursor;
   terminal.nextCursor += data.length;
-  if (terminal.output.length > OUTPUT_RING_BYTES) {
-    const remove = terminal.output.length - OUTPUT_RING_BYTES;
-    terminal.output = terminal.output.subarray(remove);
-    terminal.oldestCursor += remove;
+
+  if (data.length >= OUTPUT_RING_BYTES) {
+    const retained = Buffer.allocUnsafe(OUTPUT_RING_BYTES);
+    data.copy(retained, 0, data.length - OUTPUT_RING_BYTES);
+    terminal.outputChunks = [
+      {
+        cursor: terminal.nextCursor - OUTPUT_RING_BYTES,
+        data: retained,
+        start: 0,
+        end: retained.length,
+      },
+    ];
+    terminal.outputBytes = retained.length;
+    terminal.oldestCursor = terminal.nextCursor - retained.length;
+    terminal.lastActivityAt = new Date().toISOString();
+    return;
+  }
+
+  let sourceOffset = 0;
+  while (sourceOffset < data.length) {
+    let chunk = terminal.outputChunks.at(-1);
+    if (!chunk || chunk.end === chunk.data.length) {
+      chunk = {
+        cursor: outputStart + sourceOffset,
+        data: Buffer.allocUnsafe(OUTPUT_CHUNK_BYTES),
+        start: 0,
+        end: 0,
+      };
+      terminal.outputChunks.push(chunk);
+    }
+    const copied = Math.min(
+      chunk.data.length - chunk.end,
+      data.length - sourceOffset,
+    );
+    data.copy(chunk.data, chunk.end, sourceOffset, sourceOffset + copied);
+    chunk.end += copied;
+    sourceOffset += copied;
+  }
+  terminal.outputBytes += data.length;
+
+  while (
+    terminal.outputBytes > OUTPUT_RING_BYTES &&
+    terminal.outputChunks.length > 0
+  ) {
+    const excess = terminal.outputBytes - OUTPUT_RING_BYTES;
+    const first = terminal.outputChunks[0];
+    const firstLength = first.end - first.start;
+    if (firstLength <= excess) {
+      terminal.outputBytes -= firstLength;
+      terminal.oldestCursor = first.cursor + firstLength;
+      terminal.outputChunks.shift();
+    } else {
+      first.start += excess;
+      first.cursor += excess;
+      terminal.outputBytes -= excess;
+      terminal.oldestCursor = first.cursor;
+      break;
+    }
   }
   terminal.lastActivityAt = new Date().toISOString();
 }
 
-function outputAttentionKind(terminal, chunk) {
+function outputAttentionKind(terminal, buffer) {
   if (terminal.structuredLifecycle) return null;
-  const bell = Buffer.from(chunk).includes(0x07);
+  const bell = buffer.includes(0x07);
   const markers = ATTENTION_MARKERS.get(terminal.provider);
   if (!markers) return bell ? 'input' : null;
   /* eslint-disable no-control-regex -- Terminal controls must be stripped before marker matching. */
-  const text = Buffer.from(chunk)
+  const text = buffer
     .toString('utf8')
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
@@ -189,16 +244,42 @@ function outputSlice(terminal, cursor) {
       daemonCode: 'cursor_ahead',
     });
   const startCursor = Math.max(cursor, terminal.oldestCursor);
-  const offset = startCursor - terminal.oldestCursor;
-  const data = terminal.output.subarray(offset, offset + DAEMON_MAX_IO_BYTES);
+  const targetEnd = Math.min(
+    terminal.nextCursor,
+    startCursor + DAEMON_MAX_IO_BYTES,
+  );
+  const result = Buffer.allocUnsafe(targetEnd - startCursor);
+  let collected = 0;
+  for (const chunk of terminal.outputChunks) {
+    const chunkLength = chunk.end - chunk.start;
+    const chunkEnd = chunk.cursor + chunkLength;
+    if (chunkEnd <= startCursor) continue;
+    if (chunk.cursor >= targetEnd) break;
+    const offset = Math.max(0, startCursor - chunk.cursor);
+    const take = Math.min(
+      chunkLength - offset,
+      targetEnd - (chunk.cursor + offset),
+    );
+    if (take > 0) {
+      chunk.data.copy(
+        result,
+        collected,
+        chunk.start + offset,
+        chunk.start + offset + take,
+      );
+      collected += take;
+    }
+  }
+  const sliceBuffer =
+    collected === result.length ? result : result.subarray(0, collected);
   return {
     requestedCursor: cursor,
     oldestCursor: terminal.oldestCursor,
     startCursor,
-    endCursor: startCursor + data.length,
+    endCursor: startCursor + sliceBuffer.length,
     nextCursor: terminal.nextCursor,
     truncated: cursor < terminal.oldestCursor,
-    data: data.toString('base64'),
+    data: sliceBuffer.toString('base64'),
     terminal: publicTerminal(terminal),
   };
 }
@@ -289,36 +370,113 @@ export async function runTerminalDaemon(options) {
   let closing = false;
   await prepareSocket(options.socketPath);
 
-  const publish = (event) => {
+  const publish = (event, audience = () => true) => {
     const frame = encodeDaemonFrame({ type: 'event', ...event });
     for (const connection of connections)
-      if (connection.authenticated && !safeWrite(connection.socket, frame))
+      if (
+        connection.authenticated &&
+        audience(connection) &&
+        !safeWrite(connection.socket, frame)
+      )
         connection.socket.destroy();
   };
 
-  const syncTerminal = (terminal) => {
+  const PRIORITY_ORDER = {
+    final: 3,
+    transition: 2,
+    heartbeat: 1,
+  };
+
+  const terminalSyncQueues = new Map();
+
+  const processNextSync = async (terminal, queue) => {
+    if (queue.running || !queue.pending) return;
+    queue.running = true;
+    const task = queue.pending;
+    queue.pending = null;
+    let succeeded = false;
+
+    try {
+      const snapshot = publicTerminal(terminal);
+      await options.updateProviderStatus(terminal.project, terminal.id, {
+        status: snapshot.status,
+        lifecycleState: snapshot.lifecycleState,
+        attentionKind: snapshot.attentionKind,
+        activeRuntimeSeconds: snapshot.activeRuntimeSeconds,
+        runtimeSequence: snapshot.runtimeSequence,
+        daemon: {
+          instanceId: daemonId,
+          pid: process.pid,
+          bootId: daemonBootId,
+        },
+        exitCode: snapshot.exitCode,
+        providerResult: snapshot.providerResult,
+      });
+      task.resolve();
+      succeeded = true;
+    } catch (err) {
+      task.reject(err);
+    } finally {
+      queue.running = false;
+      if (
+        succeeded &&
+        task.priority === 'final' &&
+        queue.pending?.priority === 'heartbeat'
+      ) {
+        queue.pending.resolve();
+        queue.pending = null;
+      }
+      if (queue.pending) {
+        void processNextSync(terminal, queue);
+      } else if (terminal.finalized) {
+        terminalSyncQueues.delete(terminal.id);
+      }
+    }
+  };
+
+  const syncTerminal = (terminal, priority = 'transition') => {
     if (terminal.kind !== 'agent' || !options.updateProviderStatus)
       return Promise.resolve();
-    const snapshot = publicTerminal(terminal);
-    return options.updateProviderStatus(terminal.project, terminal.id, {
-      status: snapshot.status,
-      lifecycleState: snapshot.lifecycleState,
-      attentionKind: snapshot.attentionKind,
-      activeRuntimeSeconds: snapshot.activeRuntimeSeconds,
-      runtimeSequence: snapshot.runtimeSequence,
-      daemon: {
-        instanceId: daemonId,
-        pid: process.pid,
-        bootId: daemonBootId,
-      },
+
+    let queue = terminalSyncQueues.get(terminal.id);
+    if (!queue) {
+      queue = {
+        running: false,
+        pending: null,
+      };
+      terminalSyncQueues.set(terminal.id, queue);
+    }
+
+    const weight = PRIORITY_ORDER[priority] ?? 1;
+    if (queue.pending) {
+      if (weight > queue.pending.weight) {
+        queue.pending.priority = priority;
+        queue.pending.weight = weight;
+      }
+      return queue.pending.promise;
+    }
+
+    const pending = {
+      priority,
+      weight,
+      promise: null,
+      resolve: null,
+      reject: null,
+    };
+    pending.promise = new Promise((resolve, reject) => {
+      pending.resolve = resolve;
+      pending.reject = reject;
     });
+    queue.pending = pending;
+    void processNextSync(terminal, queue);
+    return pending.promise;
   };
 
   const transitionTerminal = (
     terminal,
     status,
     attentionKind = null,
-    { publishEvent = true } = {},
+    { publishEvent = true, syncState = true } = {},
   ) => {
     const normalizedAttention =
       status === 'waiting' && ATTENTION_KINDS.has(attentionKind)
@@ -344,7 +502,8 @@ export async function runTerminalDaemon(options) {
     terminal.lastActivityAt = new Date().toISOString();
     if (publishEvent)
       publish({ event: 'status', terminal: publicTerminal(terminal) });
-    void syncTerminal(terminal).catch(() => undefined);
+    if (syncState)
+      void syncTerminal(terminal, 'transition').catch(() => undefined);
     return true;
   };
 
@@ -386,7 +545,10 @@ export async function runTerminalDaemon(options) {
           ? 'cancelled'
           : 'failed'
       : bridgeStatus;
-    transitionTerminal(terminal, finalStatus, null, { publishEvent: false });
+    transitionTerminal(terminal, finalStatus, null, {
+      publishEvent: false,
+      syncState: false,
+    });
     terminal.exit = {
       code,
       signal,
@@ -395,8 +557,29 @@ export async function runTerminalDaemon(options) {
       providerResult,
     };
     terminal.child = null;
+    if (terminal.controllerConnection) {
+      terminal.controllerConnection.controlledTerminals.delete(terminal.id);
+      terminal.controllerConnection = null;
+    }
+    terminal.stateSyncPending = terminal.kind === 'agent';
+    if (terminal.stateSyncPending) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await syncTerminal(terminal, 'final');
+          terminal.stateSyncPending = false;
+          if (terminal.bridgeError === 'state_sync_failed')
+            terminal.bridgeError = null;
+          break;
+        } catch {
+          if (attempt < 2)
+            await new Promise((resolve) =>
+              globalThis.setTimeout(resolve, 50 * (attempt + 1)),
+            );
+        }
+      }
+      if (terminal.stateSyncPending) terminal.bridgeError = 'state_sync_failed';
+    }
     publish({ event: 'exit', terminal: publicTerminal(terminal) });
-    await syncTerminal(terminal).catch(() => undefined);
   };
 
   const registerBridge = async (terminal) => {
@@ -411,7 +594,7 @@ export async function runTerminalDaemon(options) {
           terminal.id,
           terminal.bridge,
         );
-        await syncTerminal(terminal);
+        await syncTerminal(terminal, 'transition');
         return;
       } catch {
         await new Promise((resolve) =>
@@ -435,7 +618,7 @@ export async function runTerminalDaemon(options) {
       throw Object.assign(new Error('Terminal daemon is shutting down.'), {
         daemonCode: 'shutting_down',
       });
-    if (!body || !safeString(body.project, 4096))
+    if (!validStartRequest(body))
       throw Object.assign(new Error('Invalid project.'), {
         daemonCode: 'invalid_start',
       });
@@ -478,13 +661,16 @@ export async function runTerminalDaemon(options) {
       sequence: 0,
       cols: size.cols,
       rows: size.rows,
-      output: Buffer.alloc(0),
+      outputChunks: [],
+      outputBytes: 0,
       oldestCursor: 0,
       nextCursor: 0,
+      controllerConnection: null,
       bridge: null,
       bridgeError: null,
       bridgeRegistrationStarted: false,
       finalized: false,
+      stateSyncPending: false,
       exit: null,
       child: null,
       host: null,
@@ -548,7 +734,8 @@ export async function runTerminalDaemon(options) {
       terminals.set(id, terminal);
       startingClaims.delete(claimKey);
       publish({ event: 'created', terminal: publicTerminal(terminal) });
-      child.stdout.on('data', (data) => {
+      child.stdout.on('data', (chunk) => {
+        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         if (terminal.status === 'starting')
           transitionTerminal(terminal, 'running');
         appendOutput(terminal, data);
@@ -630,7 +817,8 @@ export async function runTerminalDaemon(options) {
     transitionTerminal(terminal, 'running');
     void registerBridge(terminal);
 
-    host.onData((data) => {
+    host.onData((chunk) => {
+      const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       if (terminal.status === 'starting')
         transitionTerminal(terminal, 'running');
       appendOutput(terminal, data);
@@ -708,6 +896,38 @@ export async function runTerminalDaemon(options) {
   const dispatch = async (connection, op, body = {}) => {
     if (op === 'list') return [...terminals.values()].map(publicTerminal);
     if (op === 'start') return start(body);
+    if (op === 'stop_all') {
+      const active = [...terminals.values()].filter((terminal) =>
+        ACTIVE.has(terminal.status),
+      );
+      return {
+        count: active.length,
+        terminals: active.map(stop),
+      };
+    }
+    if (op === 'watch_threads') {
+      if (!validThreadWatch(body))
+        throw Object.assign(new Error('Invalid Threads audience.'), {
+          daemonCode: 'invalid_threads_audience',
+        });
+      if (body.enabled) connection.threadProjects.add(body.projectRoot);
+      else connection.threadProjects.delete(body.projectRoot);
+      return { ok: true };
+    }
+    if (op === 'notify_threads') {
+      if (!validThreadNotification(body))
+        throw Object.assign(new Error('Invalid Threads notification.'), {
+          daemonCode: 'invalid_threads_notification',
+        });
+      publish(
+        {
+          event: 'threads_changed',
+          ...body,
+        },
+        (item) => item.threadProjects.has(body.projectRoot),
+      );
+      return { ok: true };
+    }
     const terminal = requireTerminal(body.terminalId);
     if (op === 'inspect') return publicTerminal(terminal);
     if (op === 'attach') {
@@ -716,14 +936,69 @@ export async function runTerminalDaemon(options) {
       return replay;
     }
     if (op === 'detach') {
+      if (terminal.controllerConnection === connection) {
+        terminal.controllerConnection = null;
+        connection.controlledTerminals.delete(terminal.id);
+      }
       connection.attachments.delete(terminal.id);
       return { ok: true };
+    }
+    if (op === 'acquire_control') {
+      if (terminal.finalized)
+        throw Object.assign(new Error('Terminal is no longer running.'), {
+          daemonCode: 'not_running',
+        });
+      const takeover = body.takeover === true;
+      if (
+        terminal.controllerConnection &&
+        terminal.controllerConnection !== connection
+      ) {
+        if (!takeover) {
+          throw Object.assign(
+            new Error('Terminal control is already held by another client.'),
+            {
+              daemonCode: 'control_busy',
+            },
+          );
+        }
+        const displaced = terminal.controllerConnection;
+        displaced.controlledTerminals.delete(terminal.id);
+        terminal.controllerConnection = connection;
+        connection.controlledTerminals.add(terminal.id);
+        safeWrite(
+          displaced.socket,
+          encodeDaemonFrame({
+            type: 'event',
+            event: 'control_revoked',
+            terminalId: terminal.id,
+            reason: 'takeover',
+          }),
+        );
+        return { ok: true, terminalId: terminal.id };
+      }
+      terminal.controllerConnection = connection;
+      connection.controlledTerminals.add(terminal.id);
+      return { ok: true, terminalId: terminal.id };
+    }
+    if (op === 'release_control') {
+      if (terminal.controllerConnection === connection) {
+        terminal.controllerConnection = null;
+        connection.controlledTerminals.delete(terminal.id);
+      }
+      return { ok: true, terminalId: terminal.id };
     }
     if (op === 'write') {
       if (!connection.attachments.has(terminal.id))
         throw Object.assign(new Error('Terminal is not attached.'), {
           daemonCode: 'not_attached',
         });
+      if (terminal.controllerConnection !== connection)
+        throw Object.assign(
+          new Error('Terminal control is required to write.'),
+          {
+            daemonCode: 'not_controller',
+          },
+        );
       if (
         typeof body.data !== 'string' ||
         body.data.length > Math.ceil(DAEMON_MAX_IO_BYTES / 3) * 4 ||
@@ -756,6 +1031,13 @@ export async function runTerminalDaemon(options) {
       return { ok: true };
     }
     if (op === 'resize') {
+      if (terminal.controllerConnection !== connection)
+        throw Object.assign(
+          new Error('Terminal control is required to resize.'),
+          {
+            daemonCode: 'not_controller',
+          },
+        );
       const size = validSize(body, {
         cols: terminal.cols,
         rows: terminal.rows,
@@ -846,8 +1128,21 @@ export async function runTerminalDaemon(options) {
             daemonCode: 'still_running',
           },
         );
+      if (terminal.controllerConnection) {
+        terminal.controllerConnection.controlledTerminals.delete(terminal.id);
+        terminal.controllerConnection = null;
+      }
       terminals.delete(terminal.id);
-      for (const item of connections) item.attachments.delete(terminal.id);
+      const syncQueue = terminalSyncQueues.get(terminal.id);
+      if (syncQueue) {
+        terminalSyncQueues.delete(terminal.id);
+        syncQueue.pending?.reject(new Error('Terminal was forgotten.'));
+        syncQueue.pending = null;
+      }
+      for (const item of connections) {
+        item.attachments.delete(terminal.id);
+        item.controlledTerminals.delete(terminal.id);
+      }
       publish({ event: 'forgotten', terminalId: terminal.id });
       return { ok: true };
     }
@@ -862,6 +1157,8 @@ export async function runTerminalDaemon(options) {
       authenticated: false,
       restrictedTerminalId: null,
       attachments: new Set(),
+      controlledTerminals: new Set(),
+      threadProjects: new Set(),
       decoder: new DaemonFrameDecoder(),
     };
     connections.add(connection);
@@ -919,14 +1216,19 @@ export async function runTerminalDaemon(options) {
                       'inspect',
                       'attach',
                       'detach',
+                      'acquire_control',
+                      'release_control',
                       'write',
                       'resize',
                       'set_waiting',
                       'set_lifecycle',
                       'interrupt',
                       'stop',
+                      'stop_all',
                       'set_hidden',
                       'forget',
+                      'watch_threads',
+                      'notify_threads',
                     ],
               }),
             )
@@ -984,6 +1286,13 @@ export async function runTerminalDaemon(options) {
     socket.on('close', () => {
       globalThis.clearTimeout(timer);
       connections.delete(connection);
+      for (const terminalId of connection.controlledTerminals) {
+        const terminal = terminals.get(terminalId);
+        if (terminal && terminal.controllerConnection === connection) {
+          terminal.controllerConnection = null;
+        }
+      }
+      connection.controlledTerminals.clear();
       connection.attachments.clear();
     });
     socket.on('error', () => undefined);
@@ -1015,8 +1324,20 @@ export async function runTerminalDaemon(options) {
 
   const heartbeatTimer = globalThis.setInterval(() => {
     for (const terminal of terminals.values())
-      if (ACTIVE.has(terminal.status))
-        void syncTerminal(terminal).catch(() => undefined);
+      if (ACTIVE.has(terminal.status)) {
+        void syncTerminal(terminal, 'heartbeat').catch(() => undefined);
+      } else if (terminal.stateSyncPending) {
+        void syncTerminal(terminal, 'heartbeat').then(
+          () => {
+            terminal.stateSyncPending = false;
+            if (terminal.bridgeError === 'state_sync_failed')
+              terminal.bridgeError = null;
+            terminal.sequence += 1;
+            publish({ event: 'status', terminal: publicTerminal(terminal) });
+          },
+          () => undefined,
+        );
+      }
   }, 5_000);
   heartbeatTimer.unref();
 
@@ -1032,6 +1353,11 @@ export async function runTerminalDaemon(options) {
         closePromise = (async () => {
           closing = true;
           globalThis.clearInterval(heartbeatTimer);
+          for (const syncQueue of terminalSyncQueues.values()) {
+            syncQueue.pending?.reject(new Error('Daemon is closing.'));
+            syncQueue.pending = null;
+          }
+          terminalSyncQueues.clear();
           await Promise.allSettled([...terminalStartups]);
           if (stopActive)
             for (const terminal of terminals.values())

@@ -7,13 +7,17 @@ import {
   markLeaseOrphaned,
   releaseLease,
 } from '../../src/state/leases.js';
-import type { RelayState, RunLease } from '../../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type RelayState,
+  type RunLease,
+} from '../../src/state/schema.js';
 
 const NOW = '2026-01-01T00:00:00.000Z';
 
 function state(): RelayState {
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -43,6 +47,7 @@ function state(): RelayState {
 function lease(overrides: Partial<RunLease> = {}): RunLease {
   return {
     runId: 'run-1',
+    displayLabel: 'Claude 1',
     worktreePath: '/repo',
     projectRoot: '/repo',
     agent: 'claude',

@@ -1,7 +1,11 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { relayPath } from '../../src/safety/path-policy.js';
-import { relayStateSchema, type RelayState } from '../../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  relayStateSchema,
+  type RelayState,
+} from '../../src/state/schema.js';
 import {
   archiveState,
   readArchivedStates,
@@ -16,7 +20,7 @@ const directories: string[] = [];
 function state(root: string): RelayState {
   const now = '2026-01-01T00:00:00.000Z';
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -134,7 +138,7 @@ describe('state store', () => {
 
     const parsed = await readState(root);
     expect(parsed).toMatchObject({
-      schemaVersion: 8,
+      schemaVersion: LATEST_STATE_SCHEMA,
       revision: 0,
       recentOperations: [],
       runs: [{ agent: 'claude', status: 'orphaned' }],
@@ -184,7 +188,11 @@ describe('state store', () => {
     );
 
     await expect(readArchivedStates(root)).resolves.toMatchObject([
-      { schemaVersion: 8, sessionId: 'legacy-session', notes: [] },
+      {
+        schemaVersion: LATEST_STATE_SCHEMA,
+        sessionId: 'legacy-session',
+        notes: [],
+      },
     ]);
   });
 

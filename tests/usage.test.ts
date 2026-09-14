@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { summarizeUsage } from '../src/usage.js';
-import type { RelayState } from '../src/state/schema.js';
+import { LATEST_STATE_SCHEMA, type RelayState } from '../src/state/schema.js';
 
 function baseState(overrides: Partial<RelayState> = {}): RelayState {
   const now = '2026-07-12T00:00:00.000Z';
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],

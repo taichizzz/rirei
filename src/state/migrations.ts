@@ -7,6 +7,7 @@ import {
   type ControllerIdentity,
   type RelayState,
 } from './schema.js';
+import { formatDefaultSessionLabel } from './run-labels.js';
 
 /** Derive a structured controller identity from a legacy `controllerId` string. */
 export function deriveControllerIdentity(
@@ -301,6 +302,60 @@ const migrations: Array<(state: RawState) => RawState> = [
           runtimeSequence: 0,
         };
       }),
+    };
+  },
+  // v8 -> v9: assign deterministic display labels to active leases and history
+  // records in launch order.
+  (state) => {
+    const history = Array.isArray(state.agentHistory) ? state.agentHistory : [];
+    const runs = Array.isArray(state.runs) ? state.runs : [];
+    const providerCounts = new Map<string, number>();
+
+    const nextHistory = history.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+        return entry;
+      const record = entry as Record<string, unknown>;
+      const agent = typeof record.agent === 'string' ? record.agent : 'agent';
+      const count = (providerCounts.get(agent) ?? 0) + 1;
+      providerCounts.set(agent, count);
+      const displayLabel =
+        typeof record.displayLabel === 'string' && record.displayLabel.trim()
+          ? record.displayLabel.trim()
+          : formatDefaultSessionLabel(agent, count);
+      return {
+        ...record,
+        displayLabel,
+      };
+    });
+
+    const nextRuns = runs.map((lease) => {
+      if (!lease || typeof lease !== 'object' || Array.isArray(lease))
+        return lease;
+      const record = lease as Record<string, unknown>;
+      const matchingHistory = nextHistory.find(
+        (entry) =>
+          typeof entry === 'object' &&
+          entry !== null &&
+          (entry as Record<string, unknown>).id === record.runId,
+      ) as Record<string, unknown> | undefined;
+      const agent = typeof record.agent === 'string' ? record.agent : 'agent';
+      let displayLabel = matchingHistory?.displayLabel;
+      if (typeof displayLabel !== 'string' || !displayLabel.trim()) {
+        const count = (providerCounts.get(agent) ?? 0) + 1;
+        providerCounts.set(agent, count);
+        displayLabel = formatDefaultSessionLabel(agent, count);
+      }
+      return {
+        ...record,
+        displayLabel,
+      };
+    });
+
+    return {
+      ...state,
+      schemaVersion: 9,
+      runs: nextRuns,
+      agentHistory: nextHistory,
     };
   },
 ];

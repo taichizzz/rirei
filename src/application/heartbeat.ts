@@ -1,7 +1,8 @@
 import { markLeaseOrphaned } from '../state/leases.js';
 import { appendEvent } from '../state/events.js';
 import type { RelayState, RunLease } from '../state/schema.js';
-import { updateState } from '../state/store.js';
+import { readState, updateState } from '../state/store.js';
+import { syncActivity } from '../state/activity.js';
 
 export interface HeartbeatOptions {
   /** How often a live owner refreshes its leases' `lastSeenAt`. */
@@ -25,16 +26,19 @@ export function touchControllerLeases(
   state: RelayState,
   controllerId: string,
 ): RelayState {
-  return {
-    ...state,
-    runs: state.runs.map((lease) =>
-      ownerMatches(lease, controllerId) &&
-      lease.status !== 'orphaned' &&
-      lease.status !== 'stopping'
-        ? { ...lease, lastSeenAt: now() }
-        : lease,
-    ),
-  };
+  let changed = false;
+  const lastSeenAt = now();
+  const runs = state.runs.map((lease) => {
+    if (
+      !ownerMatches(lease, controllerId) ||
+      lease.status === 'orphaned' ||
+      lease.status === 'stopping'
+    )
+      return lease;
+    changed = true;
+    return { ...lease, lastSeenAt };
+  });
+  return changed ? { ...state, runs } : state;
 }
 
 /**
@@ -58,7 +62,7 @@ export class ControllerHeartbeat {
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => {
-      void this.beat().catch(() => undefined);
+      void this.tick().catch(() => undefined);
     }, this.intervalMs);
     this.timer.unref();
   }
@@ -70,12 +74,43 @@ export class ControllerHeartbeat {
     }
   }
 
+  /**
+   * Periodic heartbeat handler: avoids state revisions when there are no active
+   * owned leases, publishes activity snapshot, and stops after daemon adoption.
+   */
+  async tick(): Promise<void> {
+    try {
+      const current = await readState(this.projectRoot);
+      const hasActiveOwned = current.runs.some(
+        (lease) =>
+          ownerMatches(lease, this.controllerId) &&
+          lease.status !== 'orphaned' &&
+          lease.status !== 'stopping',
+      );
+      const daemonAdopted = current.runs.some(
+        (lease) =>
+          lease.controller?.kind === 'daemon' ||
+          lease.controllerId?.startsWith('daemon:'),
+      );
+      if (daemonAdopted && !hasActiveOwned) {
+        this.stop();
+      }
+      if (!hasActiveOwned) {
+        await syncActivity(this.projectRoot, current).catch(() => undefined);
+        return;
+      }
+    } catch {
+      // If state cannot be read, fall through to beat
+    }
+    await this.beat(true);
+  }
+
   /** Stamp owned leases now. Staleness alone never proves another owner died. */
-  async beat(): Promise<void> {
+  async beat(skipUnchanged = false): Promise<void> {
     await updateState(
       this.projectRoot,
       (current) => touchControllerLeases(current, this.controllerId),
-      { opId: undefined },
+      { opId: undefined, skipUnchanged },
     );
   }
 
@@ -100,7 +135,7 @@ export class ControllerHeartbeat {
         }
         return next;
       },
-      { opId: undefined },
+      { opId: undefined, skipUnchanged: true },
     );
     for (const runId of orphanedRunIds)
       await appendEvent(this.projectRoot, 'agent_orphaned', {

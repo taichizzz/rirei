@@ -6,7 +6,10 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { relayPath } from '../../src/safety/path-policy.js';
 import { branchExists, inspectGitBaseline } from '../../src/git/repository.js';
-import type { RelayState } from '../../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type RelayState,
+} from '../../src/state/schema.js';
 import { writeState } from '../../src/state/store.js';
 import {
   createWorkspace,
@@ -26,7 +29,7 @@ async function initTask(root: string): Promise<void> {
   await mkdir(relayPath(root), { recursive: true });
   const now = '2026-01-01T00:00:00.000Z';
   const state: RelayState = {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],

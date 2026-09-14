@@ -1,6 +1,6 @@
 {
   "name": "@taichizzz/rirei",
-  "version": "0.1.0-alpha.4.1",
+  "version": "0.1.0-alpha.4.2",
   "private": true,
   "description": "Local orchestration and durable handoffs for officially installed coding-agent CLIs.",
   "license": "MIT",
@@ -33,6 +33,8 @@
     "desktop/provider-lifecycle-hook.cjs",
     "desktop/codex-lifecycle-wrapper.mjs",
     "desktop/opencode-lifecycle-wrapper.mjs",
+    "docs/cli-reference.md",
+    "docs/relay-threads.md",
     "LICENSE",
     "README.md",
     "THIRD_PARTY_NOTICES.md"
@@ -43,7 +45,7 @@
     "dev": "tsx src/index.ts",
     "tui": "node dist/index.cjs tui",
     "desktop:dev": "npm run build && electron desktop/main.mjs",
-    "desktop:build": "npm run build && electron-builder --mac --publish never",
+    "desktop:build": "npm run build && node scripts/build-desktop.mjs --mac --publish never",
     "lint": "eslint desktop src tests eslint.config.js",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
@@ -91,6 +93,7 @@
     "asar": true,
     "asarUnpack": [
       "desktop/terminal-daemon.mjs",
+      "desktop/daemon-bridge-worker.mjs",
       "desktop/terminal-daemon-server.mjs",
       "desktop/terminal-daemon-protocol.mjs",
       "desktop/terminal-control.mjs",
@@ -120,6 +123,10 @@
       {
         "from": "dist/index.cjs",
         "to": "cli/index.cjs"
+      },
+      {
+        "from": "node_modules/react",
+        "to": "cli/node_modules/react"
       },
       {
         "from": "LICENSE",

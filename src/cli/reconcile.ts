@@ -4,7 +4,7 @@ import { discoverRepository } from '../git/repository.js';
 
 export function reconcileCommand(): Command {
   return new Command('reconcile')
-    .description('Check durable run ownership without releasing worktrees')
+    .description('Reconcile durable run ownership with verified process state')
     .option('--json', 'print machine-readable reconciliation results')
     .option('--daemon-id <id>', 'complete daemon inventory owner')
     .option('--daemon-pid <pid>', 'complete daemon inventory process')

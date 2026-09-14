@@ -24,7 +24,7 @@ const timer = setTimeout(finish, 1500);
 socket.once('connect', () => {
   socket.write(
     `${JSON.stringify({
-      v: 1,
+      v: 2,
       type: 'lifecycle_hello',
       terminalId,
       token,
@@ -48,7 +48,7 @@ socket.on('data', (chunk) => {
       requestSent = true;
       socket.write(
         `${JSON.stringify({
-          v: 1,
+          v: 2,
           type: 'request',
           id: '1',
           op: 'set_lifecycle',

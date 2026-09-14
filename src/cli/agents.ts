@@ -9,7 +9,7 @@ export function agentsCommand(): Command {
       const agents = await agentCatalog();
       if (options.json) {
         process.stdout.write(
-          `${JSON.stringify({ schemaVersion: 2, agents }, null, 2)}\n`,
+          `${JSON.stringify({ schemaVersion: 3, agents }, null, 2)}\n`,
         );
         return;
       }

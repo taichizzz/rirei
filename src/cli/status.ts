@@ -109,7 +109,7 @@ export function statusCommand(): Command {
             : state.runs
                 .map(
                   (lease) =>
-                    `${lease.agent} (${lease.status}) in ${lease.workspaceId ?? 'main working tree'}`,
+                    `${lease.displayLabel} [${lease.agent}] (${lease.status}) in ${lease.workspaceId ?? 'main working tree'}`,
                 )
                 .join('; ')
         }`,

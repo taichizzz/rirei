@@ -10,6 +10,7 @@ describe('packaged desktop protocol', () => {
     });
     expect(packageJson.build.asarUnpack).toEqual([
       'desktop/terminal-daemon.mjs',
+      'desktop/daemon-bridge-worker.mjs',
       'desktop/terminal-daemon-server.mjs',
       'desktop/terminal-daemon-protocol.mjs',
       'desktop/terminal-control.mjs',

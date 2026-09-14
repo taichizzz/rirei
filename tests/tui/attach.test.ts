@@ -42,14 +42,26 @@ class MockDaemonClient extends EventEmitter {
   attachCalls = 0;
   activeFetches = 0;
   maxActiveFetches = 0;
+  acquired = 0;
+  released = 0;
+  resized = 0;
   failWrite = false;
   failFetch = false;
+  failInitialFetch = false;
+  failResize = false;
+  failAcquireCode: string | null = null;
+  terminalStatus = 'running';
+  terminalNextCursor: number | null = null;
   holdFetch: (() => void) | null = null;
 
   async attach(_terminalId: string, cursor = 0) {
     this.attachCalls += 1;
     this.activeFetches += 1;
     this.maxActiveFetches = Math.max(this.maxActiveFetches, this.activeFetches);
+    if (this.attachCalls === 1 && this.failInitialFetch) {
+      this.activeFetches -= 1;
+      throw new Error('initial fetch failed');
+    }
     if (this.attachCalls > 1 && this.holdFetch)
       await new Promise<void>((resolve) => {
         const held = this.holdFetch;
@@ -66,12 +78,27 @@ class MockDaemonClient extends EventEmitter {
       data: data.toString('base64'),
       startCursor: cursor,
       endCursor: cursor + data.length,
-      nextCursor: cursor + data.length,
+      nextCursor: this.terminalNextCursor ?? cursor + data.length,
+      terminal: { status: this.terminalStatus },
     };
   }
 
   async detach() {
     this.detached += 1;
+    return { ok: true };
+  }
+
+  async acquireControl() {
+    this.acquired += 1;
+    if (this.failAcquireCode)
+      throw Object.assign(new Error('acquire failed'), {
+        code: this.failAcquireCode,
+      });
+    return { ok: true };
+  }
+
+  async releaseControl() {
+    this.released += 1;
     return { ok: true };
   }
 
@@ -82,6 +109,8 @@ class MockDaemonClient extends EventEmitter {
   }
 
   async resize() {
+    this.resized += 1;
+    if (this.failResize) throw new Error('resize failed');
     return { ok: true };
   }
 
@@ -92,7 +121,11 @@ class MockDaemonClient extends EventEmitter {
 
 function fixture(
   client = new MockDaemonClient(),
-  options: { clearOnExit?: boolean } = {},
+  options: {
+    clearOnExit?: boolean;
+    readOnly?: boolean;
+    returnToDashboard?: boolean;
+  } = {},
 ) {
   const stdin = new FakeInput();
   const stdout = new FakeOutput();
@@ -123,10 +156,58 @@ describe('terminal passthrough attachment', () => {
     state.stdin.emit('data', Buffer.from([0x1d]));
     await state.attached;
     expect(state.client.detached).toBe(1);
+    expect(state.client.released).toBe(1);
     expect(state.stdin.rawModes).toEqual([true, false]);
     expect(state.stdin.paused).toBe(true);
     expect(state.stdin.listenerCount('data')).toBe(0);
     expect(state.stdout.listenerCount('resize')).toBe(0);
+  });
+
+  it('detaches with Ctrl+B then D without forwarding the reserved chord', async () => {
+    const state = fixture();
+    await ready(state.client);
+    state.stdin.emit('data', Buffer.from([0x02]));
+    state.stdin.emit('data', Buffer.from('d'));
+    await state.attached;
+    expect(state.client.writtenData).toEqual([]);
+    expect(state.client.detached).toBe(1);
+  });
+
+  it('reserves Ctrl+Q for the dashboard while forwarding plain q', async () => {
+    const state = fixture();
+    await ready(state.client);
+    state.stdin.emit('data', Buffer.from('q'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.client.writtenData).toEqual([Buffer.from('q')]);
+
+    state.stdin.emit('data', Buffer.from([0x11]));
+    await state.attached;
+    expect(state.client.detached).toBe(1);
+  });
+
+  it('handles UTF-8 string chunks left by Ink on the input stream', async () => {
+    const state = fixture();
+    await ready(state.client);
+    state.stdin.emit('data', 'type this');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.client.writtenData).toEqual([Buffer.from('type this')]);
+
+    state.stdin.emit('data', '\x11');
+    await state.attached;
+    expect(state.client.detached).toBe(1);
+  });
+
+  it('forwards Ctrl+B when the next key is not the detach command', async () => {
+    const state = fixture();
+    await ready(state.client);
+    state.stdin.emit('data', Buffer.from([0x02]));
+    state.stdin.emit('data', Buffer.from('x'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(Buffer.concat(state.client.writtenData)).toEqual(
+      Buffer.from([0x02, 0x78]),
+    );
+    state.stdin.emit('data', Buffer.from([0x1d]));
+    await state.attached;
   });
 
   it.each(['exit', 'disconnected', 'SIGINT', 'SIGTERM'])(
@@ -165,6 +246,110 @@ describe('terminal passthrough attachment', () => {
     });
     await fetchState.attached;
     expect(fetchClient.detached).toBe(1);
+  });
+
+  it('attempts detach cleanup when the initial attach response fails', async () => {
+    const client = new MockDaemonClient();
+    client.failInitialFetch = true;
+    const state = fixture(client);
+
+    await expect(state.attached).rejects.toThrow('initial fetch failed');
+    expect(client.detached).toBe(1);
+  });
+
+  it('keeps read-only viewers from acquiring, resizing, or writing', async () => {
+    const state = fixture(new MockDaemonClient(), { readOnly: true });
+    await ready(state.client);
+    state.stdin.emit('data', Buffer.from('ignored'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    state.stdin.emit('data', Buffer.from([0x11]));
+    await state.attached;
+
+    expect(state.client.acquired).toBe(0);
+    expect(state.client.resized).toBe(0);
+    expect(state.client.writtenData).toEqual([]);
+  });
+
+  it('drains a session that finalizes before control can be acquired', async () => {
+    const client = new MockDaemonClient();
+    client.failAcquireCode = 'not_running';
+    client.terminalNextCursor = 8;
+    const state = fixture(client);
+
+    await state.attached;
+
+    expect(client.attachCalls).toBe(3);
+    expect(client.acquired).toBe(1);
+    expect(client.resized).toBe(0);
+    expect(client.detached).toBe(1);
+    expect(state.stdin.rawModes).toEqual([]);
+  });
+
+  it('replays an already-final session without acquiring control', async () => {
+    const client = new MockDaemonClient();
+    client.terminalStatus = 'completed';
+    client.terminalNextCursor = 8;
+    const state = fixture(client);
+
+    await state.attached;
+
+    expect(client.attachCalls).toBe(3);
+    expect(client.acquired).toBe(0);
+    expect(client.resized).toBe(0);
+    expect(client.detached).toBe(1);
+    expect(state.stdin.rawModes).toEqual([]);
+  });
+
+  it('releases control and the viewer attachment when setup fails', async () => {
+    const client = new MockDaemonClient();
+    client.failResize = true;
+    const state = fixture(client);
+
+    await expect(state.attached).rejects.toThrow('resize failed');
+    expect(client.acquired).toBe(1);
+    expect(client.released).toBe(1);
+    expect(client.detached).toBe(1);
+    expect(state.stdin.listenerCount('data')).toBe(0);
+    expect(client.listenerCount('control_revoked')).toBe(0);
+  });
+
+  it('detaches immediately when another client takes control', async () => {
+    const state = fixture();
+    await ready(state.client);
+
+    state.client.emit('control_revoked', {
+      terminalId: 'terminal-id',
+      reason: 'takeover',
+    });
+    await state.attached;
+
+    expect(state.client.detached).toBe(1);
+    expect(state.client.listenerCount('control_revoked')).toBe(0);
+    expect(Buffer.concat(state.stdout.chunks).toString()).toContain(
+      'Terminal control was taken over',
+    );
+  });
+
+  it('drains queued output before completing on exit', async () => {
+    const state = fixture();
+    await ready(state.client);
+
+    state.client.emit('output_available', {
+      terminalId: 'terminal-id',
+      nextCursor: 8,
+    });
+    state.client.emit('exit', {
+      terminal: { id: 'terminal-id', nextCursor: 8 },
+    });
+    await state.attached;
+
+    expect(state.client.attachCalls).toBe(3);
+    expect(
+      state.stdout.chunks.some((chunk) => chunk.equals(Buffer.from('replay'))),
+    ).toBe(true);
+    expect(
+      state.stdout.chunks.filter((chunk) => chunk.equals(Buffer.from('x'))),
+    ).toHaveLength(2);
   });
 
   it('serializes output reads when availability events overlap', async () => {

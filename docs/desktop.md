@@ -13,10 +13,14 @@ The integrated terminal supports both managed agent sessions and ordinary login-
 Choose **Shell** after selecting a project to run commands such as `git status`, tests, editors,
 or any other interactive terminal program without initializing Relay first. The agent flow is:
 
-The window is a single translucent, terminal-first layout: a slim header (wordmark + project
-chooser), one control band (Task / Agents / Session groups), a compact task dashboard, and an
-integrated terminal that fills all remaining window height. See
-[Window material](#window-material) for how the translucency is built.
+The window uses the translucent **3a** layout: a 105px labelled icon rail on the left (Task,
+Agents, Notes, Threads, Usage, with Finish pinned to the bottom), a 57px top bar carrying the
+project name, its branch/dirtiness, and the task status pill, a command bar where the task is
+typed, a five-column metrics strip, and a full-width terminal. The launcher and task record
+live in a 290px **overlay drawer** that floats over the terminal rather than shrinking it; the
+**Relay** button in the top bar and the drawer's own ✕ toggle it, and the rail's Task, Agents,
+and Notes entries open it scrolled to their section. See [Window material](#window-material)
+for how the translucency is built.
 
 On first run, a skippable setup dialog validates the selected Git repository before saving it.
 It then checks the same executable path used by provider launches and reports each CLI's
@@ -24,15 +28,17 @@ installation state, conservative sign-in status, and usage-reporting support. A 
 verified sign-in failure is actionable; providers that do not expose machine-readable sign-in or
 quota status are labeled as unsupported or checked on launch rather than guessed.
 
-1. **Project** (top right) — choose your Git repository folder.
-2. **Initialize** (Session group) — runs `relay init` (creates `.relay/`). Required once per repo.
+1. **Project** (top bar, left) — click the project name to choose your Git repository folder.
+2. **Initialize** (drawer, Session group) — runs `relay init` (creates `.relay/`). Required once
+   per repo.
 3. **Describe a task** and click **Start task** — runs `relay start` (creates the active
    task). An agent cannot launch without an active task.
-4. **Run** (or **Switch**) next to Claude / Codex / Antigravity / OpenCode — launches the
+4. **Run** (or the **⌄** menu for Resume / Switch / Fork) next to Claude / Codex /
+   Antigravity / OpenCode in the drawer — launches the
    agent in the terminal. **Resume** opens Claude, Codex, or OpenCode's native session
    resume. The panel switches to the live terminal and **now accepts typing**.
 
-The **Usage** button (Session group) shows provider plan usage remaining when a
+The **Usage** entry in the icon rail shows provider plan usage remaining when a
 machine-readable source is available:
 
 - **Claude** — Claude Code passes documented `rate_limits` fields (5-hour and 7-day used
@@ -53,12 +59,12 @@ their reset time remain visible but are labeled `Stale`. Each window is evaluate
 and unchanged status-line payloads do not refresh the sample timestamp. Cards show the exact
 local capture and reset timestamps with seconds and timezone, alongside relative freshness.
 
-The **Task dashboard** reads `relay status --json` and shows the active task/status, current
-agent, branch and changed-file count, latest checkpoint/test, remaining work, decisions, and
-blockers. It refreshes after task commands, agent launch/exit, project selection, manual
+The **metrics strip** and the drawer's **Task record** read `relay status --json` and show the
+active task/status, current agent, branch and changed-file count, latest checkpoint/test,
+remaining work, decisions, and blockers. It refreshes after task commands, agent launch/exit, project selection, manual
 Refresh, and application startup for a remembered project.
 
-The dashboard's **History** action searches current and archived task metadata, including
+The top bar's **History** action searches current and archived task metadata, including
 providers, models, effort, outcomes, and checkpoint labels. It never records conversation or
 terminal transcripts. Known Claude/Codex provider session IDs can be resumed directly from a
 history result. The checkpoint metric opens a read-only list and saved patch viewer; the patch
@@ -72,7 +78,7 @@ closing Rirei stops polling and notifications.
 
 ### Agent session timeline
 
-The dashboard's **Sessions** button displays the number of agent launches recorded for the
+The top bar's **Sessions** button displays the number of agent launches recorded for the
 current task and opens a newest-first timeline. Each entry shows:
 
 - Provider name and relative launch time.
@@ -112,8 +118,10 @@ catalog failure still leaves provider-default and custom model launches availabl
 - Gemini: `--model`; no separate verified effort flag.
 
 If you click **Run** before steps 2–3, the panel shows the reason (e.g. "Start a Relay task
-before running an agent") in the command-output view instead of going live. **Stop** sends
-`Ctrl+C` to the session; **Clear** clears the terminal (or restores the how-to text when idle).
+before running an agent") in the command-output view instead of going live. **Stop Session**
+gracefully stops the selected provider and escalates to process-tree termination when needed.
+**Stop All** applies the same bounded escalation to every active terminal on the device. **Clear**
+clears the terminal (or restores the how-to text when idle).
 
 > **Packaged copies go stale.** The installed `/Applications/Rirei.app` bundles `desktop/`
 > into `Contents/Resources/app.asar` at build time — code changes do not reach it until it is
@@ -164,8 +172,9 @@ The daemon also owns provider lifecycle and active runtime. It advances runtime 
 session is starting or working, freezes it for permission/input waits, and publishes the
 normalized result through Relay state and the schema-v3 activity feed consumed by Rirei Notch.
 At reconnect it reconciles complete daemon inventory against both live terminal projects and
-recent hash-verified terminal journals. Missing terminals become orphaned but their worktrees
-remain claimed until explicit recovery.
+recent hash-verified terminal journals. Missing terminals are finalized automatically only when
+their recorded controller and bridge processes are conclusively gone; ambiguous ownership stays
+orphaned and keeps its worktree claimed.
 
 ## Why an integrated terminal (and not a `<div>`)
 
@@ -293,7 +302,8 @@ The renderer only sees `window.relay`, exposed over `contextBridge` with
 | `workspaceCreate(request)` | `relay:workspace-create`   | invoke (create workspace)               |
 | `terminalInput(id,data)`   | `relay:terminal-input`     | send (validated terminal → PTY stdin)   |
 | `resizeTerminal(id,size)`  | `relay:terminal-resize`    | send (validated terminal → PTY fd 3)    |
-| `stopTerminal(id)`         | `relay:terminal-stop`      | invoke (validated terminal Ctrl+C)      |
+| `stopTerminal(id)`         | `relay:terminal-stop`      | invoke (bounded stop escalation)        |
+| `stopAllTerminals()`       | `relay:terminal-stop-all`  | invoke (stop every active terminal)     |
 | `interruptTerminal(id)`    | `relay:terminal-interrupt` | invoke (validated terminal SIGINT)      |
 | `closeTerminal(id)`        | `relay:terminal-close`     | invoke (remove terminal from manager)   |
 | `hideTerminal(id)`         | `relay:terminal-hide`      | invoke (visually hide running agent)    |

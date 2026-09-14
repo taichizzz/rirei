@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('relay', {
     ipcRenderer.send('relay:terminal-resize', { terminalId, size }),
   stopTerminal: (terminalId) =>
     ipcRenderer.invoke('relay:terminal-stop', { terminalId }),
+  stopAllTerminals: () => ipcRenderer.invoke('relay:terminal-stop-all'),
   interruptTerminal: (terminalId) =>
     ipcRenderer.invoke('relay:terminal-interrupt', { terminalId }),
   closeTerminal: (terminalId) =>
@@ -56,6 +57,11 @@ contextBridge.exposeInMainWorld('relay', {
     ipcRenderer.on('relay:terminal-exit', listener);
     return () => ipcRenderer.removeListener('relay:terminal-exit', listener);
   },
+  onTerminalControl: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('relay:terminal-control', listener);
+    return () => ipcRenderer.removeListener('relay:terminal-control', listener);
+  },
   onUsageUpdate: (callback) => {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('relay:usage-update', listener);
@@ -66,5 +72,20 @@ contextBridge.exposeInMainWorld('relay', {
     ipcRenderer.on('relay:deep-link', listener);
     return () => ipcRenderer.removeListener('relay:deep-link', listener);
   },
+  onThreadsChanged: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('relay:threads-changed', listener);
+    return () => ipcRenderer.removeListener('relay:threads-changed', listener);
+  },
+  threads: (request) => ipcRenderer.invoke('relay:threads', request),
+  thread: (request) => ipcRenderer.invoke('relay:thread', request),
+  sendMessage: (request) => ipcRenderer.invoke('relay:send-message', request),
+  replyMessage: (request) => ipcRenderer.invoke('relay:reply-message', request),
+  markMessageRead: (request) =>
+    ipcRenderer.invoke('relay:mark-message-read', request),
+  acknowledgeMessage: (request) =>
+    ipcRenderer.invoke('relay:acknowledge-message', request),
+  renameSession: (request) =>
+    ipcRenderer.invoke('relay:rename-session', request),
   activity: (request) => ipcRenderer.invoke('relay:activity', request),
 });

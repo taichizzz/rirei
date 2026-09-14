@@ -1,4 +1,5 @@
 import { TerminalTabsModel } from './terminal-tabs-model.mjs';
+import { LatestRequestGate } from './latest-request.mjs';
 import {
   deriveProviderReadiness,
   effortsForModel,
@@ -31,6 +32,7 @@ const commandButtons = [...document.querySelectorAll('[data-command]')];
 const interactiveButtons = [...document.querySelectorAll('[data-interactive]')];
 const profileButtons = [...document.querySelectorAll('[data-profile-agent]')];
 const stopButton = document.querySelector('#stop');
+const stopAllButton = document.querySelector('#stopAll');
 const openShellButton = document.querySelector('#openShell');
 const showTerminalButton = document.querySelector('#showTerminal');
 const hiddenTerminalsButton = document.querySelector('#hiddenTerminals');
@@ -58,6 +60,46 @@ const historyClose = document.querySelector('#historyClose');
 const historySearch = document.querySelector('#historySearch');
 const historyStatus = document.querySelector('#historyStatus');
 const historyList = document.querySelector('#historyList');
+const threadsOpen = document.querySelector('#threadsOpen');
+const threadsBadge = document.querySelector('#threadsBadge');
+const threadsModal = document.querySelector('#threadsModal');
+const threadsClose = document.querySelector('#threadsClose');
+const threadsNewBtn = document.querySelector('#threadsNewBtn');
+const threadsFilter = document.querySelector('#threadsFilter');
+const threadsList = document.querySelector('#threadsList');
+const attentionList = document.querySelector('#attentionList');
+const threadEmptyState = document.querySelector('#threadEmptyState');
+const threadMessagesContainer = document.querySelector(
+  '#threadMessagesContainer',
+);
+const threadHeader = document.querySelector('#threadHeader');
+const threadMessagesList = document.querySelector('#threadMessagesList');
+const threadReplyForm = document.querySelector('#threadReplyForm');
+const threadReplyBody = document.querySelector('#threadReplyBody');
+const threadReplyRedact = document.querySelector('#threadReplyRedact');
+const threadComposerContainer = document.querySelector(
+  '#threadComposerContainer',
+);
+const threadNewForm = document.querySelector('#threadNewForm');
+const composerTo = document.querySelector('#composerTo');
+const composerIntent = document.querySelector('#composerIntent');
+const composerDelivery = document.querySelector('#composerDelivery');
+const composerDeliveryHint = document.querySelector('#composerDeliveryHint');
+const composerBody = document.querySelector('#composerBody');
+const composerRedact = document.querySelector('#composerRedact');
+const composerTokenEstimate = document.querySelector('#composerTokenEstimate');
+const composerCancel = document.querySelector('#composerCancel');
+let currentThreadId = null;
+let currentThreadReplyToId = null;
+let threadsFilterTimer = null;
+let authoritativeUnread = 0;
+let sendMessagePending = false;
+let replyMessagePending = false;
+let sendOperationId = null;
+let replyOperationId = null;
+let messageDeliveryCatalog = [];
+const threadsRequestGate = new LatestRequestGate();
+const threadRequestGate = new LatestRequestGate();
 const recoverRun = document.querySelector('#recoverRun');
 const resumeRecovered = document.querySelector('#resumeRecovered');
 const checkpointModal = document.querySelector('#checkpointModal');
@@ -82,6 +124,8 @@ const onboardingStatus = document.querySelector('#onboardingStatus');
 const onboardingProviders = document.querySelector('#onboardingProviders');
 const onboardingError = document.querySelector('#onboardingError');
 let agentHistory = [];
+let activitySessions = [];
+let threadTimeline = [];
 let checkpoints = [];
 let historyRequest = 0;
 let historySearchTimer = null;
@@ -156,7 +200,20 @@ function createXterm(id) {
     t.open(container);
 
     disposable = t.onData((data) => {
-      window.relay.terminalInput(id, data);
+      const tab = tabsModel.get(id);
+      if (tab?.metadata?.readOnly) return;
+      for (let offset = 0; offset < data.length;) {
+        let end = Math.min(data.length, offset + 16 * 1024);
+        const lastCodeUnit = data.charCodeAt(end - 1);
+        if (
+          end < data.length &&
+          lastCodeUnit >= 0xd800 &&
+          lastCodeUnit <= 0xdbff
+        )
+          end -= 1;
+        window.relay.terminalInput(id, data.slice(offset, end));
+        offset = end;
+      }
     });
     const bellDisposable = t.onBell(() => {
       window.relay.terminalAttention(id);
@@ -480,7 +537,8 @@ hiddenTerminalsButton.onclick = async () => {
 document.getElementById('closeTabInterrupt').onclick = async () => {
   const terminal = tabToClose ? tabsModel.get(tabToClose) : null;
   if (tabToClose) {
-    await window.relay.interruptTerminal(tabToClose);
+    const result = await window.relay.stopTerminal(tabToClose);
+    if (!result?.ok) show(result);
     tabToClose = null;
   }
   document.getElementById('closeTabModal').hidden = true;
@@ -736,9 +794,8 @@ function syncControls() {
   const active = tabsModel.getActive();
   stopButton.disabled =
     !active ||
-    !['starting', 'running', 'waiting', 'stopping'].includes(
-      active.metadata.status,
-    );
+    !['starting', 'running', 'waiting'].includes(active.metadata.status);
+  stopAllButton.disabled = counts.running === 0;
   if (locked) {
     recoverRun.hidden = true;
     resumeRecovered.hidden = true;
@@ -765,6 +822,16 @@ function renderDashboardList(element, items, empty, alert = false) {
   }
 }
 
+// The 3a top bar repeats branch and dirtiness beside the project name; the
+// metrics strip keeps the authoritative pair.
+const topbarGit = document.querySelector('#topbarGit');
+
+function setTopbarGit(branch, changes) {
+  if (!topbarGit) return;
+  topbarGit.textContent =
+    branch && changes ? `${branch} · ${changes.toLowerCase()}` : '—';
+}
+
 function renderDashboard(data) {
   dashboardTitle.textContent = data.task.title;
   dashboardStatus.textContent = data.task.status;
@@ -774,6 +841,7 @@ function renderDashboard(data) {
   dashboardChanges.textContent = data.git.dirty
     ? `${data.git.changedFiles} changed`
     : 'Clean';
+  setTopbarGit(data.git.currentBranch, dashboardChanges.textContent);
   dashboardCheckpoint.textContent = data.latestCheckpoint
     ? relTime(data.latestCheckpoint.createdAt)
     : 'None';
@@ -810,6 +878,7 @@ function renderDashboard(data) {
   agentHistory = Array.isArray(data.agentHistory) ? data.agentHistory : [];
   timelineCount.textContent = String(agentHistory.length);
   if (!timelineModal.hidden) renderTimeline(agentHistory);
+  renderAttentionCenter();
   syncControls();
 }
 
@@ -823,6 +892,7 @@ function renderDashboardUnavailable(message) {
   dashboardAgent.textContent = '—';
   dashboardBranch.textContent = '—';
   dashboardChanges.textContent = '—';
+  setTopbarGit(null, null);
   dashboardCheckpoint.textContent = '—';
   dashboardCheckpoint.disabled = true;
   checkpoints = [];
@@ -832,8 +902,10 @@ function renderDashboardUnavailable(message) {
   renderDashboardList(dashboardDecisions, [], 'No decisions recorded');
   renderDashboardList(dashboardBlockers, [], 'No blockers');
   agentHistory = [];
+  threadTimeline = [];
   timelineCount.textContent = '0';
   if (!timelineModal.hidden) renderTimeline(agentHistory);
+  renderAttentionCenter();
   syncControls();
 }
 
@@ -844,7 +916,15 @@ async function refreshDashboard() {
   }
   dashboard.classList.add('loading');
   try {
-    const result = await window.relay.dashboard({ project });
+    const [result, activity] = await Promise.all([
+      window.relay.dashboard({ project }),
+      window.relay.activity({ project }),
+    ]);
+    activitySessions = activity.ok
+      ? (activity.data?.sessions ?? []).filter(
+          (session) => session.needsAttention,
+        )
+      : [];
     if (result.ok) renderDashboard(result.data);
     else renderDashboardUnavailable('Initialize and start a task');
   } finally {
@@ -856,6 +936,7 @@ function syncSize() {
   const active = tabsModel.getActive();
   if (!active || !card.classList.contains('live')) return;
   active.fit.fit();
+  if (active.metadata?.readOnly) return;
   window.relay.resizeTerminal(active.id, {
     cols: active.terminal.cols,
     rows: active.terminal.rows,
@@ -972,6 +1053,13 @@ async function runOnboardingChecks() {
 
 async function activateProject(nextProject) {
   project = nextProject;
+  currentThreadId = null;
+  currentThreadReplyToId = null;
+  authoritativeUnread = 0;
+  messageDeliveryCatalog = [];
+  updateAuthoritativeUnread([]);
+  threadsRequestGate.invalidate();
+  threadRequestGate.invalidate();
   agentCatalogCache = null;
   localStorage.setItem('relay-project', project);
   window.relay.setActiveProject(project);
@@ -980,7 +1068,7 @@ async function activateProject(nextProject) {
   showOutput();
   output.textContent =
     'Project selected. Initialize or start a task to continue.';
-  await refreshDashboard();
+  await Promise.all([refreshDashboard(), loadThreads()]);
 }
 
 async function chooseProject({ onboarding = false } = {}) {
@@ -1158,7 +1246,22 @@ document.querySelector('#stop').addEventListener('click', async () => {
     show({ ok: false, output: 'No running terminal session selected.' });
     return;
   }
-  await window.relay.stopTerminal(active.id);
+  const result = await window.relay.stopTerminal(active.id);
+  if (!result?.ok) show(result);
+});
+stopAllButton.addEventListener('click', async () => {
+  const count = tabsModel.counts().running;
+  if (count === 0) return;
+  if (
+    !window.confirm(
+      `Stop all ${count} active terminal session${count === 1 ? '' : 's'} on this device?`,
+    )
+  )
+    return;
+  stopAllButton.disabled = true;
+  const result = await window.relay.stopAllTerminals();
+  if (!result?.ok) show(result);
+  syncControls();
 });
 showTerminalButton.addEventListener('click', () => {
   showTerminal();
@@ -1307,22 +1410,48 @@ function exitDetail(run) {
 
 function renderTimeline(runs) {
   timelineList.textContent = '';
+  const eventCount = runs.length + threadTimeline.length;
   timelineSummary.textContent =
-    runs.length === 0
-      ? 'No agent sessions recorded for this task.'
-      : `${runs.length} ${runs.length === 1 ? 'session' : 'sessions'} recorded · newest first`;
+    eventCount === 0
+      ? 'No sessions or coordination threads recorded for this task.'
+      : `${eventCount} timeline ${eventCount === 1 ? 'event' : 'events'} · newest first`;
 
   for (const run of [...runs].reverse()) {
     const tone = timelineTone(run);
     const orphaned = !run.endedAt && run.lifecycleStatus === 'orphaned';
     const item = el('li', `timeline-item ${tone}`);
+    item.dataset.at = run.endedAt || run.startedAt;
     const marker = el('span', 'timeline-marker');
     marker.setAttribute('aria-hidden', 'true');
     const card = el('article', 'timeline-card');
     const head = el('div', 'timeline-card-head');
     const identity = el('div', 'timeline-identity');
+    const sessionLabel = run.displayLabel || displayAgent(run.agent);
+    const labelStrong = el('strong', null, sessionLabel);
+    const renameBtn = el('button', 'link-button small', 'Rename');
+    renameBtn.title = 'Edit session label';
+    renameBtn.addEventListener('click', async () => {
+      const newLabel = window.prompt(
+        'Enter new session label:',
+        run.displayLabel || sessionLabel,
+      );
+      if (newLabel && newLabel.trim() && newLabel.trim() !== run.displayLabel) {
+        const res = await window.relay.renameSession({
+          project,
+          runId: `run:${run.id}`,
+          label: newLabel.trim(),
+        });
+        if (res.ok) {
+          await refreshDashboard();
+          openTimeline();
+        } else {
+          show(res);
+        }
+      }
+    });
     identity.append(
-      el('strong', null, displayAgent(run.agent)),
+      labelStrong,
+      renameBtn,
       el('span', 'timeline-relative', relTime(run.startedAt)),
     );
     const status = el(
@@ -1337,9 +1466,19 @@ function renderTimeline(runs) {
     head.append(identity, status);
 
     const profile = el('div', 'timeline-profile');
+    const delivery = messageDeliveryCatalog.find(
+      (entry) => entry.id === run.agent,
+    )?.capabilities?.messageDelivery;
+    const deliveryModes = [
+      'Inbox',
+      ...(delivery?.nextSafeTurn ? ['Safe turn'] : []),
+      ...(delivery?.wake ? ['Wake'] : []),
+    ].join(' + ');
     profile.append(
       el('span', null, `Model · ${run.model ?? 'Auto'}`),
       el('span', null, `Effort · ${run.effort ?? 'Auto'}`),
+      el('span', null, `Branch · ${run.branchLabel ?? 'main'}`),
+      el('span', null, `Delivery · ${deliveryModes}`),
     );
 
     const facts = el('dl', 'timeline-facts');
@@ -1376,15 +1515,52 @@ function renderTimeline(runs) {
     item.append(marker, card);
     timelineList.append(item);
   }
+  for (const summary of threadTimeline) {
+    const item = el('li', 'timeline-item message');
+    item.dataset.at = summary.updatedAt;
+    const marker = el('span', 'timeline-marker');
+    marker.setAttribute('aria-hidden', 'true');
+    const card = el('article', 'timeline-card');
+    const participants = (summary.participants || [])
+      .map((actor) =>
+        actor.kind === 'operator' ? 'Operator' : `run:${actor.runId}`,
+      )
+      .join(' ↔ ');
+    card.append(
+      el('strong', null, `Coordination thread ${summary.threadId.slice(0, 8)}`),
+      el(
+        'div',
+        'timeline-relative',
+        `${participants} · ${summary.messageCount} messages · ${summary.deliveryState} · ${relTime(summary.updatedAt)}`,
+      ),
+    );
+    item.append(marker, card);
+    timelineList.append(item);
+  }
+  for (const item of [...timelineList.children].sort(
+    (left, right) => Date.parse(right.dataset.at) - Date.parse(left.dataset.at),
+  ))
+    timelineList.append(item);
 }
 
-function openTimeline() {
+async function openTimeline() {
   renderTimeline(agentHistory);
   timelineModal.hidden = false;
+  timelineClose.focus();
+  try {
+    const requestedProject = project;
+    const catalog = await loadAgentCatalog();
+    if (project !== requestedProject || timelineModal.hidden) return;
+    messageDeliveryCatalog = catalog;
+    renderTimeline(agentHistory);
+  } catch {
+    // Durable session metadata remains available if capability discovery fails.
+  }
 }
 
 function closeTimeline() {
   timelineModal.hidden = true;
+  timelineOpen.focus();
 }
 
 timelineOpen.addEventListener('click', openTimeline);
@@ -1499,6 +1675,495 @@ historySearch.addEventListener('input', () => {
   if (historySearchTimer) clearTimeout(historySearchTimer);
   historySearchTimer = setTimeout(loadHistory, 160);
 });
+
+/* ---- coordination threads ---- */
+async function loadThreads() {
+  if (!project) return;
+  const requestedProject = project;
+  const filter = threadsFilter?.value.trim() || '';
+  const ticket = threadsRequestGate.issue(`${requestedProject}\0${filter}`);
+  const visibleRequest = window.relay.threads({
+    project: requestedProject,
+    ...(filter ? { filter } : {}),
+  });
+  const authoritativeRequest = filter
+    ? window.relay.threads({ project: requestedProject })
+    : visibleRequest;
+  const [visible, authoritative] = await Promise.all([
+    visibleRequest,
+    authoritativeRequest,
+  ]);
+  if (
+    !threadsRequestGate.accepts(
+      ticket,
+      `${project}\0${threadsFilter?.value.trim() || ''}`,
+    )
+  )
+    return;
+  if (authoritative.ok && Array.isArray(authoritative.data?.summaries)) {
+    threadTimeline = authoritative.data.summaries;
+    updateAuthoritativeUnread(authoritative.data.summaries);
+    if (!timelineModal.hidden) renderTimeline(agentHistory);
+  }
+  if (visible.ok && Array.isArray(visible.data?.summaries))
+    renderThreadsList(visible.data.summaries);
+}
+
+function updateAuthoritativeUnread(summaries) {
+  authoritativeUnread = summaries.reduce(
+    (total, summary) => total + (Number(summary.unreadCount) || 0),
+    0,
+  );
+  threadsBadge.textContent = String(authoritativeUnread);
+  threadsBadge.hidden = authoritativeUnread === 0;
+  threadsOpen.setAttribute(
+    'aria-label',
+    authoritativeUnread > 0
+      ? `Open coordination threads, ${authoritativeUnread} unread`
+      : 'Open coordination threads',
+  );
+  renderAttentionCenter();
+}
+
+function renderAttentionCenter() {
+  if (!attentionList) return;
+  attentionList.textContent = '';
+  if (authoritativeUnread > 0)
+    attentionList.append(
+      el(
+        'li',
+        'attention-item unread',
+        `${authoritativeUnread} unread coordination ${authoritativeUnread === 1 ? 'message' : 'messages'}`,
+      ),
+    );
+  for (const run of agentHistory.filter(
+    (entry) =>
+      !entry.endedAt &&
+      (['needs_permission', 'waiting_for_input'].includes(
+        entry.lifecycleStatus,
+      ) ||
+        ['permission', 'input'].includes(entry.attentionKind)),
+  )) {
+    const reason =
+      run.attentionKind === 'permission' ||
+      run.lifecycleStatus === 'needs_permission'
+        ? 'needs permission'
+        : 'is waiting for input';
+    attentionList.append(
+      el(
+        'li',
+        'attention-item session',
+        `${run.displayLabel || displayAgent(run.agent)} ${reason}`,
+      ),
+    );
+  }
+  const currentRunIds = new Set(agentHistory.map((run) => run.id));
+  for (const session of activitySessions.filter(
+    (entry) => !currentRunIds.has(entry.runId),
+  )) {
+    attentionList.append(
+      el(
+        'li',
+        'attention-item session',
+        `${session.projectLabel}: ${displayAgent(session.agent)} ${session.message || 'needs attention'}`,
+      ),
+    );
+  }
+  if (attentionList.children.length === 0)
+    attentionList.append(
+      el('li', 'attention-item quiet', 'No items need attention.'),
+    );
+}
+
+function renderThreadsList(summaries) {
+  if (!threadsList) return;
+  threadsList.textContent = '';
+
+  for (const s of summaries) {
+    const li = el('li', 'threads-list-item');
+    const button = el('button', 'threads-list-button');
+    button.type = 'button';
+    button.dataset.threadId = s.threadId;
+    button.setAttribute(
+      'aria-label',
+      `Open thread ${s.threadId}, ${s.unreadCount || 0} unread`,
+    );
+    if (currentThreadId === s.threadId) {
+      button.classList.add('selected');
+      button.setAttribute('aria-current', 'true');
+    }
+
+    const head = el('div', 'threads-list-item-head');
+    head.append(
+      el('span', 'threads-list-item-title', `thread:${s.threadId.slice(0, 8)}`),
+      s.unreadCount > 0
+        ? el('span', 'threads-list-item-unread', `${s.unreadCount} unread`)
+        : '',
+    );
+
+    const snippet = el(
+      'div',
+      'threads-list-item-snippet',
+      s.latestExcerpt || 'No messages',
+    );
+    button.append(head, snippet);
+    li.append(button);
+
+    button.addEventListener('click', () => openThread(s.threadId));
+    threadsList.append(li);
+  }
+}
+
+function receipt(label, timestamp, tone) {
+  const item = el(
+    'span',
+    `thread-receipt ${tone || ''}`,
+    `${label}${timestamp ? ` · ${relTime(timestamp)}` : ''}`,
+  );
+  if (timestamp) item.title = formatExactTimestamp(timestamp);
+  return item;
+}
+
+function renderMessageReceipts(message) {
+  const row = el('div', 'thread-message-receipts');
+  const delivery = message.delivery ?? {};
+  const deliveryReceipt = {
+    queued: ['Queued', message.createdAt, 'queued'],
+    delivered: ['Delivered', delivery.deliveredAt, 'delivered'],
+    acknowledged: ['Acknowledged', delivery.acknowledgedAt, 'acknowledged'],
+    expired: [
+      `Expired${delivery.expirationReason ? ` · ${delivery.expirationReason.replaceAll('_', ' ')}` : ''}`,
+      delivery.expiredAt,
+      'expired',
+    ],
+  }[delivery.state] ?? ['Unknown delivery', null, 'queued'];
+  row.append(receipt(...deliveryReceipt));
+  if (delivery.readAt) row.append(receipt('Read', delivery.readAt, 'read'));
+  if (delivery.acknowledgedAt && delivery.state !== 'acknowledged')
+    row.append(
+      receipt('Acknowledged', delivery.acknowledgedAt, 'acknowledged'),
+    );
+  row.append(receipt(message.deliveryMode || 'inbox', null, 'mode'));
+  return row;
+}
+
+function renderThreadMessages(threadId, messages) {
+  currentThreadReplyToId = messages.at(-1)?.id ?? null;
+  replyOperationId = window.crypto.randomUUID();
+  threadHeader.textContent = '';
+  threadHeader.append(
+    el('strong', null, `thread:${threadId}`),
+    document.createTextNode(` · ${messages.length} message(s)`),
+  );
+  threadMessagesList.textContent = '';
+  for (const msg of messages) {
+    const isOp = msg.from?.kind === 'operator';
+    const bubble = el(
+      'article',
+      `thread-message-bubble ${isOp ? 'from-operator' : ''}`,
+    );
+    const meta = el('div', 'thread-message-meta');
+    const sender = isOp ? 'Operator' : `run:${msg.from?.runId || 'unknown'}`;
+    meta.append(
+      el('span', null, `${sender} · ${msg.intent}`),
+      el('time', null, formatExactTimestamp(msg.createdAt)),
+    );
+    meta.lastElementChild.dateTime = msg.createdAt;
+
+    bubble.append(meta, el('div', 'thread-message-body', msg.body));
+
+    for (const card of Array.isArray(msg.contextCards)
+      ? msg.contextCards
+      : []) {
+      const cardEl = el('aside', 'thread-card-attachment');
+      cardEl.append(
+        el('strong', null, card.title),
+        el(
+          'span',
+          'thread-card-meta',
+          `${card.kind === 'checkpoint_summary' ? 'Checkpoint' : 'Note'} · ${formatExactTimestamp(card.capturedAt)}`,
+        ),
+        el('div', 'thread-card-body', card.text),
+      );
+      bubble.append(cardEl);
+    }
+
+    bubble.append(renderMessageReceipts(msg));
+    if (
+      msg.delivery?.state !== 'acknowledged' &&
+      msg.delivery?.state !== 'expired' &&
+      msg.to?.kind === 'operator'
+    ) {
+      const ackBtn = el('button', 'secondary small', 'Acknowledge');
+      ackBtn.type = 'button';
+      ackBtn.addEventListener('click', async () => {
+        ackBtn.disabled = true;
+        const result = await window.relay.acknowledgeMessage({
+          project,
+          messageId: msg.id,
+        });
+        if (!result.ok) show(result);
+        else await openThread(threadId);
+      });
+      bubble.append(ackBtn);
+    }
+
+    threadMessagesList.append(bubble);
+  }
+  threadMessagesList.scrollTop = threadMessagesList.scrollHeight;
+}
+
+async function openThread(threadId) {
+  if (!project || !threadId) return;
+  const requestedProject = project;
+  const ticket = threadRequestGate.issue(`${requestedProject}\0${threadId}`);
+  currentThreadId = threadId;
+  currentThreadReplyToId = null;
+  if (threadComposerContainer) threadComposerContainer.hidden = true;
+  if (threadEmptyState) threadEmptyState.hidden = true;
+  if (threadMessagesContainer) threadMessagesContainer.hidden = false;
+
+  for (const button of threadsList?.querySelectorAll('.threads-list-button') ??
+    []) {
+    const selected = button.dataset.threadId === threadId;
+    button.classList.toggle('selected', selected);
+    if (selected) button.setAttribute('aria-current', 'true');
+    else button.removeAttribute('aria-current');
+  }
+
+  threadHeader.textContent = 'Loading thread…';
+  const result = await window.relay.thread({
+    project: requestedProject,
+    threadId,
+  });
+  if (
+    !threadRequestGate.accepts(ticket, `${project}\0${currentThreadId}`) ||
+    threadsModal.hidden
+  )
+    return;
+  if (!result.ok || !result.data?.messages) {
+    if (threadHeader) threadHeader.textContent = 'Could not load thread.';
+    return;
+  }
+
+  let messages = result.data.messages;
+  const unread = messages.filter(
+    (msg) => msg.to?.kind === 'operator' && !msg.delivery?.readAt,
+  );
+  if (unread.length > 0) {
+    const marked = await Promise.all(
+      unread.map((msg) =>
+        window.relay.markMessageRead({
+          project: requestedProject,
+          messageId: msg.id,
+        }),
+      ),
+    );
+    if (!threadRequestGate.accepts(ticket, `${project}\0${currentThreadId}`))
+      return;
+    const replacements = new Map(
+      marked
+        .filter((entry) => entry.ok && entry.data?.message)
+        .map((entry) => [entry.data.message.id, entry.data.message]),
+    );
+    messages = messages.map((msg) => replacements.get(msg.id) ?? msg);
+  }
+  renderThreadMessages(threadId, messages);
+  if (unread.length > 0) await loadThreads();
+}
+
+function updateComposerDeliveryOptions() {
+  const agent = composerTo?.selectedOptions[0]?.dataset.agent;
+  const delivery = messageDeliveryCatalog.find((entry) => entry.id === agent)
+    ?.capabilities?.messageDelivery;
+  composerDelivery.textContent = '';
+  addOption(composerDelivery, 'inbox', 'Inbox (pull-based, standard)');
+  if (delivery?.nextSafeTurn)
+    addOption(
+      composerDelivery,
+      'next_safe_turn',
+      'Next safe turn (provider-supported)',
+    );
+  if (delivery?.wake)
+    addOption(composerDelivery, 'wake', 'Wake (provider-supported)');
+  const modes = [
+    'inbox',
+    ...(delivery?.nextSafeTurn ? ['next safe turn'] : []),
+    ...(delivery?.wake ? ['wake'] : []),
+  ];
+  composerDeliveryHint.textContent = agent
+    ? `This agent advertises ${modes.join(', ')} delivery.`
+    : 'Select an active agent to see its delivery capabilities.';
+}
+
+async function showNewMessageComposer() {
+  if (threadMessagesContainer) threadMessagesContainer.hidden = true;
+  if (threadEmptyState) threadEmptyState.hidden = true;
+  if (threadComposerContainer) threadComposerContainer.hidden = false;
+  if (composerBody) composerBody.value = '';
+  if (composerTokenEstimate) composerTokenEstimate.textContent = '~0 tokens';
+  sendOperationId = window.crypto.randomUUID();
+
+  if (composerTo) {
+    composerTo.textContent = '';
+    if (Array.isArray(agentHistory)) {
+      const activeRuns = agentHistory.filter(
+        (run) =>
+          !run.endedAt && typeof run.id === 'string' && run.id.length > 0,
+      );
+      for (const run of activeRuns) {
+        const opt = el(
+          'option',
+          null,
+          `${run.displayLabel || run.agent} (run:${run.id})`,
+        );
+        opt.value = `run:${run.id}`;
+        opt.dataset.agent = run.agent;
+        composerTo.append(opt);
+      }
+    }
+  }
+  updateComposerDeliveryOptions();
+  const requestedProject = project;
+  try {
+    const catalog = await loadAgentCatalog();
+    if (project !== requestedProject || threadComposerContainer.hidden) return;
+    messageDeliveryCatalog = catalog;
+    updateComposerDeliveryOptions();
+  } catch {
+    updateComposerDeliveryOptions();
+  }
+  composerBody?.focus();
+}
+
+function openThreads() {
+  if (!project)
+    return show({ ok: false, output: 'Choose a project folder first.' });
+  if (threadsModal) threadsModal.hidden = false;
+  threadsClose.focus();
+  void loadThreads();
+}
+
+function closeThreads() {
+  if (threadsModal) threadsModal.hidden = true;
+  currentThreadId = null;
+  currentThreadReplyToId = null;
+  threadsRequestGate.invalidate();
+  threadRequestGate.invalidate();
+  threadsOpen.focus();
+}
+
+if (threadsOpen) threadsOpen.addEventListener('click', openThreads);
+if (threadsClose) threadsClose.addEventListener('click', closeThreads);
+if (threadsModal) {
+  threadsModal.addEventListener('click', (event) => {
+    if (event.target === threadsModal) closeThreads();
+  });
+}
+if (threadsNewBtn)
+  threadsNewBtn.addEventListener('click', showNewMessageComposer);
+if (composerTo)
+  composerTo.addEventListener('change', updateComposerDeliveryOptions);
+if (composerCancel) {
+  composerCancel.addEventListener('click', () => {
+    if (threadComposerContainer) threadComposerContainer.hidden = true;
+    if (currentThreadId && threadMessagesContainer)
+      threadMessagesContainer.hidden = false;
+    else if (threadEmptyState) threadEmptyState.hidden = false;
+    threadsNewBtn.focus();
+  });
+}
+if (threadsFilter) {
+  threadsFilter.addEventListener('input', () => {
+    if (threadsFilterTimer) clearTimeout(threadsFilterTimer);
+    threadsFilterTimer = setTimeout(loadThreads, 160);
+  });
+}
+if (composerBody) {
+  composerBody.addEventListener('input', () => {
+    sendOperationId = window.crypto.randomUUID();
+    const tokens = Math.ceil(composerBody.value.length / 4);
+    if (composerTokenEstimate)
+      composerTokenEstimate.textContent = `~${tokens} tokens`;
+  });
+}
+if (threadNewForm) {
+  threadNewForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (
+      sendMessagePending ||
+      !project ||
+      !composerTo?.value ||
+      !composerBody?.value.trim()
+    )
+      return;
+    sendMessagePending = true;
+    const submit = threadNewForm.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+      const result = await window.relay.sendMessage({
+        project,
+        to: composerTo.value,
+        intent: composerIntent?.value || 'request',
+        delivery: composerDelivery?.value || 'inbox',
+        text: composerBody.value.trim(),
+        redact: composerRedact?.checked ?? true,
+        operationId: sendOperationId ?? window.crypto.randomUUID(),
+      });
+      if (result.ok && result.data?.message?.threadId) {
+        sendOperationId = null;
+        await loadThreads();
+        await openThread(result.data.message.threadId);
+      } else {
+        show(result);
+      }
+    } finally {
+      sendMessagePending = false;
+      submit.disabled = false;
+    }
+  });
+}
+if (threadReplyBody)
+  threadReplyBody.addEventListener('input', () => {
+    replyOperationId = window.crypto.randomUUID();
+  });
+if (threadReplyForm) {
+  threadReplyForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (
+      replyMessagePending ||
+      !project ||
+      !currentThreadId ||
+      !currentThreadReplyToId ||
+      !threadReplyBody?.value.trim()
+    )
+      return;
+    replyMessagePending = true;
+    const submit = threadReplyForm.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    const threadId = currentThreadId;
+    try {
+      const result = await window.relay.replyMessage({
+        project,
+        parentMessageId: currentThreadReplyToId,
+        text: threadReplyBody.value.trim(),
+        redact: threadReplyRedact?.checked ?? true,
+        operationId: replyOperationId ?? window.crypto.randomUUID(),
+      });
+      if (result.ok) {
+        replyOperationId = null;
+        threadReplyBody.value = '';
+        await openThread(threadId);
+        await loadThreads();
+      } else {
+        show(result);
+      }
+    } finally {
+      replyMessagePending = false;
+      submit.disabled = false;
+    }
+  });
+}
 
 /* ---- checkpoint diff viewer ---- */
 function renderCheckpointList(items) {
@@ -1725,6 +2390,47 @@ usageModal.addEventListener('click', (event) => {
   if (event.target === usageModal) closeUsage();
 });
 
+/* ---- launch and task-record drawer ---- */
+
+const drawer = document.querySelector('.drawer');
+const drawerToggle = document.querySelector('#drawerToggle');
+const drawerClose = document.querySelector('.drawer-close');
+const railPanelItems = [...document.querySelectorAll('.rail-item[data-panel]')];
+
+// The rail's Task/Agents/Notes entries scroll the drawer to their section
+// rather than swapping panels: 3a shows launch and record in one column. Two
+// entries can share a section, so the active state keys on the item itself.
+const drawerSections = {
+  launch: '.launch-list',
+  record: '.record',
+};
+
+function setDrawerOpen(open) {
+  if (!drawer) return;
+  drawer.hidden = !open;
+  drawerToggle?.setAttribute('aria-expanded', String(open));
+}
+
+function selectRailPanel(selected) {
+  for (const item of railPanelItems) {
+    const active = item === selected;
+    item.classList.toggle('is-active', active);
+    item.setAttribute('aria-pressed', String(active));
+  }
+  setDrawerOpen(true);
+  const target = drawer?.querySelector(
+    drawerSections[selected.dataset.section] ?? '',
+  );
+  target?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+for (const item of railPanelItems) {
+  item.addEventListener('click', () => selectRailPanel(item));
+}
+
+drawerToggle?.addEventListener('click', () => setDrawerOpen(drawer.hidden));
+drawerClose?.addEventListener('click', () => setDrawerOpen(false));
+
 /* ---- model and effort profile ---- */
 const profileModal = document.querySelector('#profileModal');
 const profileClose = document.querySelector('#profileClose');
@@ -1912,6 +2618,7 @@ window.addEventListener('keydown', (event) => {
       historyModal: closeHistory,
       checkpointModal: closeCheckpointViewer,
       profileModal: closeProfile,
+      threadsModal: closeThreads,
     }[modal.id];
     closeModal?.();
     event.preventDefault();
@@ -1920,7 +2627,7 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Tab' && modal) {
     const focusable = Array.from(
       modal.querySelectorAll(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled])',
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       ),
     );
     if (focusable.length === 0) return;
@@ -1947,6 +2654,18 @@ const removeTerminalStatusListener = window.relay.onTerminalStatus((event) => {
 const removeTerminalExitListener = window.relay.onTerminalExit((event) =>
   receiveTerminalEvent({ ...event, type: 'exit' }),
 );
+const removeTerminalControlListener = window.relay.onTerminalControl?.(
+  (event) => {
+    const readOnly = event.readOnly !== false;
+    tabsModel.updateMetadata(event.terminalId, { readOnly });
+    const tab = tabsModel.get(event.terminalId);
+    if (tab?.terminal) {
+      tab.terminal.options.disableStdin = readOnly;
+    }
+    renderTabs();
+    syncControls();
+  },
+);
 const removeUsageUpdateListener = window.relay.onUsageUpdate((data) => {
   if (!usageModal.hidden) {
     const incomingCapturedAt = Math.max(
@@ -1961,6 +2680,11 @@ const removeUsageUpdateListener = window.relay.onUsageUpdate((data) => {
   }
 });
 const removeDeepLinkListener = window.relay.onDeepLink(receiveDeepLink);
+const removeThreadsListener = window.relay.onThreadsChanged?.((event) => {
+  if (!project || event?.projectRoot !== project) return;
+  void loadThreads();
+  if (!threadsModal.hidden && currentThreadId) void openThread(currentThreadId);
+});
 
 updateProfileButtons();
 
@@ -1989,6 +2713,7 @@ async function initializeProject() {
   await refreshDashboard().catch(() =>
     renderDashboardUnavailable('Could not read project status'),
   );
+  if (project) await loadThreads().catch(() => undefined);
   if (
     !project &&
     (invalidRememberedProject ||
@@ -2003,6 +2728,7 @@ function factory(item) {
   if (tabsModel.get(item.id)) return tabsModel.get(item.id);
   const instances = createXterm(item.id);
   if (!instances) return null;
+  instances.terminal.options.disableStdin = item.readOnly === true;
   const added = tabsModel.addTerminal(
     item.id,
     item,
@@ -2044,8 +2770,10 @@ window.addEventListener('unload', () => {
   removeTerminalDataListener?.();
   removeTerminalStatusListener?.();
   removeTerminalExitListener?.();
+  removeTerminalControlListener?.();
   removeUsageUpdateListener?.();
   removeDeepLinkListener?.();
+  removeThreadsListener?.();
   deepLinkQueue = [];
   for (const terminal of tabsModel.getAll()) terminal.dispose?.();
 });

@@ -202,7 +202,7 @@ Replace POSIX bash syntax in `src/agents/usage-collectors.ts` with cross-platfor
 5. **Phase 5: Remove Port-Discovery Dependencies** — Complete (Cross-platform TCP listening port discovery supporting `netstat -ano -p tcp`, macOS `lsof`, and Linux `ss`).
 6. **Phase 6: Make the Daemon Launchable from the CLI** — Complete (`relay daemon --internal` and `ensureDaemon` supervisor).
 7. **Phase 7: TUI Dashboard** — Complete (`ink` / `react` interactive dashboard with active sessions, plan usage, and hotkey actions).
-8. **Phase 8: Native Provider TUI Passthrough** — Complete (Raw terminal mode streaming with `Ctrl+]` escape detachment).
+8. **Phase 8: Native Provider TUI Passthrough** — Complete (Raw terminal mode streaming with `Ctrl+Q` plus fallback detachment chords).
 9. **Phase 9: Windows Provider Compatibility** — Complete (Cross-platform Claude hooks, `%PATHEXT%` binary resolution, and ConPTY compatibility).
 10. **Phase 10: Windows CI** — Complete (`.github/workflows/ci.yml` matrix covering Windows, macOS, and Linux).
 11. **Phase 11: Packaging & Documentation** — Complete (`package.json`, `docs/cli-reference.md`, `README.md`, `docs/windows-tui.md`).
@@ -238,7 +238,8 @@ relay tui
 
 While attached to any native agent or shell session:
 
-- Press **`Ctrl+]`** (`0x1d`) to cleanly detach and return to the Relay TUI dashboard.
+- Press **`Ctrl+Q`** to cleanly detach and return to the Relay TUI dashboard.
+  **`Ctrl+B`**, then **`D`**, and **`Ctrl+]`** (`0x1d`) remain available as fallbacks.
 - The agent or shell session continues running undisturbed in the background terminal daemon.
 
 ---

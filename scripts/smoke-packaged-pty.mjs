@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises';
+import { cp, readFile, readdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -35,7 +35,23 @@ const hostUrl = pathToFileURL(
     'terminal-host.mjs',
   ),
 ).href;
+const workerUrl = pathToFileURL(
+  path.join(
+    app,
+    'Contents',
+    'Resources',
+    'app.asar.unpacked',
+    'desktop',
+    'daemon-bridge-worker.mjs',
+  ),
+).href;
 const cwd = await mkdtemp(path.join(os.tmpdir(), 'rirei-packaged-pty-'));
+const isolatedCliDirectory = path.join(cwd, 'cli');
+await cp(path.dirname(cli), isolatedCliDirectory, {
+  recursive: true,
+  verbatimSymlinks: true,
+});
+const isolatedCli = path.join(isolatedCliDirectory, 'index.cjs');
 const code = `
 const module = await import(process.env.RIREI_TERMINAL_HOST_URL);
 const host = await module.createTerminalHost('/bin/sh', ['-c', 'sleep 0.1; printf RIREI_PACKAGED_PTY_OK'], { cwd: process.cwd(), env: process.env });
@@ -47,9 +63,10 @@ process.stdout.write('RIREI_PACKAGED_PTY_OK\\n');
 `;
 
 try {
+  await import(workerUrl);
   const { version } = JSON.parse(await readFile('package.json', 'utf8'));
   await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cli, '--version'], {
+    const child = spawn(process.execPath, [isolatedCli, '--version'], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

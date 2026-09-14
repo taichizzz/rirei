@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { currentBootId } from '../../src/application/controller.js';
 import { reconcileProjectRuns } from '../../src/application/reconciliation.js';
 import { relayPath } from '../../src/safety/path-policy.js';
-import type { RelayState, RunLease } from '../../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type RelayState,
+  type RunLease,
+} from '../../src/state/schema.js';
 import { writeState } from '../../src/state/store.js';
 import { appendTerminalJournal } from '../../src/state/journal.js';
 import { createRepository, removeRepository } from '../helpers.js';
@@ -14,7 +18,7 @@ const NOW = '2026-01-01T00:00:00.000Z';
 
 function state(root: string, lease: RunLease): RelayState {
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [lease],
@@ -30,7 +34,15 @@ function state(root: string, lease: RunLease): RelayState {
       updatedAt: NOW,
     },
     git: { startingCommit: 'abc', startingBranch: 'main', dirtyAtStart: false },
-    agentHistory: [{ id: lease.runId, agent: lease.agent, startedAt: NOW }],
+    agentHistory: [
+      {
+        id: lease.runId,
+        displayLabel: lease.displayLabel,
+        agent: lease.agent,
+        terminalId: lease.terminalId,
+        startedAt: NOW,
+      },
+    ],
     decisions: [],
     completedWork: [],
     remainingWork: [],
@@ -48,6 +60,7 @@ function lease(
 ): RunLease {
   return {
     runId: 'run',
+    displayLabel: 'OpenCode 1',
     terminalId: 'terminal',
     worktreePath: root,
     projectRoot: root,
@@ -116,6 +129,36 @@ describe('run reconciliation', () => {
     expect(result.state.runs[0]).toMatchObject({
       status: 'orphaned',
       lifecycleStatus: 'orphaned',
+    });
+  });
+
+  it('finalizes a stopping lease when its controller and bridge are proven gone', async () => {
+    const root = await project((value) => ({
+      ...lease(value, 2_147_483_647, currentBootId()),
+      status: 'stopping',
+      lifecycleStatus: 'stopping',
+      bridgeIdentity: {
+        instanceId: 'bridge-a',
+        pid: 2_147_483_646,
+        protocolVersion: 1,
+      },
+    }));
+    const result = await reconcileProjectRuns(root, {
+      instanceId: 'daemon-new',
+      pid: process.pid,
+      bootId: currentBootId(),
+      terminalIds: new Set(),
+    });
+
+    expect(result.runs[0]).toMatchObject({
+      status: 'finalized',
+      reason: 'process_gone',
+    });
+    expect(result.state.runs).toEqual([]);
+    expect(result.state.agentHistory[0]).toMatchObject({
+      endedAt: expect.any(String),
+      exitReason: 'user_cancelled',
+      lifecycleStatus: 'cancelled',
     });
   });
 

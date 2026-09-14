@@ -21,6 +21,9 @@ const expected = [
   'desktop/codex-lifecycle-wrapper.mjs',
   'desktop/opencode-lifecycle-wrapper.mjs',
   'desktop/provider-lifecycle-hook.cjs',
+  'docs/README.md',
+  'docs/cli-reference.md',
+  'docs/relay-threads.md',
   'dist/index.cjs',
   'package.json',
 ].sort();
@@ -38,6 +41,14 @@ for (const file of files) {
   }
   if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(content)) {
     throw new Error(`Private key material found in package file: ${file}`);
+  }
+  if (
+    file === 'dist/index.cjs' &&
+    content.includes('function resolveDispatcher')
+  ) {
+    throw new Error(
+      'React was bundled into the CLI; Ink and the TUI must share one external React instance.',
+    );
   }
 }
 

@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { SessionManager, type RunSelection } from './application/sessions.js';
 import {
@@ -9,6 +9,7 @@ import { ControllerHeartbeat } from './application/heartbeat.js';
 import { readConfig } from './config/loader.js';
 import {
   discoverRepository,
+  discoverRepositoryAuthority,
   ensureRelayLocalExclusion,
   inspectGitSnapshot,
   type GitSnapshot,
@@ -25,15 +26,40 @@ import { readState, updateState } from './state/store.js';
 import type { AgentAdapter, ProcessResult } from './agents/adapter.js';
 import { InheritedProcessHost } from './process/inherited-process-host.js';
 
-export async function taskContext(): Promise<{
+export async function taskContext(
+  options: {
+    ensureExclusion?: boolean;
+    allowClosed?: boolean;
+  } = {},
+): Promise<{
   root: string;
   state: RelayState;
 }> {
-  const root = await discoverRepository(process.cwd());
-  if (!root) throw new Error('Relay must be run inside a Git repository.');
-  await ensureRelayLocalExclusion(root);
+  const rootHint = process.env.RIREI_PROJECT_ROOT?.trim();
+  const discoveredRoot = rootHint
+    ? await discoverRepository(rootHint)
+    : await discoverRepositoryAuthority(process.cwd());
+  if (!discoveredRoot)
+    throw new Error('Relay must be run inside a Git repository.');
+  let root = discoveredRoot;
+  if (rootHint) {
+    const [canonicalRoot, canonicalHint] = await Promise.all([
+      realpath(discoveredRoot),
+      realpath(rootHint),
+    ]);
+    if (canonicalRoot !== canonicalHint)
+      throw new Error(
+        'RIREI_PROJECT_ROOT must identify a Git repository root.',
+      );
+    root = path.resolve(rootHint);
+  }
+  if (options.ensureExclusion !== false) await ensureRelayLocalExclusion(root);
   const state = await readState(root);
-  if (state.task.status !== 'active' && state.task.status !== 'blocked')
+  if (
+    !options.allowClosed &&
+    state.task.status !== 'active' &&
+    state.task.status !== 'blocked'
+  )
     throw new Error(`Relay task is ${state.task.status}.`);
   return { root, state };
 }
@@ -153,7 +179,6 @@ export async function launchAgent(
   process.on('SIGUSR2', userStop);
   process.on('SIGHUP', controllerLoss);
   const heartbeat = new ControllerHeartbeat(root, controllerIdFor(controller));
-  heartbeat.start();
   try {
     const managed = await manager.startRun({
       projectRoot: root,
@@ -163,6 +188,7 @@ export async function launchAgent(
       selection,
       controller,
     });
+    heartbeat.start();
     const completed = await managed.completion;
     if (completed.result.spawnErrorCode)
       throw new Error(

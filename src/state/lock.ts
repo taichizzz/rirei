@@ -10,8 +10,6 @@ import {
 } from 'node:fs/promises';
 import { relayPath } from '../safety/path-policy.js';
 
-const LOCK_DIRECTORY = 'state.lock';
-const GATE_DIRECTORY = 'state.lock.gate';
 const LOCK_META = 'owner.json';
 const ACQUIRE_ATTEMPTS = 40;
 const ACQUIRE_INTERVAL_MS = 50;
@@ -151,8 +149,21 @@ async function removeIfOwned(
   }
 }
 
-async function acquireGate(root: string): Promise<LockOwner> {
-  const directory = relayPath(root, GATE_DIRECTORY);
+function validateLockName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || !/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+    throw new Error(
+      `Invalid lock name "${name}". Lock names must use letters, numbers, underscores, or dashes.`,
+    );
+  }
+  return trimmed;
+}
+
+async function acquireGate(
+  root: string,
+  lockName = 'state',
+): Promise<LockOwner> {
+  const directory = relayPath(root, `${lockName}.lock.gate`);
   for (let attempt = 0; attempt < ACQUIRE_ATTEMPTS; attempt += 1) {
     try {
       return await createOwnedDirectory(directory);
@@ -167,17 +178,17 @@ async function acquireGate(root: string): Promise<LockOwner> {
     }
   }
   throw new RelayLockError(
-    'Another Relay process is acquiring or releasing the repository writer lock. ' +
-      'Wait for it to finish, or remove .relay/state.lock.gate if no Relay is running.',
+    `Another Relay process is acquiring or releasing the repository ${lockName} lock. ` +
+      `Wait for it to finish, or remove .relay/${lockName}.lock.gate if no Relay is running.`,
   );
 }
 
-async function acquire(root: string): Promise<LockOwner> {
-  const directory = relayPath(root, LOCK_DIRECTORY);
-  const gateDirectory = relayPath(root, GATE_DIRECTORY);
+async function acquire(root: string, lockName = 'state'): Promise<LockOwner> {
+  const directory = relayPath(root, `${lockName}.lock`);
+  const gateDirectory = relayPath(root, `${lockName}.lock.gate`);
   await mkdir(relayPath(root), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < ACQUIRE_ATTEMPTS; attempt += 1) {
-    const gate = await acquireGate(root);
+    const gate = await acquireGate(root, lockName);
     let busy = false;
     try {
       try {
@@ -199,33 +210,49 @@ async function acquire(root: string): Promise<LockOwner> {
     if (busy) await delay(ACQUIRE_INTERVAL_MS);
   }
   throw new RelayLockError(
-    'Another Relay process is holding the repository writer lock. ' +
-      'Wait for it to finish, or remove .relay/state.lock if no Relay is running.',
+    `Another Relay process is holding the repository ${lockName} lock. ` +
+      `Wait for it to finish, or remove .relay/${lockName}.lock if no Relay is running.`,
   );
 }
 
-async function release(root: string, owner: LockOwner): Promise<void> {
-  const gateDirectory = relayPath(root, GATE_DIRECTORY);
-  const gate = await acquireGate(root);
+async function release(
+  root: string,
+  owner: LockOwner,
+  lockName = 'state',
+): Promise<void> {
+  const gateDirectory = relayPath(root, `${lockName}.lock.gate`);
+  const gate = await acquireGate(root, lockName);
   try {
-    await removeIfOwned(relayPath(root, LOCK_DIRECTORY), owner);
+    await removeIfOwned(relayPath(root, `${lockName}.lock`), owner);
   } finally {
     await removeIfOwned(gateDirectory, gate);
   }
 }
 
 /**
- * Run `fn` while holding the repository-scoped writer lock. The lock is always
- * released in `finally`, even when `fn` throws.
+ * Run `fn` while holding a named repository-scoped writer lock (e.g. `state` or `threads`).
+ */
+export async function withNamedRepositoryLock<T>(
+  root: string,
+  name: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const validatedName = validateLockName(name);
+  const owner = await acquire(root, validatedName);
+  try {
+    return await fn();
+  } finally {
+    await release(root, owner, validatedName);
+  }
+}
+
+/**
+ * Run `fn` while holding the repository-scoped writer lock for state mutations.
+ * The lock is always released in `finally`, even when `fn` throws.
  */
 export async function withRepositoryLock<T>(
   root: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const owner = await acquire(root);
-  try {
-    return await fn();
-  } finally {
-    await release(root, owner);
-  }
+  return withNamedRepositoryLock(root, 'state', fn);
 }

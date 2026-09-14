@@ -13,8 +13,29 @@ const parentPid = Number(process.env.RIREI_GUARD_PARENT_PID);
 let child = null;
 let stopping = false;
 let forced = false;
+function descendants(rootPid) {
+  let stdout = '';
+  try { stdout = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' }); } catch {}
+  const children = new Map();
+  for (const row of stdout.split('\n')) {
+    const [pidText, parentText] = row.trim().split(/\s+/);
+    const pid = Number(pidText);
+    const parent = Number(parentText);
+    if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
+    const values = children.get(parent) || [];
+    values.push(pid);
+    children.set(parent, values);
+  }
+  const targets = [];
+  const pending = [...(children.get(rootPid) || [])];
+  while (pending.length) {
+    const pid = pending.pop();
+    targets.push(pid);
+    pending.push(...(children.get(pid) || []));
+  }
+  return targets.reverse();
+}
 function stop(force) {
-  if (stopping && !force) return;
   if (force && forced) return;
   if (force) forced = true;
   stopping = true;
@@ -30,29 +51,12 @@ function stop(force) {
   }
   if (!force) {
     if (!child) return process.exit(0);
-    try { child.kill('SIGTERM'); } catch {}
+    try { child.kill('SIGUSR2'); } catch {}
+    for (const pid of descendants(child.pid)) { try { process.kill(pid, 'SIGTERM'); } catch {} }
     return;
   }
-  let stdout = '';
-  try { stdout = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' }); } catch {}
-    const children = new Map();
-    for (const row of stdout.split('\n')) {
-      const [pidText, parentText] = row.trim().split(/\s+/);
-      const pid = Number(pidText);
-      const parent = Number(parentText);
-      if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
-      const values = children.get(parent) || [];
-      values.push(pid);
-      children.set(parent, values);
-    }
-    const targets = [];
-    const pending = child ? [child.pid] : [];
-    while (pending.length) {
-      const pid = pending.pop();
-      targets.push(pid);
-      pending.push(...(children.get(pid) || []));
-    }
-    for (const pid of targets.reverse()) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+  const targets = child ? [...descendants(child.pid), child.pid] : [];
+  for (const pid of targets) { try { process.kill(pid, 'SIGKILL'); } catch {} }
   setTimeout(() => process.exit(1), 1000).unref();
 }
 process.on('SIGTERM', () => stop(false));
@@ -293,15 +297,28 @@ export class NodePtyTerminalHost {
       }
       return;
     }
-    await signalProcessTree(
-      this.ptyProcess.pid,
-      intent === 'user_stop' ? 'SIGTERM' : 'SIGINT',
-    );
+    if (intent === 'user_stop') {
+      try {
+        process.kill(this.ptyProcess.pid, 'SIGTERM');
+      } catch {
+        // The parent guard already exited.
+      }
+      return;
+    }
+    await signalProcessTree(this.ptyProcess.pid, 'SIGINT');
   }
 
   async terminate() {
     if (this.disposed) return;
-    await signalProcessTree(this.ptyProcess.pid, 'SIGTERM', false);
+    if (process.platform === 'win32') {
+      await signalProcessTree(this.ptyProcess.pid, 'SIGTERM', false);
+      return;
+    }
+    try {
+      process.kill(this.ptyProcess.pid, 'SIGTERM');
+    } catch {
+      // The parent guard already exited.
+    }
   }
 
   async killTree() {

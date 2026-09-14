@@ -1,8 +1,13 @@
 import { Command } from 'commander';
 import { createInterface } from 'node:readline/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { getAgent, isAgentId } from '../agents/registry.js';
 import { inspectGitSnapshot } from '../git/repository.js';
-import { hasContinuationNotes } from '../handoff.js';
+import {
+  handoffStateFingerprint,
+  hasContinuationNotes,
+  type RenderedHandoff,
+} from '../handoff.js';
 import {
   createCheckpoint,
   launchAgent,
@@ -10,6 +15,27 @@ import {
   taskContext,
 } from '../lifecycle.js';
 import { readState } from '../state/store.js';
+
+export async function verifySwitchPreview(
+  projectRoot: string,
+  approved: RenderedHandoff,
+) {
+  const [latestState, latestSnapshot] = await Promise.all([
+    readState(projectRoot),
+    inspectGitSnapshot(projectRoot, 1),
+  ]);
+  const latestHandoff = await renderHandoffDocument(
+    projectRoot,
+    latestState,
+    projectRoot,
+    latestSnapshot,
+  );
+  if (!isDeepStrictEqual(latestHandoff, approved))
+    throw new Error(
+      'Handoff-relevant state or Git changed after the preview. Run relay switch again to review a fresh handoff.',
+    );
+  return latestState;
+}
 
 export function switchCommand(): Command {
   return new Command('switch')
@@ -48,6 +74,9 @@ export function switchCommand(): Command {
           context.root,
           checkpoint.snapshot,
         );
+        const expectedHandoffStateFingerprint = handoffStateFingerprint(
+          checkpoint.state,
+        );
         const hasNotes = hasContinuationNotes(handoff.capsule.notes);
         process.stdout.write(
           `Checkpoint: ${checkpoint.id}\nEstimated handoff: ${handoff.budget.estimatedTokens} tokens (${handoff.budget.usedCharacters} characters)` +
@@ -84,21 +113,11 @@ export function switchCommand(): Command {
             return;
           }
         }
-        const [latestState, latestSnapshot] = await Promise.all([
-          readState(context.root),
-          inspectGitSnapshot(context.root, 1),
-        ]);
-        if (
-          latestState.revision !== checkpoint.state.revision ||
-          latestSnapshot.fingerprint !== checkpoint.snapshot.fingerprint
-        )
-          throw new Error(
-            'Relay state or Git changed after the preview. Run relay switch again to review a fresh handoff.',
-          );
+        const latestState = await verifySwitchPreview(context.root, handoff);
         process.stdout.write(`Launching ${agent}...\n`);
         const { result } = await launchAgent(
           context.root,
-          checkpoint.state,
+          latestState,
           getAgent(agent),
           handoff.text,
           {
@@ -106,6 +125,7 @@ export function switchCommand(): Command {
             effort: options.effort,
             operationId: options.operationId,
             terminalId: options.terminalId,
+            expectedHandoffStateFingerprint,
           },
         );
         if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;

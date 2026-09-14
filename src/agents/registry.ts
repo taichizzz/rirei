@@ -173,6 +173,12 @@ const CAPABILITIES = {
     authenticationDiscovery: true,
     usageCollection: true,
     structuredEvents: true,
+    messageDelivery: {
+      inbox: true,
+      nextSafeTurn: false,
+      wake: false,
+      source: 'relay_inbox',
+    },
   } satisfies AgentCapabilities,
   codex: {
     interactive: true,
@@ -182,6 +188,12 @@ const CAPABILITIES = {
     authenticationDiscovery: true,
     usageCollection: true,
     structuredEvents: true,
+    messageDelivery: {
+      inbox: true,
+      nextSafeTurn: false,
+      wake: false,
+      source: 'relay_inbox',
+    },
   } satisfies AgentCapabilities,
   gemini: {
     interactive: true,
@@ -191,6 +203,12 @@ const CAPABILITIES = {
     authenticationDiscovery: false,
     usageCollection: false,
     structuredEvents: false,
+    messageDelivery: {
+      inbox: true,
+      nextSafeTurn: false,
+      wake: false,
+      source: 'relay_inbox',
+    },
   } satisfies AgentCapabilities,
   antigravity: {
     interactive: true,
@@ -200,6 +218,12 @@ const CAPABILITIES = {
     authenticationDiscovery: false,
     usageCollection: false,
     structuredEvents: false,
+    messageDelivery: {
+      inbox: true,
+      nextSafeTurn: false,
+      wake: false,
+      source: 'relay_inbox',
+    },
   } satisfies AgentCapabilities,
   opencode: {
     interactive: true,
@@ -209,6 +233,12 @@ const CAPABILITIES = {
     authenticationDiscovery: true,
     usageCollection: false,
     structuredEvents: true,
+    messageDelivery: {
+      inbox: true,
+      nextSafeTurn: false,
+      wake: false,
+      source: 'relay_inbox',
+    },
   } satisfies AgentCapabilities,
 } as const satisfies Record<AgentId, AgentCapabilities>;
 

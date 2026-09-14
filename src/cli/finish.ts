@@ -5,6 +5,7 @@ import { createCheckpoint, taskContext } from '../lifecycle.js';
 import { appendEvent } from '../state/events.js';
 import { activeLeases } from '../state/leases.js';
 import { updateState } from '../state/store.js';
+import { expireQueuedMessages } from '../messages/service.js';
 
 async function runConfiguredTest(
   root: string,
@@ -80,6 +81,11 @@ export function finishCommand(): Command {
           },
         };
       });
+      await expireQueuedMessages(
+        context.root,
+        context.state.sessionId,
+        'task_closed',
+      );
       await appendEvent(context.root, 'task_completed', {
         checkpointId: checkpoint.id,
       });

@@ -21,16 +21,22 @@ import { noteCommand } from './cli/note.js';
 import { reconcileCommand } from './cli/reconcile.js';
 import { bridgeCommand } from './cli/bridge.js';
 import { daemonCommand } from './cli/daemon.js';
+import { sessionCommand } from './cli/session.js';
+import { messageCommand } from './cli/message.js';
 import { tuiCommand } from './cli/tui.js';
+import { attachCommand } from './cli/attach.js';
 
 const program = new Command()
   .name('relay')
   .description('Durable coding-task handoffs between official agent CLIs')
-  .version('0.1.0-alpha.4.1')
+  .version('0.1.0-alpha.4.2')
   .addCommand(initCommand())
   .addCommand(startCommand())
   .addCommand(statusCommand())
+  .addCommand(sessionCommand())
+  .addCommand(messageCommand())
   .addCommand(tuiCommand())
+  .addCommand(attachCommand())
   .addCommand(checkpointCommand())
   .addCommand(checkpointsCommand())
   .addCommand(checkpointDiffCommand())
@@ -53,6 +59,10 @@ const program = new Command()
 program.showSuggestionAfterError();
 program.parseAsync().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`relay: ${message}\n`);
+  process.stderr.write(
+    process.argv.includes('--json')
+      ? `${JSON.stringify({ schemaVersion: 1, ok: false, error: { message } })}\n`
+      : `relay: ${message}\n`,
+  );
   process.exitCode = 1;
 });

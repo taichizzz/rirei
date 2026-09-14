@@ -4,6 +4,55 @@ This file records user-visible changes made to Relay and its Rirei desktop app. 
 CLI command and `.relay/` state directory retain their existing names when the desktop app
 branding changes.
 
+## Unreleased
+
+## 0.1.0-alpha.4.2 - 2026-09-11
+
+### Relay Threads
+
+- Added local, task-scoped coordination threads with authenticated run identities, strict routing,
+  conflict-detecting operation IDs, bounded storage, and durable read and acknowledgement receipts.
+- Added secret detection, explicit redaction, control-character escaping, and capability revocation
+  so message bodies remain untrusted user context and never enter lifecycle or activity metadata.
+- Added operator and run inbox commands plus desktop and TUI thread lists, replies, unread attention,
+  context cards, receipt metadata, and session labels.
+
+### Reliable session shutdown
+
+- Added confirmed **Stop Session** and **Stop All** controls to desktop and TUI clients.
+- Stop escalation now leaves the Relay controller alive while provider descendants exit, then
+  falls back to a bounded process-tree kill when necessary.
+- Daemon final status publication now retries failed state synchronization and idempotently
+  completes run history, releases worktree leases, and clears live activity without manual
+  recovery.
+
+### Portable terminal attachment
+
+- Added `relay attach <terminal-id>` with read-only observation, explicit control takeover,
+  bounded replay, and safe restoration of the caller terminal on every exit path.
+- Added daemon-enforced single-writer ownership while retaining multiple viewers, including
+  control revocation and release on detach, disconnect, finalization, and forget.
+- TUI launches now remain on the dashboard and provide a portable attach command; Electron
+  restores write control after daemon reconnect or switches the terminal to viewer-only mode.
+- Replaced whole-buffer PTY output rebuilding with bounded chunks and moved provider-state
+  synchronization through a persistent, versioned, frame-bounded bridge worker.
+
+### 3a desktop layout
+
+- Rebuilt the Rirei window on the **3a** design: a 105px labelled icon rail (Task, Agents,
+  Notes, Threads, Usage, plus Finish), a 57px top bar carrying the project name, branch and
+  dirtiness, and task status, a command bar for the task input, a five-column metrics strip,
+  and a full-width terminal.
+- The agent launcher and task record moved into a 290px overlay drawer that floats over the
+  terminal instead of shrinking it. The top bar's **Relay** button and the drawer's own close
+  control toggle it; the rail's Task, Agents, and Notes entries open it scrolled to their
+  section. The drawer clears the terminal tab strip so Shell/Stop/Clear stay reachable.
+- Per-agent Resume, Switch, and Fork Latest actions collapsed into a disclosure menu beside
+  each Run button; the session commands (Initialize, Status, Doctor, Handoff) and the
+  checkpoint field moved into the drawer.
+- The palette is unchanged. Every colour in the new layout resolves to a token that already
+  existed in `:root`, and no token values were edited.
+
 ## 0.1.0-alpha.4.1 - 2026-08-31
 
 ### Provider-aware control room hardening

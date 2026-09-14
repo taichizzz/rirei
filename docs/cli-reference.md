@@ -1,9 +1,11 @@
 # CLI reference
 
-Every Relay command must run inside a Git repository. In development, invoke commands with
-`npm run dev -- <command>`; once installed, use the `relay` binary directly.
+Task-oriented Relay commands run inside a Git repository. Device-level commands such as
+`agents`, `doctor`, `usage`, `attach`, and daemon supervision can run from any directory. In
+development, invoke commands with `npm run dev -- <command>`; once installed, use the `relay`
+binary directly.
 
-Commands that operate on a task (`note`, `checkpoint`, `handoff`, `run`, `switch`, `finish`) first
+Commands that operate on a task (`note`, `checkpoint`, `handoff`, `message`, `session`, `run`, `switch`, `finish`) first
 call `taskContext()`, which requires an existing task whose status is `active` or `blocked`.
 If no task is active they exit with an error.
 
@@ -341,6 +343,54 @@ Behavior:
 
 ---
 
+## `relay message`
+
+Read and write durable, task-scoped coordination threads. Messages use the primary worktree's
+`.relay/threads/` authority even when a managed run invokes Relay from a linked worktree.
+
+Routing accepts only `operator` and canonical `run:<id>` references. Display labels are never
+routing keys. `relay message peers` prints the active canonical references.
+
+Commands:
+
+- `peers [--json]`: list active peers and presentation labels.
+- `preview --to <actor> (--text <body> | --stdin) [--redact]`: render the exact bounded,
+  terminal-safe envelope and token estimate without persisting it.
+- `send --to <actor> (--text <body> | --stdin) [--intent request|inform]
+[--context-note <id>] [--context-checkpoint <id>] [--operation-id <uuid>] [--redact]
+[--json]`: start a thread.
+- `inbox [--unread] [--peek] [--json]`: read messages addressed to the caller. Without `--peek`,
+  returned unread messages are atomically marked read.
+- `threads [--filter <text>] [--json]`: list authorized current-task thread summaries.
+- `thread <thread-id> [--json]`: show one authorized thread without changing receipts.
+- `reply <message-id> (--text <body> | --stdin) [--intent request|inform|ack]
+[--operation-id <uuid>] [--redact] [--json]`: reply to the other participant.
+- `read <message-id> [--json]`: mark a message read as its recipient.
+- `acknowledge <message-id> [--json]`: idempotently acknowledge a non-expired message as its
+  recipient.
+
+Exactly one body source is required. Body input is bounded to 8 KiB of strict UTF-8 while being
+read. Up to three context cards may total 16 KiB; the complete envelope is limited to 32 KiB.
+Each task is limited to 100 threads, 1,000 messages, and a 5 MiB journal.
+
+All current adapters support `inbox` delivery only. `next_safe_turn` and `wake` requests fail
+unless a future adapter advertises a verified official integration; Relay never silently falls
+back. See [relay-threads.md](relay-threads.md) for storage and security details.
+
+---
+
+## `relay session label`
+
+```sh
+relay session label run:<id> "Display label" [--json]
+```
+
+Rename the presentation label for an active or historical run in the current task. Only a local
+operator invocation may rename labels. Labels may be duplicated because they never route
+messages.
+
+---
+
 ## `relay doctor`
 
 Inspect local prerequisites. Does not require a task.
@@ -370,8 +420,13 @@ relay tui
 Features:
 
 - Responsive active-session list with git branches, runtime accounting, and attention badges.
+- Detached-first launches that keep the dashboard visible and print a portable `relay attach <id>` command.
 - Provider-aware model/effort launch profiles, including custom model IDs.
+- Automatic isolated Git worktree creation when a new agent would conflict with a session already
+  using the main working tree.
 - A clickable mouse interface with keyboard fallback and bounded 80×24 rendering.
+- Relay Threads unread attention, list/detail filtering, inbox-only composition and replies,
+  context cards, read/ack actions, and receipt state.
 - Remaining provider plan capacity with stale/error/unsupported states and exact UTC capture/reset
   timestamps.
 - Hotkeys:
@@ -381,10 +436,34 @@ Features:
   - `a`: Launch Antigravity session
   - `p`: Launch OpenCode session
   - `s`: Open new shell terminal
-  - `Enter`: Attach to selected session (raw passthrough mode; press `Ctrl+]` to detach)
+  - `Enter`: Attach to selected session (raw passthrough mode; press `Ctrl+Q` to return to the
+    dashboard; `Ctrl+B`, then `D`, and `Ctrl+]` are fallbacks)
+  - `x`: Confirm stopping the selected session
+  - `Shift+x`: Confirm stopping every active terminal on the device
   - `u`: Open provider usage details
+  - `m`: Open Relay Threads; use `n` to compose, `/` to filter, `i` for unread-only, and
+    `m`/`a` in thread detail to mark read or acknowledge
   - `r`: Refresh dashboard state and provider model catalogs
   - `q`: Quit dashboard (leaves daemon and agents running)
+
+---
+
+## `relay attach <terminal-id>`
+
+Attach the current interactive terminal to a session already owned by the detached daemon.
+
+```bash
+relay attach <terminal-id> [--read-only | --takeover]
+```
+
+- Can run from any directory, requires interactive stdin and stdout, and never starts a daemon as
+  a side effect.
+- Replays retained output before forwarding live terminal bytes.
+- `--read-only` observes output without acquiring write or resize control.
+- `--takeover` explicitly displaces the current writer; the displaced client is notified and detached.
+- `--read-only` and `--takeover` cannot be combined.
+- `Ctrl+Q` detaches. `Ctrl+B`, then `D`, and `Ctrl+]` remain fallback detach sequences.
+- Finalized sessions replay all retained output and return without entering raw input mode.
 
 ---
 

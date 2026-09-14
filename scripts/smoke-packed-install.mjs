@@ -79,7 +79,7 @@ function openDaemon(descriptor) {
     connection.once('connect', async () => {
       connection.write(
         `${JSON.stringify({
-          v: 1,
+          v: 2,
           type: 'hello',
           token: descriptor.reconnectToken,
           clientId: randomUUID(),
@@ -98,7 +98,7 @@ function openDaemon(descriptor) {
                 reject: rejectRequest,
               });
               connection.write(
-                `${JSON.stringify({ v: 1, type: 'request', id, op, body })}\n`,
+                `${JSON.stringify({ v: 2, type: 'request', id, op, body })}\n`,
               );
             });
           },
@@ -165,6 +165,7 @@ try {
     process.platform === 'win32'
       ? 'echo RIREI_PACKED_PTY_OK\r\nexit\r\n'
       : "printf 'RIREI_PACKED_PTY_OK\\n'; exit\n";
+  await client.request('acquire_control', { terminalId: terminal.id });
   await client.request('write', {
     terminalId: terminal.id,
     data: Buffer.from(command).toString('base64'),

@@ -170,6 +170,8 @@ export async function readThreadsJournal(
 }
 
 async function fsyncDirectory(directory: string): Promise<void> {
+  // Windows does not support fsync on directory handles.
+  if (process.platform === 'win32') return;
   const handle = await open(directory, constants.O_RDONLY | NO_FOLLOW);
   try {
     await handle.sync();

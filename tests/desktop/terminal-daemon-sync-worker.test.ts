@@ -131,9 +131,8 @@ describe('terminal daemon per-terminal sync queue', () => {
       );
       await client.setWaiting(terminal.id, 'another approval');
 
-      const stopPromise = client.stop(terminal.id);
+      await client.stop(terminal.id);
       releaseFirstSync?.();
-      await stopPromise;
     } finally {
       releaseFirstSync?.();
     }

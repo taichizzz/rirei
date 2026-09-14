@@ -31,6 +31,17 @@ export interface MessageCapabilityDescriptor {
 const CAPABILITY_MAX_BYTES = 4096;
 const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
 
+async function fsyncDirectory(directory: string): Promise<void> {
+  // Windows does not support fsync on directory handles.
+  if (process.platform === 'win32') return;
+  const handle = await open(directory, constants.O_RDONLY | NO_FOLLOW);
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 async function ensureRealDirectory(directory: string): Promise<void> {
   try {
     await mkdir(directory, { mode: 0o700 });
@@ -117,12 +128,7 @@ export async function issueMessageCapability(
   }
   try {
     await rename(tempFile, filePath);
-    const directoryHandle = await open(dir, 'r');
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
-    }
+    await fsyncDirectory(dir);
   } finally {
     await rm(tempFile, { force: true }).catch(() => undefined);
   }

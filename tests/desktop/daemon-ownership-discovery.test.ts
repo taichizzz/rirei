@@ -60,10 +60,11 @@ async function temporaryPaths(canonical = false) {
 }
 
 async function startDaemon(
-  commandFor = () =>
-    process.platform === 'win32'
-      ? [process.env.ComSpec || 'cmd.exe']
-      : ['/bin/zsh', '-f'],
+  commandFor = () => [
+    process.execPath,
+    '-e',
+    'process.stdin.resume(); setInterval(() => {}, 1000)',
+  ],
   overrides: Record<string, unknown> = {},
   canonical = false,
 ) {

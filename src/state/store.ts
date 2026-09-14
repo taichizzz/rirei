@@ -40,6 +40,8 @@ interface UpdateOptions {
   opId?: string;
   /** Optimistic-concurrency guard; rejects if on-disk revision differs. */
   expectedRevision?: number;
+  /** Treat an identity-returning mutator as a no-op. */
+  skipUnchanged?: boolean;
 }
 
 /**
@@ -71,6 +73,8 @@ export async function updateState(
           `(expected revision ${options.expectedRevision}, found ${current.revision}).`,
       );
     const mutated = await mutator(current);
+    if (options.skipUnchanged && mutated === current && !options.opId)
+      return current;
     const revision = current.revision + 1;
     const recentOperations = options.opId
       ? [

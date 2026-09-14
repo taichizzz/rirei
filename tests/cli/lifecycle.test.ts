@@ -4,6 +4,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { ControllerHeartbeat } from '../../src/application/heartbeat.js';
+import {
+  createCheckpoint,
+  renderHandoffDocument,
+} from '../../src/lifecycle.js';
+import { verifySwitchPreview } from '../../src/cli/switch.js';
 import { activityFilePath } from '../../src/state/activity.js';
 import { updateState } from '../../src/state/store.js';
 import { createRepository, removeRepository } from '../helpers.js';
@@ -156,6 +162,7 @@ describe('Relay lifecycle commands', () => {
       runs: [
         {
           runId: 'run-attention',
+          displayLabel: 'Codex 1',
           terminalId,
           worktreePath: root,
           projectRoot: root,
@@ -270,6 +277,7 @@ describe('Relay lifecycle commands', () => {
         ...current.agentHistory,
         {
           id: 'ended-terminal-run',
+          displayLabel: 'Codex 1',
           agent: 'codex',
           terminalId,
           startedAt: now,
@@ -339,6 +347,82 @@ describe('Relay lifecycle commands', () => {
       await readFile(`${root}/.relay/state.json`, 'utf8'),
     );
     expect(after.revision).toBe(before.revision);
+  });
+
+  it('finalizes and releases a terminal lease from a final bridge state', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Finalize terminal state');
+    const now = new Date().toISOString();
+    const terminalId = `terminal-final-${process.pid}-${Date.now()}`;
+    await updateState(root, (current) => ({
+      ...current,
+      runs: [
+        {
+          runId: 'run-final',
+          displayLabel: 'Codex 1',
+          terminalId,
+          worktreePath: root,
+          projectRoot: root,
+          agent: 'codex',
+          launchMode: 'new',
+          controllerId: `daemon:test:${terminalId}`,
+          controller: {
+            kind: 'daemon',
+            instanceId: terminalId,
+            pid: process.pid,
+            bootId: 'test',
+          },
+          lifecycleStatus: 'stopping',
+          activeRuntimeSeconds: 8,
+          runtimeSequence: 3,
+          startedAt: now,
+          lastSeenAt: now,
+          status: 'stopping',
+        },
+      ],
+      agentHistory: [
+        {
+          id: 'run-final',
+          displayLabel: 'Codex 1',
+          agent: 'codex',
+          terminalId,
+          startedAt: now,
+          lifecycleStatus: 'stopping',
+          activeRuntimeSeconds: 8,
+          runtimeSequence: 3,
+        },
+      ],
+    }));
+
+    await relay(
+      root,
+      'bridge',
+      '--terminal-id',
+      terminalId,
+      '--status',
+      'cancelled',
+      '--lifecycle-state',
+      'cancelled',
+      '--active-runtime-seconds',
+      '10',
+      '--runtime-sequence',
+      '4',
+    );
+
+    const persisted = JSON.parse(
+      await readFile(`${root}/.relay/state.json`, 'utf8'),
+    );
+    expect(persisted.runs).toEqual([]);
+    expect(persisted.agentHistory[0]).toMatchObject({
+      id: 'run-final',
+      endedAt: expect.any(String),
+      exitReason: 'user_cancelled',
+      lifecycleStatus: 'cancelled',
+      activeRuntimeSeconds: 10,
+      runtimeSequence: 4,
+    });
   });
 
   it('requires explicit acknowledgement of a dirty baseline', async () => {
@@ -644,6 +728,38 @@ describe('Relay lifecycle commands', () => {
       ),
     ) as { fingerprint: string };
     expect(metadata.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('accepts heartbeat revisions but rejects handoff changes after a switch preview', async () => {
+    const root = await createRepository();
+    directories.push(root);
+    await relay(root, 'init');
+    await relay(root, 'start', 'Switch without heartbeat conflicts');
+    const checkpoint = await createCheckpoint(root, 'Switch to codex');
+    const approved = await renderHandoffDocument(
+      root,
+      checkpoint.state,
+      root,
+      checkpoint.snapshot,
+    );
+
+    await new ControllerHeartbeat(root, 'cli:unrelated-controller').beat();
+    const latest = await verifySwitchPreview(root, approved);
+    expect(latest.revision).toBeGreaterThan(checkpoint.state.revision);
+
+    await updateState(root, (current) => ({
+      ...current,
+      remainingWork: [
+        ...current.remainingWork,
+        {
+          description: 'Review a newly discovered edge case',
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    }));
+    await expect(verifySwitchPreview(root, approved)).rejects.toThrow(
+      /Handoff-relevant state or Git changed/,
+    );
   });
 
   it('requires explicit approval for a non-interactive switch', async () => {
@@ -1094,6 +1210,7 @@ describe('Relay lifecycle commands', () => {
     state.task.status = 'completed';
     state.agentHistory.push({
       id: 'still-running',
+      displayLabel: 'Claude 1',
       agent: 'claude',
       startedAt: '2026-07-21T00:00:00.000Z',
     });
@@ -1129,11 +1246,13 @@ describe('Relay lifecycle commands', () => {
     state.task.status = 'completed';
     state.agentHistory.push({
       id: 'leased-run',
+      displayLabel: 'Claude 1',
       agent: 'claude',
       startedAt: '2026-07-21T00:00:00.000Z',
     });
     state.runs.push({
       runId: 'leased-run',
+      displayLabel: 'Claude 1',
       worktreePath: root,
       projectRoot: root,
       agent: 'claude',
@@ -1172,6 +1291,7 @@ describe('Relay lifecycle commands', () => {
     state.currentRunId = 'stale-run';
     state.agentHistory.push({
       id: 'finished-run',
+      displayLabel: 'Claude 1',
       agent: 'claude',
       startedAt: '2026-01-01T00:00:00.000Z',
       endedAt: '2026-01-01T00:01:00.000Z',
@@ -1180,6 +1300,7 @@ describe('Relay lifecycle commands', () => {
     });
     state.agentHistory.push({
       id: 'stale-run',
+      displayLabel: 'Codex 1',
       agent: 'codex',
       startedAt: '2026-01-01T00:02:00.000Z',
       launchMode: 'resume',
@@ -1223,6 +1344,7 @@ describe('Relay lifecycle commands', () => {
     };
     state.agentHistory.push({
       id: 'legacy-unfinished',
+      displayLabel: 'Claude 1',
       agent: 'claude',
       startedAt: '2026-01-01T00:00:00.000Z',
     });

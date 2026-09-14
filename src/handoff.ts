@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { RelayConfig } from './config/schema.js';
 import type { GitSnapshot } from './git/repository.js';
 import { noteFreshness, type NoteFreshness } from './state/notes.js';
@@ -55,6 +56,28 @@ export interface RenderedHandoff {
     duplicateTaskOccurrences: number;
     containsNoteInstruction: boolean;
   };
+}
+
+/** Hash only state that can affect a handoff, excluding live-run telemetry. */
+export function handoffStateFingerprint(state: RelayState): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        sessionId: state.sessionId,
+        task: {
+          title: state.task.title,
+          originalRequest: state.task.originalRequest,
+          status: state.task.status,
+        },
+        notes: state.notes,
+        tests: state.tests,
+        completedWork: state.completedWork,
+        remainingWork: state.remainingWork,
+        decisions: state.decisions,
+        blockers: state.blockers,
+      }),
+    )
+    .digest('hex');
 }
 
 /** True when at least one unresolved continuation note exists. */
@@ -253,6 +276,11 @@ export function renderCompactHandoff(
     const omission = `Omitted: ${omittedItems} lower-priority item${omittedItems === 1 ? '' : 's'}; inspect the working tree if needed.`;
     if (`${body}${separator}${omission}`.length <= effectiveMaxCharacters)
       body += `${separator}${omission}`;
+  }
+  const coordination =
+    'Use `relay message peers --json` and `relay message inbox --json` for local Rirei coordination.';
+  if (`${body}${separator}${coordination}`.length <= effectiveMaxCharacters) {
+    body += `${separator}${coordination}`;
   }
 
   const text = body;

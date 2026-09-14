@@ -2,7 +2,11 @@ import { mkdir } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ControllerHeartbeat } from '../../src/application/heartbeat.js';
 import { relayPath } from '../../src/safety/path-policy.js';
-import type { RelayState, RunLease } from '../../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type RelayState,
+  type RunLease,
+} from '../../src/state/schema.js';
 import { readState, writeState } from '../../src/state/store.js';
 import { createRepository, removeRepository } from '../helpers.js';
 
@@ -11,7 +15,7 @@ const NOW = '2026-01-01T00:00:00.000Z';
 
 function state(root: string): RelayState {
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -45,6 +49,7 @@ function lease(
 ): RunLease {
   return {
     runId,
+    displayLabel: 'Claude 1',
     worktreePath: '/worktrees/' + runId,
     projectRoot: '/worktrees',
     agent: 'claude',
@@ -132,5 +137,39 @@ describe('controller heartbeat', () => {
     await new ControllerHeartbeat(root, 'cli:teardown').orphanOwned();
     const persisted = await readState(root);
     expect(persisted.runs.every((run) => run.status === 'orphaned')).toBe(true);
+  });
+
+  it('suppresses state revision changes on no-op heartbeats and stops after daemon adoption', async () => {
+    const { root, state } = await project();
+    state.runs = [
+      {
+        ...lease('run-daemon', 'daemon:boot:inst', new Date().toISOString()),
+        controller: {
+          kind: 'daemon',
+          instanceId: 'inst',
+          pid: 1,
+          bootId: 'boot',
+        },
+      },
+    ];
+    await writeState(root, state);
+    const initial = await readState(root);
+
+    const heartbeat = new ControllerHeartbeat(root, 'cli:unrelated');
+    heartbeat.start();
+    await heartbeat.tick();
+    const afterTick = await readState(root);
+    expect(afterTick.revision).toBe(initial.revision);
+    expect((heartbeat as unknown as { timer: unknown }).timer).toBeNull();
+  });
+
+  it('does not write a revision when shutdown owns no leases', async () => {
+    const { root } = await project();
+    const heartbeat = new ControllerHeartbeat(root, 'cli:unrelated');
+    const initial = await readState(root);
+
+    await heartbeat.orphanOwned();
+
+    expect((await readState(root)).revision).toBe(initial.revision);
   });
 });

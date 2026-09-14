@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildHandoffCapsule,
+  handoffStateFingerprint,
   hasContinuationNotes,
   renderCompactHandoff,
 } from '../src/handoff.js';
 import type { RelayConfig } from '../src/config/schema.js';
 import type { GitSnapshot } from '../src/git/repository.js';
-import type { HandoffNote, RelayState } from '../src/state/schema.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type HandoffNote,
+  type RelayState,
+} from '../src/state/schema.js';
 
 const DEFAULTS: RelayConfig['handoff'] = {
   maxCharacters: 1_200,
@@ -49,7 +54,7 @@ function note(
 function state(): RelayState {
   const now = '2026-01-01T00:00:00.000Z';
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -110,6 +115,132 @@ describe('handoff task rendering', () => {
     expect(rendered.text).toContain(
       'Task: Implement retry parsing: accept integer and IMF-fixdate values, clamp to MAX_TIMEOUT_MS.',
     );
+  });
+});
+
+describe('handoff state fingerprint', () => {
+  it('ignores storage revisions and live-run telemetry', () => {
+    const approved = state();
+    const current = structuredClone(approved);
+    current.revision = 42;
+    current.recentOperations = [
+      {
+        opId: 'heartbeat',
+        at: '2026-01-01T00:00:01.000Z',
+        revision: 42,
+      },
+    ];
+    current.task.updatedAt = '2026-01-01T00:00:01.000Z';
+    current.runs = [
+      {
+        runId: 'run-live',
+        displayLabel: 'Codex 1',
+        worktreePath: '/repo/worktree',
+        projectRoot: '/repo',
+        agent: 'codex',
+        launchMode: 'new',
+        controllerId: 'cli:test-boot:controller',
+        controller: {
+          kind: 'cli',
+          instanceId: 'controller',
+          pid: 123,
+          bootId: 'test-boot',
+        },
+        lifecycleStatus: 'waiting_for_input',
+        attentionKind: 'input',
+        activeRuntimeSeconds: 15,
+        runtimeSequence: 3,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        lastSeenAt: '2026-01-01T00:00:01.000Z',
+        status: 'waiting',
+      },
+    ];
+    current.currentAgent = 'codex';
+    current.currentRunId = 'run-live';
+    current.agentHistory = [
+      {
+        id: 'run-live',
+        displayLabel: 'Codex 1',
+        agent: 'codex',
+        startedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    current.checkpoints = [
+      {
+        id: 'checkpoint-1',
+        createdAt: '2026-01-01T00:00:01.000Z',
+        path: 'checkpoints/checkpoint-1',
+      },
+    ];
+
+    expect(handoffStateFingerprint(current)).toBe(
+      handoffStateFingerprint(approved),
+    );
+  });
+
+  it('changes for every state section represented in a handoff', () => {
+    const approved = state();
+    const expected = handoffStateFingerprint(approved);
+    const changes: Array<(value: RelayState) => void> = [
+      (value) => {
+        value.sessionId = 'replacement-session';
+      },
+      (value) => {
+        value.task.originalRequest = 'Changed request';
+      },
+      (value) => {
+        value.notes = [note('next', 'Changed next step')];
+      },
+      (value) => {
+        value.tests = [
+          {
+            command: 'npm test',
+            status: 'failed',
+            exitCode: 1,
+            durationMs: 10,
+            createdAt: '2026-01-01T00:00:01.000Z',
+          },
+        ];
+      },
+      (value) => {
+        value.completedWork = [
+          {
+            description: 'Completed work',
+            updatedAt: '2026-01-01T00:00:01.000Z',
+          },
+        ];
+      },
+      (value) => {
+        value.remainingWork = [
+          {
+            description: 'Remaining work',
+            updatedAt: '2026-01-01T00:00:01.000Z',
+          },
+        ];
+      },
+      (value) => {
+        value.decisions = [
+          {
+            summary: 'Changed decision',
+            createdAt: '2026-01-01T00:00:01.000Z',
+          },
+        ];
+      },
+      (value) => {
+        value.blockers = [
+          {
+            description: 'Changed blocker',
+            createdAt: '2026-01-01T00:00:01.000Z',
+          },
+        ];
+      },
+    ];
+
+    for (const change of changes) {
+      const current = structuredClone(approved);
+      change(current);
+      expect(handoffStateFingerprint(current)).not.toBe(expected);
+    }
   });
 });
 

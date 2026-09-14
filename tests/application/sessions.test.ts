@@ -1,7 +1,9 @@
-import { mkdir } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, ProcessResult } from '../../src/agents/adapter.js';
+import { handoffStateFingerprint } from '../../src/handoff.js';
 import {
+  finalizeTerminalRun,
   markControllerOrphaned,
   recoverOrphanedRun,
   RunAlreadyStartedError,
@@ -16,9 +18,13 @@ import type {
   ProcessStartRequest,
   Unsubscribe,
 } from '../../src/process/process-host.js';
+import { capabilityDescriptorPath } from '../../src/messages/capability.js';
 import { relayPath } from '../../src/safety/path-policy.js';
-import type { RelayState } from '../../src/state/schema.js';
-import { readState, writeState } from '../../src/state/store.js';
+import {
+  LATEST_STATE_SCHEMA,
+  type RelayState,
+} from '../../src/state/schema.js';
+import { readState, updateState, writeState } from '../../src/state/store.js';
 import { createRepository, removeRepository } from '../helpers.js';
 
 const roots: string[] = [];
@@ -36,6 +42,12 @@ const adapter: AgentAdapter = {
     authenticationDiscovery: true,
     usageCollection: true,
     structuredEvents: false,
+    messageDelivery: {
+      inbox: true,
+      nextSafeTurn: false,
+      wake: false,
+      source: 'relay_inbox',
+    },
   },
   async detectInstallation() {
     return { status: 'ready' };
@@ -153,7 +165,7 @@ class FakeProcessHost implements ProcessHost {
 
 function initialState(root: string): RelayState {
   return {
-    schemaVersion: 8,
+    schemaVersion: LATEST_STATE_SCHEMA,
     revision: 0,
     recentOperations: [],
     runs: [],
@@ -203,6 +215,62 @@ const success: ProcessResult = {
 };
 
 describe('SessionManager', () => {
+  it('allows storage-only revisions before a guarded handoff launch', async () => {
+    const { root, state } = await project();
+    const expectedHandoffStateFingerprint = handoffStateFingerprint(state);
+    const current = await updateState(root, (value) => value);
+    const host = new FakeProcessHost();
+    const manager = new SessionManager(host);
+
+    const run = await manager.startRun({
+      projectRoot: root,
+      state: current,
+      adapter,
+      prompt: 'Approved handoff',
+      selection: {
+        operationId: 'guarded-heartbeat',
+        expectedHandoffStateFingerprint,
+      },
+    });
+
+    expect(current.revision).toBeGreaterThan(state.revision);
+    expect(host.starts).toHaveLength(1);
+    host.exit(run.handleId!, success);
+    await run.completion;
+  });
+
+  it('rejects a guarded launch when handoff state changes before lease acquisition', async () => {
+    const { root, state } = await project();
+    const expectedHandoffStateFingerprint = handoffStateFingerprint(state);
+    await updateState(root, (current) => ({
+      ...current,
+      blockers: [
+        ...current.blockers,
+        {
+          description: 'New blocker after approval',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }));
+    const host = new FakeProcessHost();
+    const manager = new SessionManager(host);
+
+    await expect(
+      manager.startRun({
+        projectRoot: root,
+        state,
+        adapter,
+        prompt: 'Stale handoff',
+        selection: {
+          operationId: 'guarded-stale',
+          expectedHandoffStateFingerprint,
+        },
+      }),
+    ).rejects.toThrow(/Handoff-relevant state changed/);
+    expect(host.starts).toHaveLength(0);
+    expect((await readState(root)).runs).toEqual([]);
+  });
+
   it('acquires a lease and finalizes a provider exit exactly once', async () => {
     const { root, state } = await project();
     const host = new FakeProcessHost();
@@ -220,6 +288,13 @@ describe('SessionManager', () => {
       terminalId: 'terminal-1',
       branchLabel: 'main',
       role: 'implement',
+    });
+    const descriptor = capabilityDescriptorPath(root, run.runId);
+    await expect(access(descriptor)).resolves.toBeUndefined();
+    expect(host.starts[0]?.env).toMatchObject({
+      RIREI_PROJECT_ROOT: root,
+      RIREI_RUN_ID: run.runId,
+      RIREI_TERMINAL_ID: 'terminal-1',
     });
     host.exit(run.handleId!, success);
     host.exit(run.handleId!, success);
@@ -243,6 +318,7 @@ describe('SessionManager', () => {
         providerCode: '0',
       },
     });
+    await expect(access(descriptor)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('persists a durable exit classification derived from provider observations', async () => {
@@ -272,6 +348,51 @@ describe('SessionManager', () => {
       },
       providerObservations: [{ kind: 'rate_limit', detail: 'rate_limited' }],
     });
+  });
+
+  it('lets the daemon finalize and release a stopped terminal lease', async () => {
+    const { root, state } = await project();
+    const host = new FakeProcessHost();
+    const manager = new SessionManager(host);
+    const run = await manager.startRun({
+      projectRoot: root,
+      state,
+      adapter,
+      prompt: 'Stop me',
+      selection: { operationId: 'daemon-stop', terminalId: 'terminal-stop' },
+    });
+
+    await finalizeTerminalRun({
+      projectRoot: root,
+      terminalId: 'terminal-stop',
+      status: 'cancelled',
+      exitCode: null,
+      activeRuntimeSeconds: 12,
+      runtimeSequence: 4,
+    });
+    await finalizeTerminalRun({
+      projectRoot: root,
+      terminalId: 'terminal-stop',
+      status: 'cancelled',
+      exitCode: null,
+      activeRuntimeSeconds: 12,
+      runtimeSequence: 4,
+    });
+
+    const persisted = await readState(root);
+    expect(persisted.runs).toEqual([]);
+    expect(persisted.agentHistory[0]).toMatchObject({
+      id: run.runId,
+      endedAt: expect.any(String),
+      exitReason: 'user_cancelled',
+      lifecycleStatus: 'cancelled',
+      activeRuntimeSeconds: 12,
+      runtimeSequence: 4,
+    });
+
+    host.exit(run.handleId!, success);
+    await run.completion;
+    expect((await readState(root)).agentHistory).toHaveLength(1);
   });
 
   it('allows concurrent providers only in different worktrees', async () => {

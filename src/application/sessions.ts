@@ -7,6 +7,7 @@ import type {
   ResumeTargetKind,
 } from '../agents/adapter.js';
 import { interruptedExitClassification } from '../agents/adapter.js';
+import { handoffStateFingerprint } from '../handoff.js';
 import { buildControllerIdentity, controllerIdFor } from './controller.js';
 import { prepareProviderUsage } from '../plan-usage.js';
 import type { ProcessHost } from '../process/process-host.js';
@@ -23,6 +24,15 @@ import type {
   RelayState,
   RunLease,
 } from '../state/schema.js';
+import {
+  formatDefaultSessionLabel,
+  validateSessionLabel,
+} from '../state/run-labels.js';
+import {
+  issueMessageCapability,
+  revokeMessageCapability,
+} from '../messages/capability.js';
+import { expireQueuedMessages } from '../messages/service.js';
 import { ORPHAN_BID_LIMIT } from '../state/schema.js';
 import { updateState } from '../state/store.js';
 import type { WorkspaceRole } from '../worktrees/schema.js';
@@ -30,6 +40,7 @@ import type { WorkspaceRole } from '../worktrees/schema.js';
 export interface RunSelection {
   model?: string;
   effort?: string;
+  displayLabel?: string;
   launchMode?: 'new' | 'resume' | 'fork';
   resumeTargetKind?: ResumeTargetKind;
   resumeTargetValue?: string;
@@ -41,6 +52,8 @@ export interface RunSelection {
   };
   terminalId?: string;
   operationId?: string;
+  /** Semantic state approved in a handoff preview, checked with the lease lock. */
+  expectedHandoffStateFingerprint?: string;
 }
 
 export interface StartRunRequest {
@@ -59,6 +72,16 @@ export interface CompletedRun {
   runId: string;
   result: ProcessResult;
   state: RelayState;
+}
+
+export interface TerminalRunFinalization {
+  projectRoot: string;
+  terminalId: string;
+  status: 'completed' | 'failed' | 'cancelled';
+  exitCode: number | null;
+  classification?: ExitClassification;
+  activeRuntimeSeconds?: number;
+  runtimeSequence?: number;
 }
 
 export interface ManagedRun {
@@ -125,6 +148,125 @@ function resultFromHistory(
   };
 }
 
+function fallbackTerminalClassification(
+  status: TerminalRunFinalization['status'],
+  exitCode: number | null,
+): ExitClassification {
+  if (status === 'completed')
+    return {
+      reason: 'completed',
+      confidence: exitCode === 0 ? 'high' : 'medium',
+      source: exitCode === 0 ? 'provider_exit_code' : 'fallback',
+      ...(exitCode === null ? {} : { providerCode: String(exitCode) }),
+    };
+  if (status === 'cancelled')
+    return {
+      reason: 'user_cancelled',
+      confidence: 'high',
+      source: 'user_intent',
+    };
+  return {
+    reason: 'unknown_failure',
+    confidence: 'low',
+    source: exitCode === null ? 'fallback' : 'provider_exit_code',
+    ...(exitCode === null ? {} : { providerCode: String(exitCode) }),
+  };
+}
+
+/**
+ * Completes a daemon-owned run after its process tree exits. The provider
+ * controller normally wins this race; this idempotent fallback guarantees the
+ * lease is still released when stop escalation terminates that controller.
+ */
+export async function finalizeTerminalRun(
+  request: TerminalRunFinalization,
+): Promise<RelayState> {
+  const classification =
+    request.classification ??
+    fallbackTerminalClassification(request.status, request.exitCode);
+  const endedAt = new Date().toISOString();
+  let runId: string | undefined;
+  let sessionId: string | undefined;
+  let agent: string | undefined;
+  let merged = false;
+  const state = await updateState(
+    request.projectRoot,
+    (current) => {
+      const lease = current.runs.find(
+        (item) => item.terminalId === request.terminalId,
+      );
+      const existing = current.agentHistory.find(
+        (item) =>
+          item.terminalId === request.terminalId || item.id === lease?.runId,
+      );
+      runId = lease?.runId ?? existing?.id;
+      sessionId = current.sessionId;
+      agent = lease?.agent ?? existing?.agent;
+      if (!runId || !existing)
+        throw new Error('The terminal-owned run is not ready yet.');
+      if (existing.endedAt) return releaseLease(current, runId);
+      merged = true;
+      const lifecycleStatus =
+        classification.reason === 'completed'
+          ? ('completed' as const)
+          : ['user_cancelled', 'interrupted'].includes(classification.reason)
+            ? ('cancelled' as const)
+            : ('failed' as const);
+      const agentHistory = current.agentHistory.map((item) =>
+        item.id === runId
+          ? {
+              ...item,
+              endedAt,
+              exitCode: request.exitCode,
+              exitReason: classification.reason,
+              exitClassification: classification,
+              lifecycleStatus,
+              attentionKind: undefined,
+              activeRuntimeSeconds: Math.max(
+                item.activeRuntimeSeconds ?? 0,
+                request.activeRuntimeSeconds ?? 0,
+              ),
+              runtimeSequence: Math.max(
+                item.runtimeSequence ?? 0,
+                request.runtimeSequence ?? 0,
+              ),
+            }
+          : item,
+      );
+      return releaseLease({ ...current, agentHistory }, runId);
+    },
+    { opId: `daemon-finalize:${request.terminalId}` },
+  );
+  if (!runId) return state;
+  await revokeMessageCapability(request.projectRoot, runId).catch(
+    () => undefined,
+  );
+  if (merged)
+    await appendEvent(request.projectRoot, 'agent_ended', {
+      operationId: request.terminalId,
+      runId,
+      sessionId,
+      agent,
+      exitCode: request.exitCode,
+      reason: classification.reason,
+      stateMerge: 'merged_by_daemon',
+    }).catch(() => undefined);
+  await appendTerminalJournal(request.projectRoot, {
+    at: endedAt,
+    terminalId: request.terminalId,
+    event: 'exit',
+    detail: `agent ${agent ?? 'unknown'} ${classification.reason}`,
+  }).catch(() => undefined);
+  if (sessionId)
+    await expireQueuedMessages(
+      request.projectRoot,
+      sessionId,
+      'recipient_ended',
+      runId,
+    ).catch(() => undefined);
+  return state;
+}
+
 /** Owns provider processes and durable run leases independently of any frontend. */
 export class SessionManager {
   private readonly active = new Map<string, ActiveSession>();
@@ -150,21 +292,28 @@ export class SessionManager {
     if (!prepared.inserted)
       throw new RunAlreadyStartedError(runId, operationId);
 
-    await appendEvent(request.projectRoot, 'agent_started', prepared.event);
-    if (selection.terminalId)
-      await appendTerminalJournal(request.projectRoot, {
-        at: new Date().toISOString(),
-        terminalId: selection.terminalId,
-        event: 'attached',
-        detail: `agent ${request.adapter.id} started`,
-      });
-
     let handleId: string;
     try {
+      await appendEvent(request.projectRoot, 'agent_started', prepared.event);
+      if (selection.terminalId)
+        await appendTerminalJournal(request.projectRoot, {
+          at: new Date().toISOString(),
+          terminalId: selection.terminalId,
+          event: 'attached',
+          detail: `agent ${request.adapter.id} started`,
+        });
+
+      const capability = await issueMessageCapability(
+        request.projectRoot,
+        request.state.sessionId,
+        runId,
+        selection.terminalId,
+      );
       handleId = (
         await this.host.start({
           command: prepared.command,
           cwd: prepared.lease.worktreePath,
+          env: { ...process.env, ...capability.env },
         })
       ).id;
     } catch (error) {
@@ -317,8 +466,18 @@ export class SessionManager {
             fork: launchMode === 'fork',
           });
     const startedAt = new Date().toISOString();
+    const previousAgentCount = request.state.agentHistory.filter(
+      (item) => item.agent === request.adapter.id,
+    ).length;
+    const displayLabel =
+      typeof selection.displayLabel === 'string' &&
+      selection.displayLabel.trim()
+        ? validateSessionLabel(selection.displayLabel)
+        : formatDefaultSessionLabel(request.adapter.id, previousAgentCount + 1);
+
     const run = {
       id: runId,
+      displayLabel,
       agent: request.adapter.id,
       model: selection.model,
       effort: selection.effort,
@@ -349,6 +508,7 @@ export class SessionManager {
     });
     const lease: RunLease = {
       runId,
+      displayLabel,
       terminalId: selection.terminalId,
       workspaceId: selection.workspace?.id,
       branchLabel:
@@ -387,6 +547,14 @@ export class SessionManager {
           throw new Error(`Relay task is ${current.task.status}.`);
         if (current.agentHistory.some((item) => item.id === runId))
           return current;
+        if (
+          selection.expectedHandoffStateFingerprint &&
+          handoffStateFingerprint(current) !==
+            selection.expectedHandoffStateFingerprint
+        )
+          throw new Error(
+            'Handoff-relevant state changed before the provider could be launched. Review a fresh handoff.',
+          );
         inserted = true;
         return acquireLease(
           { ...current, agentHistory: [...current.agentHistory, run] },
@@ -437,6 +605,9 @@ export class SessionManager {
     operationId: string,
     result: ProcessResult,
   ): Promise<CompletedRun> {
+    await revokeMessageCapability(request.projectRoot, runId).catch(
+      () => undefined,
+    );
     let classification: ExitClassification = {
       reason: 'unknown_failure',
       confidence: 'low',
@@ -537,6 +708,12 @@ export class SessionManager {
         event: 'exit',
         detail: `agent ${request.adapter.id} ${classification.reason}`,
       }).catch(() => undefined);
+    await expireQueuedMessages(
+      request.projectRoot,
+      request.state.sessionId,
+      'recipient_ended',
+      runId,
+    );
     return { runId, result, state };
   }
 

@@ -1,12 +1,15 @@
 import { hostname } from 'node:os';
+import { interruptedExitClassification } from '../agents/adapter.js';
 import { currentBootId } from './controller.js';
+import { finalizeTerminalRun } from './sessions.js';
 import { appendEvent } from '../state/events.js';
 import { markLeaseOrphaned } from '../state/leases.js';
 import { readTerminalJournal } from '../state/journal.js';
 import type { RelayState } from '../state/schema.js';
 import { updateState } from '../state/store.js';
 
-export type ReconciliationStatus = 'live' | 'needs_attention' | 'orphaned';
+export type ReconciliationStatus =
+  'live' | 'needs_attention' | 'orphaned' | 'finalized';
 
 export interface ReconciledRun {
   runId: string;
@@ -52,10 +55,18 @@ export async function reconcileProjectRuns(
 }> {
   const results: ReconciledRun[] = [];
   const orphaned: ReconciledRun[] = [];
+  const finalizationCandidates: Array<{
+    terminalId: string;
+    status: 'cancelled';
+    exitCode: null;
+    classification?: ReturnType<typeof interruptedExitClassification>;
+    activeRuntimeSeconds: number;
+    runtimeSequence: number;
+  }> = [];
   const bootId = currentBootId();
   const host = hostname();
   const journal = await readTerminalJournal(projectRoot);
-  const state = await updateState(projectRoot, (current) => {
+  let state = await updateState(projectRoot, (current) => {
     let next = current;
     for (const lease of current.runs) {
       const controller = lease.controller;
@@ -103,18 +114,52 @@ export async function reconcileProjectRuns(
             reason: 'daemon_inventory',
           };
         } else {
-          next = markLeaseOrphaned(next, lease.runId);
-          result = {
-            runId: lease.runId,
-            agent: lease.agent,
-            terminalId: lease.terminalId,
-            workspaceId: lease.workspaceId,
-            lastSeenAt: lease.lastSeenAt,
-            ...metadata,
-            status: 'orphaned',
-            reason: 'terminal_missing',
-          };
-          orphaned.push(result);
+          const sameHost = controllerHost === host;
+          const previousBoot = sameHost && controller.bootId !== bootId;
+          const controllerGone = Boolean(
+            sameHost &&
+            controller.pid &&
+            controller.bootId === bootId &&
+            !processIsAlive(controller.pid),
+          );
+          const bridgeGone = Boolean(
+            lease.bridgeIdentity && !processIsAlive(lease.bridgeIdentity.pid),
+          );
+          if (previousBoot || (controllerGone && bridgeGone)) {
+            finalizationCandidates.push({
+              terminalId: lease.terminalId,
+              status: 'cancelled',
+              exitCode: null,
+              ...(lease.status === 'stopping'
+                ? {}
+                : { classification: interruptedExitClassification() }),
+              activeRuntimeSeconds: lease.activeRuntimeSeconds,
+              runtimeSequence: lease.runtimeSequence,
+            });
+            result = {
+              runId: lease.runId,
+              agent: lease.agent,
+              terminalId: lease.terminalId,
+              workspaceId: lease.workspaceId,
+              lastSeenAt: lease.lastSeenAt,
+              ...metadata,
+              status: 'finalized',
+              reason: previousBoot ? 'different_boot' : 'process_gone',
+            };
+          } else {
+            next = markLeaseOrphaned(next, lease.runId);
+            result = {
+              runId: lease.runId,
+              agent: lease.agent,
+              terminalId: lease.terminalId,
+              workspaceId: lease.workspaceId,
+              lastSeenAt: lease.lastSeenAt,
+              ...metadata,
+              status: 'orphaned',
+              reason: 'terminal_missing',
+            };
+            orphaned.push(result);
+          }
         }
       } else if (controllerHost !== host || controller.bootId !== bootId) {
         result = {
@@ -174,6 +219,11 @@ export async function reconcileProjectRuns(
         run.reason === 'terminal_missing'
           ? 'daemon_terminal_missing'
           : 'controller_process_gone',
+    });
+  for (const candidate of finalizationCandidates)
+    state = await finalizeTerminalRun({
+      projectRoot,
+      ...candidate,
     });
   return { state, runs: results };
 }

@@ -17,6 +17,7 @@ say so explicitly rather than describing aspirational behavior.
 | [configuration.md](configuration.md)                     | `.relay/config.json` schema, defaults, and which fields are honored vs. reserved.  |
 | [state-and-events.md](state-and-events.md)               | The `RelayState` schema, migrations, atomic writes, and activity projection.       |
 | [checkpoints-and-handoff.md](checkpoints-and-handoff.md) | Checkpoint contents, size bounding, and the handoff format.                        |
+| [benchmarks.md](benchmarks.md)                           | Handoff benchmark protocol, archived results, limits, and reproduction commands.   |
 | [agents.md](agents.md)                                   | The adapter contract, executable/exit detection, and how to add an adapter.        |
 | [relay-threads.md](relay-threads.md)                     | Local run messaging, capability checks, limits, and delivery semantics.            |
 | [desktop.md](desktop.md)                                 | The Electron app, the integrated xterm.js terminal, and the PTY bridge.            |

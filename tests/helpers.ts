@@ -16,6 +16,11 @@ if (automaticDataHome) {
     rmSync(automaticDataHome, { recursive: true, force: true }),
   );
 }
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith('RIREI_') && key !== 'RIREI_DATA_HOME') {
+    delete process.env[key];
+  }
+}
 
 export async function createRepository(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), 'relay-test-'));

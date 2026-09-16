@@ -5,3 +5,8 @@ release/
 *.app/
 desktop/renderer/vendor/
 desktop/__pycache__/
+.pytest_cache/
+.claude/
+.furou/
+ARCHITECTURE*.md
+atlas.html

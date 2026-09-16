@@ -1,0 +1,14 @@
+{
+  "provider": "claude",
+  "capturedAt": "2026-09-16T12:00:00.000Z",
+  "windows": {
+    "five_hour": {
+      "usedPercentage": 100,
+      "resetsAt": 1789569600
+    },
+    "seven_day": {
+      "usedPercentage": 45,
+      "resetsAt": 1789948800
+    }
+  }
+}

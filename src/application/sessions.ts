@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
   AgentAdapter,
+  AgentId,
   ExitClassification,
   ProcessResult,
   ProviderObservation,
@@ -33,8 +34,13 @@ import {
   revokeMessageCapability,
 } from '../messages/capability.js';
 import { expireQueuedMessages } from '../messages/service.js';
+import { getAgent } from '../agents/registry.js';
+import {
+  detectLimitEvidence,
+  type LimitEvidence,
+} from '../agents/limit-detection.js';
 import { ORPHAN_BID_LIMIT } from '../state/schema.js';
-import { updateState } from '../state/store.js';
+import { readState, updateState } from '../state/store.js';
 import type { WorkspaceRole } from '../worktrees/schema.js';
 
 export interface RunSelection {
@@ -132,6 +138,7 @@ function resultObservations(
   return (observations ?? []).slice(0, 16).map((observation) => ({
     kind: observation.kind,
     ...(observation.detail ? { detail: observation.detail } : {}),
+    ...(observation.confidence ? { confidence: observation.confidence } : {}),
   }));
 }
 
@@ -148,9 +155,10 @@ function resultFromHistory(
   };
 }
 
-function fallbackTerminalClassification(
+export function fallbackTerminalClassification(
   status: TerminalRunFinalization['status'],
   exitCode: number | null,
+  limitEvidence?: LimitEvidence | null,
 ): ExitClassification {
   if (status === 'completed')
     return {
@@ -165,6 +173,17 @@ function fallbackTerminalClassification(
       confidence: 'high',
       source: 'user_intent',
     };
+  if (limitEvidence) {
+    return {
+      reason: limitEvidence.observation.kind,
+      confidence: limitEvidence.confidence,
+      source: 'provider_event',
+      ...(limitEvidence.observation.detail
+        ? { providerCode: limitEvidence.observation.detail }
+        : {}),
+      ...(limitEvidence.retryAt ? { retryAt: limitEvidence.retryAt } : {}),
+    };
+  }
   return {
     reason: 'unknown_failure',
     confidence: 'low',
@@ -181,10 +200,46 @@ function fallbackTerminalClassification(
 export async function finalizeTerminalRun(
   request: TerminalRunFinalization,
 ): Promise<RelayState> {
+  const endedAt = new Date().toISOString();
+  let limitEvidence: LimitEvidence | null = null;
+  if (
+    !request.classification &&
+    !['completed', 'cancelled'].includes(request.status)
+  ) {
+    try {
+      const current = await readState(request.projectRoot);
+      const lease = current.runs.find(
+        (item) => item.terminalId === request.terminalId,
+      );
+      const existing = current.agentHistory.find(
+        (item) =>
+          item.terminalId === request.terminalId || item.id === lease?.runId,
+      );
+      if (existing) {
+        const adapter = getAgent(existing.agent as AgentId);
+        if (adapter) {
+          limitEvidence = await detectLimitEvidence(
+            adapter,
+            { projectRoot: request.projectRoot },
+            {
+              startedAt: existing.startedAt,
+              endedAt,
+              exitCode: request.exitCode,
+            },
+          );
+        }
+      }
+    } catch {
+      // Detection failure degrades to no evidence.
+    }
+  }
   const classification =
     request.classification ??
-    fallbackTerminalClassification(request.status, request.exitCode);
-  const endedAt = new Date().toISOString();
+    fallbackTerminalClassification(
+      request.status,
+      request.exitCode,
+      limitEvidence,
+    );
   let runId: string | undefined;
   let sessionId: string | undefined;
   let agent: string | undefined;
@@ -230,6 +285,14 @@ export async function finalizeTerminalRun(
                 item.runtimeSequence ?? 0,
                 request.runtimeSequence ?? 0,
               ),
+              ...(limitEvidence
+                ? {
+                    providerObservations: resultObservations([
+                      ...(item.providerObservations ?? []),
+                      limitEvidence.observation,
+                    ]),
+                  }
+                : {}),
             }
           : item,
       );
@@ -608,6 +671,28 @@ export class SessionManager {
     await revokeMessageCapability(request.projectRoot, runId).catch(
       () => undefined,
     );
+    const endedAt = new Date().toISOString();
+    let limitEvidence: LimitEvidence | null = null;
+    try {
+      limitEvidence = await detectLimitEvidence(
+        request.adapter,
+        { projectRoot: request.projectRoot },
+        {
+          startedAt: run.startedAt,
+          endedAt,
+          exitCode: result.exitCode,
+        },
+      );
+    } catch {
+      // Lease finalization must not depend on optional provider classification.
+    }
+
+    const observations = resultObservations([
+      ...result.observations,
+      ...(request.observations ?? []),
+      ...(limitEvidence ? [limitEvidence.observation] : []),
+    ]);
+
     let classification: ExitClassification = {
       reason: 'unknown_failure',
       confidence: 'low',
@@ -616,17 +701,20 @@ export class SessionManager {
     try {
       classification = await request.adapter.classifyExit({
         ...result,
-        observations: resultObservations([
-          ...result.observations,
-          ...(request.observations ?? []),
-        ]),
+        observations,
       });
+      if (
+        limitEvidence?.retryAt &&
+        ['usage_limit', 'rate_limit'].includes(classification.reason)
+      ) {
+        classification.retryAt = limitEvidence.retryAt;
+      }
     } catch {
       // Lease finalization must not depend on optional provider classification.
     }
     const completedRun = {
       ...run,
-      endedAt: new Date().toISOString(),
+      endedAt,
       exitCode: result.exitCode,
       exitReason: classification.reason,
       exitClassification: classification,
@@ -637,6 +725,7 @@ export class SessionManager {
             ? ('cancelled' as const)
             : ('failed' as const),
       attentionKind: undefined,
+      providerObservations: observations,
     };
     let merged = false;
     let state: RelayState;

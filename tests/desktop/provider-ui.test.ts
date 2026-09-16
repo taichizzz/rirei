@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import {
   deriveProviderReadiness,
+  displayExitReason,
   effortsForModel,
   formatExactTimestamp,
+  formatLocalReset,
   launchProfileOverrides,
   planStatusLabel,
   selectedModelValue,
@@ -146,5 +148,30 @@ describe('desktop provider UI contract', () => {
         detail: 'Probe timed out.',
       },
     });
+  });
+
+  test('formats exit reason labels and reset timestamps correctly', () => {
+    expect(displayExitReason('usage_limit')).toBe('Usage limit reached');
+    expect(displayExitReason('rate_limit')).toBe('Rate limited');
+    expect(displayExitReason('completed')).toBe('Completed');
+    expect(displayExitReason('user_cancelled')).toBe('User Cancelled');
+    expect(displayExitReason(undefined)).toBe('Result unknown');
+
+    expect(
+      displayExitReason('usage_limit', '2026-09-16T14:30:00.000Z', {
+        locale: 'en-US',
+        timeZone: 'UTC',
+      }),
+    ).toBe('Usage limit reached (until 2:30 PM)');
+
+    expect(
+      displayExitReason('rate_limit', '2026-09-16T14:30:00.000Z', {
+        locale: 'en-US',
+        timeZone: 'UTC',
+      }),
+    ).toBe('Rate limited (until 2:30 PM)');
+
+    expect(formatLocalReset('invalid')).toBeNull();
+    expect(formatLocalReset(undefined)).toBeNull();
   });
 });

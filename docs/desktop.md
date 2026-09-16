@@ -88,7 +88,9 @@ current task and opens a newest-first timeline. Each entry shows:
 - Local start and end timestamps plus a derived duration. A live entry uses the current time
   until the provider exits.
 - The adapter-classified exit reason and process exit code. Unknown failures remain labeled
-  conservatively rather than being reinterpreted by the renderer.
+  conservatively rather than being reinterpreted by the renderer. When a provider exits due to
+  a usage or rate limit, the timeline renders "Usage limit reached" or "Rate limited" along with
+  its formatted local reset time (e.g. `Usage limit reached (until 4:30 PM)`).
 
 The timeline is derived entirely from `agentHistory` returned by `relay status --json`; the
 renderer does not create a separate history database. This means entries survive desktop

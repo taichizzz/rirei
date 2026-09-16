@@ -194,16 +194,8 @@ export function tuiCommand(): Command {
               })
               .catch(() => undefined);
           };
-          let inventory: Array<{
-            id: string;
-            provider: string;
-            project: string;
-            workspaceId: string;
-            branchLabel: string;
-            status: string;
-            attentionKind?: string | null;
-            activeRuntimeSeconds?: number;
-          }> = [];
+          let inventory: Awaited<ReturnType<typeof client.refreshInventory>> =
+            [];
           try {
             inventory = await client.refreshInventory();
           } catch {
@@ -221,6 +213,8 @@ export function tuiCommand(): Command {
               status: item.status,
               attentionKind: item.attentionKind,
               activeRuntimeSeconds: item.activeRuntimeSeconds,
+              exitReason: item.providerResult?.reason,
+              retryAt: item.providerResult?.retryAt,
             }),
           );
 

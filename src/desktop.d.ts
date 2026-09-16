@@ -58,6 +58,13 @@ declare module '*/desktop/terminal-daemon-client.mjs' {
         status: string;
         attentionKind?: string | null;
         activeRuntimeSeconds?: number;
+        providerResult?: {
+          reason?: string;
+          confidence?: string;
+          source?: string;
+          retryAt?: string;
+          providerCode?: string;
+        };
       }>
     >;
     on(

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { discoverRepository, inspectGitBaseline } from '../git/repository.js';
 import { readState } from '../state/store.js';
+import { displayExitReason } from '../agents/limit-detection.js';
 
 export function statusCommand(): Command {
   return new Command('status')
@@ -16,6 +17,7 @@ export function statusCommand(): Command {
       ]);
       const latestTest = state.tests.at(-1);
       const latestCheckpoint = state.checkpoints.at(-1);
+      const latestRun = state.agentHistory.at(-1);
       const previousAgents = [
         ...new Set(state.agentHistory.map((record) => record.agent)),
       ];
@@ -78,6 +80,7 @@ export function statusCommand(): Command {
               currentRunId: state.currentRunId ?? null,
               previousAgents,
               agentHistory: state.agentHistory,
+              latestRun: latestRun ?? null,
               latestTest: latestTest ?? null,
               latestCheckpoint: latestCheckpoint ?? null,
               checkpointCount: state.checkpoints.length,
@@ -98,11 +101,18 @@ export function statusCommand(): Command {
         );
         return;
       }
+      const latestRunText = latestRun
+        ? `${latestRun.agent} (${displayExitReason(
+            latestRun.exitClassification?.reason ?? latestRun.exitReason,
+            latestRun.exitClassification?.retryAt,
+          )})`
+        : 'None';
       const lines = [
         `Session ID: ${state.sessionId}`,
         `Task: ${state.task.title}`,
         `Status: ${state.task.status}`,
         `Current agent: ${state.currentAgent ?? 'None'}`,
+        `Latest run: ${latestRunText}`,
         `Active runs: ${
           state.runs.length === 0
             ? 'None'

@@ -6,6 +6,13 @@ branding changes.
 
 ## Unreleased
 
+### Usage limit detection and reset time surfacing
+
+- Detected provider usage limits from existing usage snapshots across both controller (`SessionManager.finalize()`) and terminal daemon (`finalizeTerminalRun()`) exit paths.
+- Differentiated short-window rate limits (`< 3600s`) from plan quota exhaustion (`>= 3600s`), populating `retryAt` reset timestamps on run exit classifications with medium confidence.
+- Preserved clean exits (`exitCode === 0`) and user cancellations as non-limit terminations, ensuring zero false positives.
+- Surfaced formatted exit reasons and reset timestamps across the desktop UI timeline, TUI session list, and `relay status` (in both text output and structured `--json`).
+
 ## 0.1.0-alpha.4.2 - 2026-09-11
 
 ### Relay Threads

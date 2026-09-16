@@ -411,6 +411,9 @@ export async function runTerminalDaemon(options) {
         },
         exitCode: snapshot.exitCode,
         providerResult: snapshot.providerResult,
+        ...(snapshot.providerResult?.retryAt
+          ? { retryAt: snapshot.providerResult.retryAt }
+          : {}),
       });
       task.resolve();
       succeeded = true;

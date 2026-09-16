@@ -2,6 +2,7 @@ import { TerminalTabsModel } from './terminal-tabs-model.mjs';
 import { LatestRequestGate } from './latest-request.mjs';
 import {
   deriveProviderReadiness,
+  displayExitReason,
   effortsForModel,
   formatExactTimestamp,
   launchProfileOverrides,
@@ -392,7 +393,7 @@ function applyTerminalEvent(event) {
     if (terminal.exitPresented) return;
     terminal.exitPresented = true;
     const providerLabel = event.providerResult
-      ? `provider ${displayExitReason(event.providerResult.reason)}`
+      ? `provider ${displayExitReason(event.providerResult.reason, event.providerResult.retryAt)}`
       : 'provider result unknown';
     const bridgeLabel =
       event.bridgeStatus === 'failed' || event.bridgeError
@@ -1372,14 +1373,6 @@ function displayAgent(agent) {
   return names[agent] ?? agent ?? 'Unknown agent';
 }
 
-function displayExitReason(reason) {
-  if (!reason) return 'Result unknown';
-  return reason
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
 function timelineTone(run) {
   if (!run.endedAt && run.lifecycleStatus === 'orphaned') return 'failed';
   if (!run.endedAt) return 'active';
@@ -1390,10 +1383,13 @@ function timelineTone(run) {
 }
 
 function exitDetail(run) {
-  const parts = [displayExitReason(run.exitReason)];
+  const parts = [
+    displayExitReason(run.exitReason, run.exitClassification?.retryAt),
+  ];
   if (run.exitCode != null) parts.push(`code ${run.exitCode}`);
   if (run.exitClassification) {
-    const { reason, confidence, source, providerCode } = run.exitClassification;
+    const { reason, confidence, source, providerCode, retryAt } =
+      run.exitClassification;
     const lineage = `${confidence} confidence · ${source.replaceAll('_', ' ')}`;
     if (
       providerCode &&
@@ -1402,7 +1398,7 @@ function exitDetail(run) {
     )
       return `${parts.join(' · ')} · ${lineage} · provider ${providerCode}`;
     if (reason !== run.exitReason)
-      return `${parts.join(' · ')} · ${lineage} (classified as ${displayExitReason(reason)})`;
+      return `${parts.join(' · ')} · ${lineage} (classified as ${displayExitReason(reason, retryAt)})`;
     return `${parts.join(' · ')} · ${lineage}`;
   }
   return parts.join(' · ');
@@ -1461,7 +1457,7 @@ function renderTimeline(runs) {
         ? 'Needs recovery'
         : tone === 'active'
           ? 'Running'
-          : displayExitReason(run.exitReason),
+          : displayExitReason(run.exitReason, run.exitClassification?.retryAt),
     );
     head.append(identity, status);
 
@@ -1597,7 +1593,7 @@ async function renderHistory(entries) {
         el(
           'span',
           null,
-          `${displayAgent(run.provider)} · ${run.model ?? 'Auto'} · ${displayExitReason(run.exitReason)}`,
+          `${displayAgent(run.provider)} · ${run.model ?? 'Auto'} · ${displayExitReason(run.exitReason, run.exitClassification?.retryAt ?? run.retryAt)}`,
         ),
       );
       const capabilities = catalog.find((entry) => entry.id === run.provider);

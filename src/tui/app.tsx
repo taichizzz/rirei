@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { DOMElement } from 'ink';
 import type { AgentCatalogEntry } from '../agents/registry.js';
+import { displayExitReason } from '../agents/limit-detection.js';
 import {
   cycleChoice,
   effortChoices,
@@ -50,6 +51,8 @@ export interface TerminalSummary {
   readonly attentionKind?: string | null;
   readonly activeRuntimeSeconds?: number;
   readonly displayLabel?: string;
+  readonly exitReason?: string;
+  readonly retryAt?: string;
 }
 
 export interface AppProps {
@@ -974,7 +977,12 @@ export function createApp(
       else controls.current.delete(id);
     };
 
-    const renderStatus = (status: string, attention?: string | null) => {
+    const renderStatus = (
+      status: string,
+      attention?: string | null,
+      exitReason?: string,
+      retryAt?: string,
+    ) => {
       if (status === 'running') return <Text color="green">RUNNING</Text>;
       if (status === 'waiting') {
         return (
@@ -985,6 +993,17 @@ export function createApp(
       }
       if (status === 'starting') return <Text color="yellow">STARTING</Text>;
       if (status === 'stopping') return <Text color="red">STOPPING</Text>;
+      if (status === 'completed') return <Text color="green">COMPLETED</Text>;
+      if (status === 'failed') {
+        if (exitReason) {
+          return (
+            <Text color="red">
+              {displayExitReason(exitReason, retryAt).toUpperCase()}
+            </Text>
+          );
+        }
+        return <Text color="red">FAILED</Text>;
+      }
       return <Text color="gray">{status.toUpperCase()}</Text>;
     };
 
@@ -1793,7 +1812,12 @@ export function createApp(
                 <Box marginLeft={1} flexShrink={0}>
                   <Text wrap="truncate-end">
                     <Text color="gray">│ </Text>
-                    {renderStatus(terminal.status, terminal.attentionKind)}{' '}
+                    {renderStatus(
+                      terminal.status,
+                      terminal.attentionKind,
+                      terminal.exitReason,
+                      terminal.retryAt,
+                    )}{' '}
                     <Text color="gray">
                       {runtimeLabel(terminal.activeRuntimeSeconds)}
                     </Text>

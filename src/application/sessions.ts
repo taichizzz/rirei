@@ -35,9 +35,12 @@ import {
 } from '../messages/capability.js';
 import { expireQueuedMessages } from '../messages/service.js';
 import { getAgent } from '../agents/registry.js';
+import { createInterface } from 'node:readline/promises';
 import {
+  checkPreflightLimit,
   detectLimitEvidence,
   type LimitEvidence,
+  type PreflightLimitWarning,
 } from '../agents/limit-detection.js';
 import { ORPHAN_BID_LIMIT } from '../state/schema.js';
 import { readState, updateState } from '../state/store.js';
@@ -60,6 +63,10 @@ export interface RunSelection {
   operationId?: string;
   /** Semantic state approved in a handoff preview, checked with the lease lock. */
   expectedHandoffStateFingerprint?: string;
+  failOnExhausted?: boolean;
+  interactive?: boolean;
+  confirmExhausted?: (message: string) => Promise<boolean> | boolean;
+  onPreflightWarning?: (warning: PreflightLimitWarning) => void;
 }
 
 export interface StartRunRequest {
@@ -96,6 +103,7 @@ export interface ManagedRun {
   lease: RunLease | null;
   handleId: string | null;
   completion: Promise<CompletedRun>;
+  warning?: PreflightLimitWarning;
 }
 
 export class RunAlreadyStartedError extends Error {
@@ -350,6 +358,7 @@ export class SessionManager {
         lease: null,
         handleId: null,
         completion: Promise.resolve(prepared.completed),
+        warning: prepared.warning,
       };
     }
     if (!prepared.inserted)
@@ -427,6 +436,7 @@ export class SessionManager {
       lease: prepared.lease,
       handleId,
       completion,
+      warning: prepared.warning,
     };
   }
 
@@ -464,6 +474,57 @@ export class SessionManager {
       throw new Error(
         `${request.adapter.displayName} CLI is not installed or executable on PATH.`,
       );
+
+    let preflightWarning: PreflightLimitWarning | null = null;
+    try {
+      preflightWarning = await checkPreflightLimit(request.adapter, {
+        projectRoot: request.projectRoot,
+      });
+    } catch {
+      // Pre-flight warning check must never block or throw
+    }
+
+    if (preflightWarning) {
+      selection.onPreflightWarning?.(preflightWarning);
+      if (selection.failOnExhausted) {
+        throw new Error(
+          `${preflightWarning.message} Launch refused (--fail-on-exhausted).`,
+        );
+      }
+
+      const isInteractive =
+        selection.interactive ??
+        (Boolean(process.stdin?.isTTY) && Boolean(process.stdout?.isTTY));
+
+      if (isInteractive) {
+        let confirmed = false;
+        if (selection.confirmExhausted) {
+          confirmed = await selection.confirmExhausted(
+            `${preflightWarning.message} Continue?`,
+          );
+        } else {
+          process.stdout.write(`\nWarning: ${preflightWarning.message}\n`);
+          const rl = createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          });
+          try {
+            const answer = await rl.question(
+              `${preflightWarning.message} Continue? [y/N] `,
+            );
+            confirmed = /^y(?:es)?$/i.test(answer.trim());
+          } finally {
+            rl.close();
+          }
+        }
+        if (!confirmed) {
+          throw new Error('Launch cancelled.');
+        }
+      } else {
+        process.stderr.write(`Warning: ${preflightWarning.message}\n`);
+      }
+    }
+
     const launchMode = selection.launchMode ?? 'new';
     if (launchMode !== 'new' && !selection.resumeTargetKind)
       throw new Error('Resume launches require a target.');
@@ -638,6 +699,7 @@ export class SessionManager {
             result: resultFromHistory(existing),
             state: persisted,
           } satisfies CompletedRun,
+          warning: preflightWarning ?? undefined,
         };
     }
     return {
@@ -658,6 +720,7 @@ export class SessionManager {
       },
       lease,
       run,
+      warning: preflightWarning ?? undefined,
     };
   }
 

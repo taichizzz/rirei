@@ -15,6 +15,7 @@ interface ResumeOptions {
   operationId?: string;
   terminalId?: string;
   workspace?: string;
+  failOnExhausted?: boolean;
 }
 
 export function resumeCommand(): Command {
@@ -31,6 +32,10 @@ export function resumeCommand(): Command {
     .option('--operation-id <id>', 'idempotency key for this provider launch')
     .option('--terminal-id <id>', 'terminal that owns this provider launch')
     .option('--workspace <id>', 'resume inside the original Rirei workspace')
+    .option(
+      '--fail-on-exhausted',
+      'refuse to launch if the provider reports an exhausted quota',
+    )
     .action(async (agent: string, options: ResumeOptions) => {
       if (!isAgentId(agent)) throw new Error(`Unknown agent: ${agent}.`);
       const adapter = getAgent(agent);
@@ -95,6 +100,7 @@ export function resumeCommand(): Command {
           operationId: options.operationId,
           terminalId: options.terminalId,
           workspace,
+          failOnExhausted: options.failOnExhausted,
         },
       );
       if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;

@@ -194,10 +194,13 @@ before launch.
 records the terminal that owns the run. Frontends should generate these; ordinary interactive
 CLI use can omit both.
 
+**Option:** `--fail-on-exhausted` — refuse to launch if the provider's fresh telemetry reports an exhausted quota. By default, interactive runs prompt for confirmation before proceeding, while non-interactive runs log a warning.
+
 Behavior:
 
 - Validates the agent id.
 - Builds the prompt (the handoff by default, or `--prompt`).
+- Checks pre-flight quota status if the provider supports `readUsage`. If exhausted and `--fail-on-exhausted` is set, launch aborts. In an interactive terminal, prompts for confirmation.
 - `launchAgent()` verifies the executable is installed, records `agent_started`, spawns the
   CLI with **inherited stdio** in the repository root, classifies the exit, and records
   `agent_ended`. Relay's exit code mirrors the agent's non-zero exit code.
@@ -215,7 +218,8 @@ Checkpoint, preview a handoff, then launch another agent.
 `--terminal-id <id>` use the same session controls as `relay run` for the incoming agent.
 `--yes` is required for non-interactive launches and skips confirmation after the caller has
 reviewed the generated preview. `--allow-empty-notes` overrides the continuation gate and
-launches even when no unresolved continuation note exists.
+launches even when no unresolved continuation note exists. `--fail-on-exhausted` refuses to
+launch if the incoming provider reports an exhausted quota.
 
 Sequence:
 

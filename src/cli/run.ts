@@ -19,6 +19,10 @@ export function runCommand(): Command {
       '--workspace <id>',
       'run inside a Rirei workspace worktree instead of the main working tree',
     )
+    .option(
+      '--fail-on-exhausted',
+      'refuse to launch if the provider reports an exhausted quota',
+    )
     .action(
       async (
         agent: string,
@@ -29,6 +33,7 @@ export function runCommand(): Command {
           workspace?: string;
           operationId?: string;
           terminalId?: string;
+          failOnExhausted?: boolean;
         },
       ) => {
         if (!isAgentId(agent)) throw new Error(`Unknown agent: ${agent}.`);
@@ -50,6 +55,7 @@ export function runCommand(): Command {
             workspace,
             operationId: options.operationId,
             terminalId: options.terminalId,
+            failOnExhausted: options.failOnExhausted,
           },
         );
         if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;

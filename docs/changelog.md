@@ -13,6 +13,12 @@ branding changes.
 - Preserved clean exits (`exitCode === 0`) and user cancellations as non-limit terminations, ensuring zero false positives.
 - Surfaced formatted exit reasons and reset timestamps across the desktop UI timeline, TUI session list, and `relay status` (in both text output and structured `--json`).
 
+### Pre-flight usage limit warnings
+
+- Added pre-flight check in `prepareRun` evaluating fresh provider usage telemetry via a shared exhaustion predicate (`isQuotaExhausted`).
+- Prompted interactive confirmation before launch when an exhausted quota is detected (`"<Provider> reports 0% remaining until <reset>. Continue?"`).
+- Added `--fail-on-exhausted` flag across `relay run`, `relay switch`, and `relay resume` to abort launches against exhausted providers in non-interactive workflows.
+
 ## 0.1.0-alpha.4.2 - 2026-09-11
 
 ### Relay Threads

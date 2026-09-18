@@ -50,6 +50,10 @@ export function switchCommand(): Command {
       '--allow-empty-notes',
       'launch even when no continuation notes were recorded',
     )
+    .option(
+      '--fail-on-exhausted',
+      'refuse to launch if the provider reports an exhausted quota',
+    )
     .action(
       async (
         agent: string,
@@ -60,6 +64,7 @@ export function switchCommand(): Command {
           terminalId?: string;
           yes?: boolean;
           allowEmptyNotes?: boolean;
+          failOnExhausted?: boolean;
         },
       ) => {
         if (!isAgentId(agent)) throw new Error(`Unknown agent: ${agent}.`);
@@ -126,6 +131,7 @@ export function switchCommand(): Command {
             operationId: options.operationId,
             terminalId: options.terminalId,
             expectedHandoffStateFingerprint,
+            failOnExhausted: options.failOnExhausted,
           },
         );
         if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;

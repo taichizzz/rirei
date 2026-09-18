@@ -1,5 +1,6 @@
 import type {
   AgentAdapter,
+  AgentId,
   ProviderObservation,
   ProviderUsageSnapshot,
   UsageCollectionContext,
@@ -14,7 +15,14 @@ export interface LimitEvidence {
   source: 'usage_sample' | 'provider_event';
 }
 
-function isQuotaExhausted(metric: UsageMetric): boolean {
+export interface PreflightLimitWarning {
+  adapterId: AgentId;
+  metric: UsageMetric;
+  retryAt?: string;
+  message: string;
+}
+
+export function isQuotaExhausted(metric: UsageMetric): boolean {
   if (metric.kind !== 'quota') return false;
   if (metric.status === 'stale') return false;
   if (metric.remaining === 0) return true;
@@ -37,6 +45,88 @@ function isQuotaExhausted(metric: UsageMetric): boolean {
   )
     return true;
   return false;
+}
+
+export async function checkPreflightLimit(
+  adapter: AgentAdapter,
+  context: UsageCollectionContext,
+): Promise<PreflightLimitWarning | null> {
+  if (typeof adapter.readUsage !== 'function') return null;
+
+  let snapshots: ProviderUsageSnapshot[];
+  try {
+    snapshots = await adapter.readUsage(context);
+  } catch {
+    return null;
+  }
+
+  if (!Array.isArray(snapshots) || snapshots.length === 0) return null;
+
+  const staleWindow = context.staleAfterMs ?? PLAN_USAGE_STALE_MS;
+  const now = context.now ? context.now.getTime() : Date.now();
+
+  for (const snapshot of snapshots) {
+    if (snapshot.status !== 'available' || !snapshot.capturedAt) continue;
+
+    const captured = Date.parse(snapshot.capturedAt);
+    if (!Number.isFinite(captured)) continue;
+    if (Math.abs(now - captured) > staleWindow) continue;
+
+    const exhaustedMetrics = (snapshot.metrics ?? []).filter(isQuotaExhausted);
+    if (exhaustedMetrics.length === 0) continue;
+
+    const candidateMetrics = exhaustedMetrics.some(
+      (m) =>
+        m.window?.durationSeconds === undefined ||
+        m.window.durationSeconds >= 3600,
+    )
+      ? exhaustedMetrics.filter(
+          (m) =>
+            m.window?.durationSeconds === undefined ||
+            m.window.durationSeconds >= 3600,
+        )
+      : exhaustedMetrics;
+
+    const futureResets = candidateMetrics
+      .map((m) => m.resetsAt)
+      .filter((reset): reset is string => {
+        if (!reset) return false;
+        const resetTime = Date.parse(reset);
+        return Number.isFinite(resetTime) && resetTime > now;
+      })
+      .sort((a, b) => Date.parse(a) - Date.parse(b));
+
+    const retryAt = futureResets[0];
+    const metric =
+      (retryAt
+        ? candidateMetrics.find((m) => m.resetsAt === retryAt)
+        : undefined) ?? candidateMetrics[0];
+
+    if (!metric) return null;
+
+    const resetText = formatLocalReset(retryAt);
+    const resetPart = resetText ? ` until ${resetText}` : '';
+    const remaining =
+      metric.remaining ??
+      (metric.unit === 'percent' && metric.used !== undefined
+        ? Math.max(0, 100 - metric.used)
+        : 0);
+    const remainingText =
+      metric.unit === 'percent' || metric.remaining !== undefined
+        ? `${remaining}% remaining`
+        : '0% remaining';
+
+    const message = `${adapter.displayName} reports ${remainingText}${resetPart}.`;
+
+    return {
+      adapterId: adapter.id,
+      metric,
+      ...(retryAt ? { retryAt } : {}),
+      message,
+    };
+  }
+
+  return null;
 }
 
 export async function detectLimitEvidence(

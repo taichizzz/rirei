@@ -24,6 +24,7 @@ import { appendEvent } from './state/events.js';
 import type { RelayState } from './state/schema.js';
 import { readState, updateState } from './state/store.js';
 import type { AgentAdapter, ProcessResult } from './agents/adapter.js';
+import type { PreflightLimitWarning } from './agents/limit-detection.js';
 import { InheritedProcessHost } from './process/inherited-process-host.js';
 
 export async function taskContext(
@@ -166,7 +167,11 @@ export async function launchAgent(
   adapter: AgentAdapter,
   prompt: string,
   selection: RunSelection = {},
-): Promise<{ result: ProcessResult; state: RelayState }> {
+): Promise<{
+  result: ProcessResult;
+  state: RelayState;
+  warning?: PreflightLimitWarning;
+}> {
   const controller = buildControllerIdentity({
     terminalId: selection.terminalId,
   });
@@ -194,7 +199,11 @@ export async function launchAgent(
       throw new Error(
         `${adapter.displayName} could not start (${completed.result.spawnErrorCode}).`,
       );
-    return { result: completed.result, state: completed.state };
+    return {
+      result: completed.result,
+      state: completed.state,
+      warning: managed.warning,
+    };
   } finally {
     heartbeat.stop();
     await heartbeat.orphanOwned().catch(() => undefined);

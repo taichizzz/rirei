@@ -435,7 +435,7 @@ describe('detectLimitEvidence unit tests', () => {
 });
 
 describe('finalize paths integration', () => {
-  const futureReset = '2026-09-16T14:30:00.000Z';
+  const futureReset = new Date(Date.now() + 7200 * 1000).toISOString();
 
   async function setupRepoWithTask() {
     const root = await createRepository();

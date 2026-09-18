@@ -176,6 +176,8 @@ export function createApp(
     const [launchCustomModel, setLaunchCustomModel] = useState('');
     const [usageOpen, setUsageOpen] = useState(false);
     const [selectedUsage, setSelectedUsage] = useState(0);
+    const [handoffOfferDismissed, setHandoffOfferDismissed] = useState(false);
+    const handoffOffer = initialData.handoffOffer;
     const [threadsData, setThreadsData] = useState(initialData.threads);
     const [threadsOpen, setThreadsOpen] = useState(false);
     const [threadView, setThreadView] = useState<
@@ -671,6 +673,21 @@ export function createApp(
       if (notificationCard && key.escape) {
         setNotificationCard(null);
         return;
+      }
+
+      if (handoffOffer && !handoffOfferDismissed && handoffOffer.target) {
+        if (input === 'h' || input === 'H') {
+          void onLaunchAgent({
+            agent: handoffOffer.target.id,
+            command: 'switch',
+          });
+          setHandoffOfferDismissed(true);
+          return;
+        }
+        if (input === 'd' || input === 'D') {
+          setHandoffOfferDismissed(true);
+          return;
+        }
       }
 
       if (stopConfirmation) {
@@ -1731,7 +1748,13 @@ export function createApp(
     const activeProjects = initialData.activity?.projects ?? [];
     const projectName = basename(initialData.currentProject);
     const feedbackIsError = feedbackMessage?.includes('failed:') ?? false;
-    const feedbackRows = (feedbackMessage ? 4 : 0) + (notificationCard ? 4 : 0);
+    const hasActiveOffer = Boolean(
+      handoffOffer && !handoffOfferDismissed && handoffOffer.target,
+    );
+    const feedbackRows =
+      (feedbackMessage ? 4 : 0) +
+      (notificationCard ? 4 : 0) +
+      (hasActiveOffer ? 5 : 0);
     const showSidePanel = wide || terminalHeight >= 28 + feedbackRows;
     const visibleSessionLimit = Math.min(
       8,
@@ -1998,6 +2021,28 @@ export function createApp(
           {sessionsPanel}
           {showSidePanel ? sidePanel : null}
         </Box>
+
+        {hasActiveOffer && handoffOffer?.target && (
+          <Box
+            borderStyle="round"
+            borderColor="magenta"
+            paddingX={1}
+            marginTop={1}
+            flexDirection="column"
+            flexShrink={0}
+          >
+            <Text bold color="magenta">
+              {handoffOffer.headline}
+            </Text>
+            <Text color="dim">
+              {handoffOffer.target.displayName}: {handoffOffer.target.reason}
+            </Text>
+            {handoffOffer.notesWarning ? (
+              <Text color="yellow">{handoffOffer.notesWarning}</Text>
+            ) : null}
+            <Text color="cyan">Press H to hand off • D to dismiss</Text>
+          </Box>
+        )}
 
         {notificationCard && (
           <Box

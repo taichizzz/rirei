@@ -1,7 +1,9 @@
 import { Command } from 'commander';
+import type { AgentId } from '../agents/adapter.js';
 import { discoverRepository, inspectGitBaseline } from '../git/repository.js';
 import { readState } from '../state/store.js';
 import { displayExitReason } from '../agents/limit-detection.js';
+import { buildHandoffOffer } from '../application/handoff-suggestion.js';
 
 export function statusCommand(): Command {
   return new Command('status')
@@ -59,6 +61,24 @@ export function statusCommand(): Command {
             createdAt: note.createdAt,
           })),
       ];
+      let handoffOffer = null;
+      if (
+        latestRun?.exitClassification &&
+        ['usage_limit', 'rate_limit'].includes(
+          latestRun.exitClassification.reason,
+        )
+      ) {
+        try {
+          handoffOffer = await buildHandoffOffer(
+            projectRoot,
+            state,
+            latestRun.agent as AgentId,
+            latestRun.exitClassification,
+          );
+        } catch {
+          // Suggestion lookup failure degrades to no offer
+        }
+      }
       if (options.json) {
         process.stdout.write(
           `${JSON.stringify(
@@ -94,6 +114,7 @@ export function statusCommand(): Command {
               ),
               questions: activeNotes.filter((note) => note.type === 'question'),
               notes: state.notes,
+              handoffOffer,
             },
             null,
             2,
@@ -138,6 +159,13 @@ export function statusCommand(): Command {
         `Rejected approaches: ${activeNotes.filter((note) => note.type === 'rejected').length}`,
         `Open questions: ${activeNotes.filter((note) => note.type === 'question').length}`,
       ];
+      if (handoffOffer?.target) {
+        lines.push(`Handoff offer: ${handoffOffer.headline}`);
+        if (handoffOffer.notesWarning) {
+          lines.push(`Handoff notes: ${handoffOffer.notesWarning}`);
+        }
+        lines.push(`Suggested command: relay switch ${handoffOffer.target.id}`);
+      }
       process.stdout.write(`${lines.join('\n')}\n`);
     });
 }

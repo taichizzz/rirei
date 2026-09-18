@@ -103,6 +103,13 @@ const threadsRequestGate = new LatestRequestGate();
 const threadRequestGate = new LatestRequestGate();
 const recoverRun = document.querySelector('#recoverRun');
 const resumeRecovered = document.querySelector('#resumeRecovered');
+const handoffOfferBanner = document.querySelector('#handoffOfferBanner');
+const handoffOfferHeadline = document.querySelector('#handoffOfferHeadline');
+const handoffOfferNotes = document.querySelector('#handoffOfferNotes');
+const handoffOfferAccept = document.querySelector('#handoffOfferAccept');
+const handoffOfferChoose = document.querySelector('#handoffOfferChoose');
+const handoffOfferDismiss = document.querySelector('#handoffOfferDismiss');
+let currentHandoffOffer = null;
 const checkpointModal = document.querySelector('#checkpointModal');
 const checkpointClose = document.querySelector('#checkpointClose');
 const checkpointList = document.querySelector('#checkpointList');
@@ -879,12 +886,33 @@ function renderDashboard(data) {
   agentHistory = Array.isArray(data.agentHistory) ? data.agentHistory : [];
   timelineCount.textContent = String(agentHistory.length);
   if (!timelineModal.hidden) renderTimeline(agentHistory);
+
+  if (data.handoffOffer && data.handoffOffer.target) {
+    currentHandoffOffer = data.handoffOffer;
+    if (handoffOfferHeadline)
+      handoffOfferHeadline.textContent = data.handoffOffer.headline;
+    if (handoffOfferNotes) {
+      if (data.handoffOffer.notesWarning) {
+        handoffOfferNotes.textContent = data.handoffOffer.notesWarning;
+        handoffOfferNotes.hidden = false;
+      } else {
+        handoffOfferNotes.hidden = true;
+      }
+    }
+    if (handoffOfferBanner) handoffOfferBanner.hidden = false;
+  } else {
+    currentHandoffOffer = null;
+    if (handoffOfferBanner) handoffOfferBanner.hidden = true;
+  }
+
   renderAttentionCenter();
   syncControls();
 }
 
 function renderDashboardUnavailable(message) {
   window.hasRecoverableRun = false;
+  currentHandoffOffer = null;
+  if (handoffOfferBanner) handoffOfferBanner.hidden = true;
   dashboardTitle.textContent = project
     ? 'No Relay task loaded'
     : 'No project selected';
@@ -1329,6 +1357,30 @@ resumeRecovered.addEventListener('click', async () => {
     resumeRecovered.hidden = true;
   }
 });
+
+if (handoffOfferAccept) {
+  handoffOfferAccept.addEventListener('click', async () => {
+    if (!currentHandoffOffer?.target) return;
+    const targetId = currentHandoffOffer.target.id;
+    if (handoffOfferBanner) handoffOfferBanner.hidden = true;
+    currentHandoffOffer = null;
+    await launchInteractive('switch', targetId);
+  });
+}
+if (handoffOfferChoose) {
+  handoffOfferChoose.addEventListener('click', () => {
+    const drawerToggle = document.querySelector('#drawerToggle');
+    if (drawerToggle && drawerToggle.getAttribute('aria-expanded') !== 'true') {
+      drawerToggle.click();
+    }
+  });
+}
+if (handoffOfferDismiss) {
+  handoffOfferDismiss.addEventListener('click', () => {
+    if (handoffOfferBanner) handoffOfferBanner.hidden = true;
+    currentHandoffOffer = null;
+  });
+}
 
 /* ---- durable agent session timeline ---- */
 function formatSessionTime(iso) {

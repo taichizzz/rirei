@@ -19,6 +19,16 @@ branding changes.
 - Prompted interactive confirmation before launch when an exhausted quota is detected (`"<Provider> reports 0% remaining until <reset>. Continue?"`).
 - Added `--fail-on-exhausted` flag across `relay run`, `relay switch`, and `relay resume` to abort launches against exhausted providers in non-interactive workflows.
 
+### Provider handoff offers on limit exits
+
+- Added `suggestHandoffTargets` and `buildHandoffOffer` (`src/application/handoff-suggestion.ts`) to recommend alternative installed providers when a run exits with `usage_limit` or `rate_limit`.
+- Candidates prioritize providers previously used on the active task followed by providers reporting available quota; exhausted alternatives are excluded and unknown usage remains eligible.
+- Added desktop task-area handoff banner with Hand off, Choose another, and Dismiss actions.
+- Added TUI dashboard handoff offer card with H (Hand off) and D (Dismiss) keybindings.
+- Surfaced handoff suggestions in CLI exit outputs (`relay run`, `relay switch`, `relay resume`) and `relay status` (in human-readable text and `--json` via `handoffOffer`).
+- Preserved all `relay switch` consent guarantees: all handoffs route through checkpoint creation, handoff preview, continuation gate checks, interactive confirmation, and state fingerprint verification, with zero automatic switching.
+- Checked continuation note status up front, warning when no notes are recorded instead of hitting an unexpected switch failure.
+
 ## 0.1.0-alpha.4.2 - 2026-09-11
 
 ### Relay Threads

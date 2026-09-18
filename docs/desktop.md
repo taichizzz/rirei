@@ -100,6 +100,24 @@ optional. The view updates whenever the normal dashboard refreshes, including sh
 launch and when the PTY reports exit. It records metadata only—no prompt, response, terminal
 transcript, credentials, or provider conversation content is displayed or added to state.
 
+### Usage limit handoff offer
+
+When an agent run terminates due to quota exhaustion or rate limits (`usage_limit` or `rate_limit`),
+Rirei surfaces an actionable handoff banner in the task area above the terminal:
+
+- **Headline**: e.g. `Claude reached its usage limit (resets 4:30 PM). Hand off to Codex?`
+- **Provider recommendation**: Alternative installed providers are ranked with preference for
+  providers already used on this task, followed by providers reporting known available quota.
+  Providers with unknown usage remain eligible.
+- **Continuation note guard**: If no unresolved continuation notes (`next`, `blocker`, `decision`,
+  `rejected`, or `question`) were recorded, the banner warns up front: `"No continuation notes recorded. Add one to hand off, or switch anyway."`
+- **Actions**:
+  - **Hand off**: Initiates `relay switch <target>` in the interactive terminal, ensuring the full
+    switch safeguard workflow executes (checkpoint creation, handoff preview, continuation gate,
+    approval prompt, and state fingerprint verification). Never switches automatically.
+  - **Choose another**: Opens the agent drawer to select a different provider or adjust model/effort profiles.
+  - **Dismiss**: Dismisses the banner for the current run.
+
 Each agent row includes a **session profile** button. The picker discovers installed CLI
 versions and current model catalogs, offers only provider-supported effort levels, supports a
 custom model ID, previews the launch selection, and stores preferences per provider in desktop

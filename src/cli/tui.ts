@@ -41,6 +41,7 @@ export async function startTuiAgent(
 ) {
   const request = {
     kind: 'agent',
+    ...(selection.command ? { command: selection.command } : {}),
     agent: selection.agent,
     model: selection.model,
     effort: selection.effort,

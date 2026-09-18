@@ -1278,6 +1278,67 @@ textarea {
   display: none;
 }
 
+.handoff-offer-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--surface-2, #1c1c1e);
+  border: 1px solid var(--warning, #e5a50a);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text, #f2f2f7);
+  font-size: 12px;
+}
+
+.handoff-offer-banner[hidden] {
+  display: none;
+}
+
+.handoff-offer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.handoff-offer-headline {
+  font-weight: 600;
+}
+
+.handoff-offer-notes {
+  color: var(--warning, #e5a50a);
+  font-size: 11px;
+}
+
+.handoff-offer-notes[hidden] {
+  display: none;
+}
+
+.handoff-offer-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.handoff-offer-actions button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  padding: 4px 10px;
+  cursor: pointer;
+  font: 580 11px var(--sans, sans-serif);
+}
+
+.handoff-offer-actions button.primary {
+  background: var(--accent, #007aff);
+  border-color: var(--accent, #007aff);
+  color: #fff;
+}
+
 /* ---- Workspace: full-width terminal with the drawer floating over it ---- */
 
 .workspace {

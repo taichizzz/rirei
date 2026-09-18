@@ -14,6 +14,7 @@ import {
   renderHandoffDocument,
   taskContext,
 } from '../lifecycle.js';
+import { printHandoffSuggestion } from '../application/handoff-suggestion.js';
 import { readState } from '../state/store.js';
 
 export async function verifySwitchPreview(
@@ -120,7 +121,7 @@ export function switchCommand(): Command {
         }
         const latestState = await verifySwitchPreview(context.root, handoff);
         process.stdout.write(`Launching ${agent}...\n`);
-        const { result } = await launchAgent(
+        const { result, state: finalState } = await launchAgent(
           context.root,
           latestState,
           getAgent(agent),
@@ -134,7 +135,21 @@ export function switchCommand(): Command {
             failOnExhausted: options.failOnExhausted,
           },
         );
-        if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
+        if (result.exitCode !== 0) {
+          process.exitCode = result.exitCode ?? 1;
+          const lastRun = finalState.agentHistory.at(-1);
+          if (
+            lastRun?.exitClassification?.reason === 'usage_limit' ||
+            lastRun?.exitClassification?.reason === 'rate_limit'
+          ) {
+            await printHandoffSuggestion(
+              context.root,
+              finalState,
+              agent,
+              lastRun.exitClassification,
+            );
+          }
+        }
       },
     );
 }

@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { getAgent, isAgentId } from '../agents/registry.js';
+import { printHandoffSuggestion } from '../application/handoff-suggestion.js';
 import { launchAgent, renderHandoff, taskContext } from '../lifecycle.js';
 import { resolveWorkspace } from '../worktrees/registry.js';
 
@@ -44,7 +45,7 @@ export function runCommand(): Command {
         const prompt =
           options.prompt ??
           (await renderHandoff(root, state, workspace?.worktreePath));
-        const { result } = await launchAgent(
+        const { result, state: finalState } = await launchAgent(
           root,
           state,
           getAgent(agent),
@@ -58,7 +59,21 @@ export function runCommand(): Command {
             failOnExhausted: options.failOnExhausted,
           },
         );
-        if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
+        if (result.exitCode !== 0) {
+          process.exitCode = result.exitCode ?? 1;
+          const lastRun = finalState.agentHistory.at(-1);
+          if (
+            lastRun?.exitClassification?.reason === 'usage_limit' ||
+            lastRun?.exitClassification?.reason === 'rate_limit'
+          ) {
+            await printHandoffSuggestion(
+              root,
+              finalState,
+              agent,
+              lastRun.exitClassification,
+            );
+          }
+        }
       },
     );
 }

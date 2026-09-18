@@ -16,6 +16,11 @@ import {
   type ThreadsData,
   unavailableThreadsData,
 } from './threads.js';
+import {
+  buildHandoffOffer,
+  type HandoffOffer,
+} from '../application/handoff-suggestion.js';
+import type { AgentId } from '../agents/adapter.js';
 
 export interface DashboardData {
   readonly activity: ActivitySnapshot | null;
@@ -23,6 +28,7 @@ export interface DashboardData {
   readonly currentProject: string;
   readonly lastUpdated: string;
   readonly threads: ThreadsData;
+  readonly handoffOffer?: HandoffOffer | null;
 }
 
 export async function loadThreadsData(
@@ -74,11 +80,38 @@ export async function loadDashboardData(
 
   const threads = await loadThreadsData(currentProject);
 
+  let handoffOffer: HandoffOffer | null = null;
+  try {
+    const root = await discoverRepositoryAuthority(
+      process.env.RIREI_PROJECT_ROOT?.trim() || currentProject,
+    );
+    if (root) {
+      const state = await readState(root);
+      const latestRun = state.agentHistory.at(-1);
+      if (
+        latestRun?.exitClassification &&
+        ['usage_limit', 'rate_limit'].includes(
+          latestRun.exitClassification.reason,
+        )
+      ) {
+        handoffOffer = await buildHandoffOffer(
+          root,
+          state,
+          latestRun.agent as AgentId,
+          latestRun.exitClassification,
+        );
+      }
+    }
+  } catch {
+    // Ignore suggestion lookup errors
+  }
+
   return {
     activity,
     planUsage,
     currentProject,
     lastUpdated: new Date().toLocaleTimeString(),
     threads,
+    handoffOffer,
   };
 }

@@ -74,7 +74,9 @@ decisions, and blockers.
 
 The human-readable status continues to summarize current and previous agents. Detailed
 per-run history is intentionally confined to `--json` so the default terminal output remains
-compact.
+compact. If the most recent run ended at a usage limit or rate limit, `relay status` prints a
+suggested alternative provider and switch command; in `--json` mode, an optional `handoffOffer`
+structure is included detailing candidate targets, reasons, and continuation note warnings.
 
 ---
 
@@ -204,6 +206,7 @@ Behavior:
 - `launchAgent()` verifies the executable is installed, records `agent_started`, spawns the
   CLI with **inherited stdio** in the repository root, classifies the exit, and records
   `agent_ended`. Relay's exit code mirrors the agent's non-zero exit code.
+- If the agent exits with a usage limit or rate limit, Relay prints a handoff suggestion with available alternative providers and the corresponding `relay switch <agent>` command.
 
 The launched CLI handles its own authentication. Relay passes the prompt and any explicit
 model/effort selection.
@@ -234,6 +237,7 @@ Sequence:
 6. Recheck state and Git after approval; if either changed, refuse the stale preview.
 7. `launchAgent()` for the target CLI (records `agent_started` / `agent_ended`). A cancellation
    or refusal keeps the checkpoint but launches nothing.
+8. If the run exits at a usage or rate limit, Relay suggests alternative providers and commands.
 
 > Current limitation: `switch` records agent start/end events but does not append a distinct
 > `switch` event.

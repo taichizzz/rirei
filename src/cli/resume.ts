@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import type { ResumeTargetKind } from '../agents/adapter.js';
 import { getAgent, isAgentId } from '../agents/registry.js';
+import { printHandoffSuggestion } from '../application/handoff-suggestion.js';
 import { launchAgent, taskContext } from '../lifecycle.js';
 import { resolveWorkspace } from '../worktrees/registry.js';
 
@@ -86,7 +87,7 @@ export function resumeCommand(): Command {
             context.state.sessionId,
           )
         : undefined;
-      const { result } = await launchAgent(
+      const { result, state: finalState } = await launchAgent(
         context.root,
         context.state,
         adapter,
@@ -103,6 +104,20 @@ export function resumeCommand(): Command {
           failOnExhausted: options.failOnExhausted,
         },
       );
-      if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
+      if (result.exitCode !== 0) {
+        process.exitCode = result.exitCode ?? 1;
+        const lastRun = finalState.agentHistory.at(-1);
+        if (
+          lastRun?.exitClassification?.reason === 'usage_limit' ||
+          lastRun?.exitClassification?.reason === 'rate_limit'
+        ) {
+          await printHandoffSuggestion(
+            context.root,
+            finalState,
+            agent,
+            lastRun.exitClassification,
+          );
+        }
+      }
     });
 }

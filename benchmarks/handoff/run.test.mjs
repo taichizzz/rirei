@@ -482,6 +482,14 @@ test('runDryTask applies the full dry-run gate on a real relay build', async () 
     result.successorGates.baseline.fingerprint,
     result.successorGates.treatment.fingerprint,
   );
+  assert.equal(
+    result.successorGates.baseline.fingerprint,
+    result.successorGates['handoff-with-notes'].fingerprint,
+  );
+  assert.equal(
+    result.successorGates.baseline.fingerprint,
+    result.successorGates['handoff-no-notes'].fingerprint,
+  );
   assert.equal(result.handoff.duplicateTaskOccurrences, 1);
   assert.equal(result.handoff.containsNoteInstruction, false);
   assert.ok(
@@ -491,5 +499,16 @@ test('runDryTask applies the full dry-run gate on a real relay build', async () 
   assert.ok(
     result.handoff.characters <= 1_200,
     `expected <=1,200 characters, got ${result.handoff.characters}`,
+  );
+  assert.ok(result.handoffNoNotes);
+  assert.equal(result.handoffNoNotes.duplicateTaskOccurrences, 1);
+  assert.equal(result.handoffNoNotes.containsNoteInstruction, false);
+  assert.ok(
+    result.handoffNoNotes.estimatedTokens <= 300,
+    `expected <=300 est. tokens for no-notes, got ${result.handoffNoNotes.estimatedTokens}`,
+  );
+  assert.ok(
+    result.handoffNoNotes.characters <= 1_200,
+    `expected <=1,200 characters for no-notes, got ${result.handoffNoNotes.characters}`,
   );
 });

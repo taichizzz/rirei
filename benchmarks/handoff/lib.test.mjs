@@ -40,6 +40,9 @@ test('extracts only emitted Codex metrics', () => {
     reasoningTokens: 7,
     modelTurns: 1,
     toolCalls: 1,
+    distinctFilesRead: null,
+    timeToFirstEditMs: null,
+    turnsBeforeFirstEdit: null,
   });
   assert.equal(parseProviderMetrics('codex', 'not json').inputTokens, null);
   assert.equal(
@@ -98,6 +101,9 @@ test('uses authoritative Antigravity result usage without double-counting steps'
     reasoningTokens: 5,
     modelTurns: 3,
     toolCalls: 1,
+    distinctFilesRead: null,
+    timeToFirstEditMs: null,
+    turnsBeforeFirstEdit: null,
   });
 });
 
@@ -140,4 +146,147 @@ test('aggregates paired deltas and applies the predeclared rule', () => {
     wallTimeMs: { baseline: 500, treatment: 410, delta: -90 },
     nonCachedTokens: { baseline: 500, treatment: 500 },
   });
+});
+
+test('extracts exploration metrics when exposed and leaves missing metrics null', () => {
+  const codexLog = [
+    JSON.stringify({ type: 'turn.started', timestamp: 1000 }),
+    JSON.stringify({
+      type: 'item.started',
+      item: { type: 'file_read', path: 'src/index.js' },
+      timestamp: 1200,
+    }),
+    JSON.stringify({
+      type: 'item.started',
+      item: { type: 'file_read', path: 'src/utils.js' },
+      timestamp: 1400,
+    }),
+    JSON.stringify({
+      type: 'item.started',
+      item: { type: 'file_read', path: 'src/index.js' }, // duplicate read
+      timestamp: 1500,
+    }),
+    JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 50, output_tokens: 10 },
+      timestamp: 1600,
+    }),
+    JSON.stringify({
+      type: 'turn.started',
+      timestamp: 1700,
+    }),
+    JSON.stringify({
+      type: 'item.started',
+      item: { type: 'file_change' },
+      timestamp: 2500,
+    }),
+    JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 60, output_tokens: 20 },
+      timestamp: 3000,
+    }),
+  ].join('\n');
+
+  const metrics = parseProviderMetrics('codex', codexLog);
+  assert.equal(metrics.distinctFilesRead, 2);
+  assert.equal(metrics.timeToFirstEditMs, 1500); // 2500 - 1000
+  assert.equal(metrics.turnsBeforeFirstEdit, 1);
+  assert.equal(metrics.toolCalls, 1); // 1 file_change
+
+  // Missing exploration metrics stay null
+  const bareLog = JSON.stringify({
+    type: 'turn.completed',
+    usage: { input_tokens: 10, output_tokens: 2 },
+  });
+  const bareMetrics = parseProviderMetrics('codex', bareLog);
+  assert.equal(bareMetrics.distinctFilesRead, null);
+  assert.equal(bareMetrics.timeToFirstEditMs, null);
+  assert.equal(bareMetrics.turnsBeforeFirstEdit, null);
+});
+
+test('evaluates three arms separately with pairwise deltas without collapsing', () => {
+  const condition = (wallTimeMs, inputTokens, filesRead, passed = true) => ({
+    wallTimeMs,
+    metrics: {
+      inputTokens,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      distinctFilesRead: filesRead,
+      toolCalls: 2,
+      timeToFirstEditMs: 500,
+      turnsBeforeFirstEdit: 1,
+    },
+    evaluation: { combined: { passed } },
+  });
+
+  const tasks = [0, 1, 2].map((index) => ({
+    taskId: `task-${index}`,
+    order: ['baseline', 'handoff-no-notes', 'handoff-with-notes'],
+    conditions: {
+      baseline: condition(100, 200, 5, true),
+      'handoff-no-notes': condition(95, 190, 4, true),
+      'handoff-with-notes': condition(60, 100, 2, true),
+    },
+  }));
+
+  const analysis = aggregateResults(tasks);
+  assert.equal(analysis.summary.taskCount, 3);
+  assert.equal(analysis.summary.successCounts.baseline, 3);
+  assert.equal(analysis.summary.successCounts['handoff-no-notes'], 3);
+  assert.equal(analysis.summary.successCounts['handoff-with-notes'], 3);
+
+  // Pairwise comparisons exist separately
+  const firstPair = analysis.pairs[0];
+  assert.ok(firstPair.comparisons.withNotesVsBaseline);
+  assert.ok(firstPair.comparisons.noNotesVsBaseline);
+  assert.ok(firstPair.comparisons.withNotesVsNoNotes);
+
+  // withNotes vs baseline
+  assert.equal(
+    firstPair.comparisons.withNotesVsBaseline.nonCachedTokenDelta,
+    -100,
+  );
+  assert.equal(
+    firstPair.comparisons.withNotesVsBaseline.distinctFilesReadDelta,
+    -3,
+  );
+  assert.equal(
+    firstPair.comparisons.withNotesVsBaseline.reachesTwentyPercent,
+    true,
+  );
+
+  // noNotes vs baseline
+  assert.equal(
+    firstPair.comparisons.noNotesVsBaseline.nonCachedTokenDelta,
+    -10,
+  );
+  assert.equal(
+    firstPair.comparisons.noNotesVsBaseline.distinctFilesReadDelta,
+    -1,
+  );
+  assert.equal(
+    firstPair.comparisons.noNotesVsBaseline.reachesTwentyPercent,
+    false,
+  );
+
+  // withNotes vs noNotes
+  assert.equal(
+    firstPair.comparisons.withNotesVsNoNotes.nonCachedTokenDelta,
+    -90,
+  );
+  assert.equal(
+    firstPair.comparisons.withNotesVsNoNotes.distinctFilesReadDelta,
+    -2,
+  );
+
+  // Summary exploration metrics
+  assert.equal(analysis.summary.exploration.baseline.distinctFilesRead.mean, 5);
+  assert.equal(
+    analysis.summary.exploration['handoff-no-notes'].distinctFilesRead.mean,
+    4,
+  );
+  assert.equal(
+    analysis.summary.exploration['handoff-with-notes'].distinctFilesRead.mean,
+    2,
+  );
 });

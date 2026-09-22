@@ -29,6 +29,14 @@ branding changes.
 - Preserved all `relay switch` consent guarantees: all handoffs route through checkpoint creation, handoff preview, continuation gate checks, interactive confirmation, and state fingerprint verification, with zero automatic switching.
 - Checked continuation note status up front, warning when no notes are recorded instead of hitting an unexpected switch failure.
 
+### Measurable handoff benchmark (Phase 5)
+
+- Added a three-arm benchmark protocol (`baseline`, `handoff-with-notes`, `handoff-no-notes`) to isolate the specific continuation benefit of recorded notes from prompt framing.
+- Captured direct exploration metrics where exposed by provider telemetry: tool calls made, distinct files read, time to first file edit (ms), and turns before first edit, preserving nulls when telemetry omits them.
+- Evaluated all three arms with pairwise deltas (`withNotesVsBaseline`, `noNotesVsBaseline`, `withNotesVsNoNotes`) without collapsing comparisons into a single summary.
+- Added three harder benchmark tasks where naive baselines fail due to unrecorded decisions or subtle architectural constraints: `json-patch-rollback` (atomic RFC 6902 patch with RFC 6901 pointer unescaping and reverse-order rollback without `JSON.parse` cloning), `cursor-pagination-stream` (async generator keyset stream with URL-safe base64url encoding and deterministic `NULLS LAST` ordering for asc/desc), and `sliding-window-rate-limiter` (segmented ring buffer rate limiter with atomic multi-token rejection and exact retryAfterMs calculation).
+- Extended dry-run gate validation to cover all 8 fixtures and all 3 successor arms without requiring paid provider execution.
+
 ## 0.1.0-alpha.4.2 - 2026-09-11
 
 ### Relay Threads

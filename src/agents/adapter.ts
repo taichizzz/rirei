@@ -249,6 +249,7 @@ export interface ProviderObservation {
     | 'rate_limited'
     | 'network_unavailable'
     | 'provider_unavailable';
+  confidence?: 'low' | 'medium' | 'high';
 }
 
 /**

@@ -38,26 +38,38 @@ quota status are labeled as unsupported or checked on launch rather than guessed
    agent in the terminal. **Resume** opens Claude, Codex, or OpenCode's native session
    resume. The panel switches to the live terminal and **now accepts typing**.
 
-The **Usage** entry in the icon rail shows provider plan usage remaining when a
-machine-readable source is available:
+The **Usage** entry in the icon rail opens the full-stage **Usage View**, providing machine-wide token analytics alongside verified provider quota windows:
 
-- **Claude** — Claude Code passes documented `rate_limits` fields (5-hour and 7-day used
-  percentage plus reset epoch) to its status line. Launching Claude through the app injects
-  a status-line collector via `--settings`; after the first prompt in that session, the
-  sanitized fields land in `~/.relay/provider-usage/claude.json` and the panel reports them
-  across projects. Existing project-local samples remain readable as a compatibility fallback.
-- **Codex** — the Codex CLI records the same class of telemetry (`rate_limits` with
-  `used_percent`, window length, reset time, plan type) in its local session logs under
-  `~/.codex/sessions/`. Rirei parses only those numeric fields from the newest session —
-  conversation content is never read into Relay state. Any Codex run (inside or outside
-  Rirei) refreshes this.
-- **Gemini / Antigravity / OpenCode** — no verified machine-readable quota interface; shown
-  as `Unknown` rather than an inferred percentage.
+- **Stage view persistence**: Clicking Usage replaces the terminal/task stage (`#mainContent`) with the dedicated usage analytics canvas (`#usageView`). Terminal tabs, active PTY processes, and daemon IPC subscriptions remain connected in the background. Pressing **Task** in the rail, the **Escape** key, or closing the view returns immediately to the active terminal without re-initialization.
+- **Privacy & opt-in flow**: Machine-wide token counting is gated by an explicit opt-in (`token-usage-opt-in.json`). When disabled, an opt-in card explains that local logs are processed strictly on this machine by the bundled native `ccusage` binary. No prompts, code, conversations, or credentials are read into Rirei or uploaded over the network.
+- **Ten interactive dashboard widgets**:
+  1. **Date range filter**: Instant switching across 7 days, 30 days, or 90 days.
+  2. **Agent filter chips**: Toggle individual agents (Claude, Codex, Gemini, Antigravity, OpenCode) with visual badge status and color coding.
+  3. **Hero metric**: Prominent token count for the selected range, subtitle breakdown, and comparative delta.
+  4. **Agent stat tiles**: Per-agent token volume, session count, and share percentage.
+  5. **Daily stacked bar chart**: SVG bar chart showing daily usage by agent with interactive day hover, peak callout, and keyboard navigation (`←`/`→`).
+  6. **Daily table toggle**: Switch between stacked chart and accessible numeric tabular breakdown.
+  7. **Activity heatmap**: 13-week GitHub-style commit/activity density grid with 5 intensity bins and keyboard inspection. It always covers the last 13 Monday-aligned weeks, whichever range is selected.
+  8. **Quota remaining cards**: Verified provider quota limits (5-hour and 7-day windows for Claude and Codex) displayed distinctly from token volume, read on every open whether or not a project is open. A window the provider has not reported shows **Not reported**, never a placeholder percentage or reset time. Codex writes its quota into its own session logs only while it runs, and Rirei never queries OpenAI, so a Codex reading is live only during use: a reading older than 15 minutes shows **As of \<time\>**, and a window whose reset time has passed since the last reading shows **Reset since last reading** instead of the old percentage.
+  9. **By-model breakdown**: Model usage table with percentage bars colored by running agent, limited to the selected range.
+  10. **Recent sessions table**: Sessions active in the selected range, with privacy-sanitized project labels (user paths and usernames stripped), model lists, and live activity indicators. OpenCode records no session times, so its sessions are left out of range counts and a note says so.
+- **Coverage is measured against the selected range**, at both ends:
+  - **Partial** appears on an agent only when its logs start after the range begins (for example, at 90D an agent whose logs start in mid-July). The "Most used" tile then warns that the ranking may be off.
+  - **Thru \<date\>** appears when the last scan is older than today. Days after it are drawn as hatched **Not collected yet** columns (dashed cells in the heatmap), never as zero usage, and the hero shows "Data through \<date\>".
+  - **No activity** marks an agent with no logs in the 180-day collection window.
+  - The comparison with the previous period names every agent whose logs don't reach back far enough, or says the data only runs through the last scan date.
+- **Selected agents drive the numbers**: the hero total, its availability, and the comparison with the previous period cover only the agents selected in the filter chips. Selecting only agents whose scan failed shows Unavailable, never 0.
+- **"Updated" is the scan time**: it shows when the shown agents' data was last scanned (the oldest of them), not when the view was drawn.
+- **Token breakdown remainder**: When an agent's parts fall short of its total by at most 1%, the parts are shown and the gap appears as **Not broken down**. When the parts exceed the total or the gap is larger, that agent's whole total is shown as Not broken down and marked **Not itemized**. Parts plus Not broken down always equal the total.
+- **Claude log retention notice**: Shown only when Claude's own logs start after the selected range begins. It names the date the logs start and points to `cleanupPeriodDays`, since Claude Code deletes logs after 30 days by default.
 
-Provider values captured more than 15 minutes ago, from an invalid/future timestamp, or past
-their reset time remain visible but are labeled `Stale`. Each window is evaluated separately,
-and unchanged status-line payloads do not refresh the sample timestamp. Cards show the exact
-local capture and reset timestamps with seconds and timezone, alongside relative freshness.
+Provider plan quota windows remain monitored:
+
+- **Claude** — Claude Code passes documented `rate_limits` fields (5-hour and 7-day used percentage plus reset epoch) to its status line, captured to `~/.relay/provider-usage/claude.json`.
+- **Codex** — local session logs under `~/.codex/sessions/` and `~/.codex/archived_sessions/` are scanned for numeric `rate_limits` telemetry.
+- **Gemini / Antigravity / OpenCode** — no verified machine-readable quota interface; shown as `Unknown` rather than an inferred percentage.
+
+Provider quota values captured more than 15 minutes ago, from an invalid/future timestamp, or past their reset time remain visible but are labeled `Stale`. Cards show the exact local capture and reset timestamps with seconds and timezone.
 
 The **metrics strip** and the drawer's **Task record** read `relay status --json` and show the
 active task/status, current agent, branch and changed-file count, latest checkpoint/test,
@@ -88,7 +100,9 @@ current task and opens a newest-first timeline. Each entry shows:
 - Local start and end timestamps plus a derived duration. A live entry uses the current time
   until the provider exits.
 - The adapter-classified exit reason and process exit code. Unknown failures remain labeled
-  conservatively rather than being reinterpreted by the renderer.
+  conservatively rather than being reinterpreted by the renderer. When a provider exits due to
+  a usage or rate limit, the timeline renders "Usage limit reached" or "Rate limited" along with
+  its formatted local reset time (e.g. `Usage limit reached (until 4:30 PM)`).
 
 The timeline is derived entirely from `agentHistory` returned by `relay status --json`; the
 renderer does not create a separate history database. This means entries survive desktop
@@ -97,6 +111,24 @@ Older state files remain compatible because the newly recorded model and effort 
 optional. The view updates whenever the normal dashboard refreshes, including shortly after
 launch and when the PTY reports exit. It records metadata only—no prompt, response, terminal
 transcript, credentials, or provider conversation content is displayed or added to state.
+
+### Usage limit handoff offer
+
+When an agent run terminates due to quota exhaustion or rate limits (`usage_limit` or `rate_limit`),
+Rirei surfaces an actionable handoff banner in the task area above the terminal:
+
+- **Headline**: e.g. `Claude reached its usage limit (resets 4:30 PM). Hand off to Codex?`
+- **Provider recommendation**: Alternative installed providers are ranked with preference for
+  providers already used on this task, followed by providers reporting known available quota.
+  Providers with unknown usage remain eligible.
+- **Continuation note guard**: If no unresolved continuation notes (`next`, `blocker`, `decision`,
+  `rejected`, or `question`) were recorded, the banner warns up front: `"No continuation notes recorded. Add one to hand off, or switch anyway."`
+- **Actions**:
+  - **Hand off**: Initiates `relay switch <target>` in the interactive terminal, ensuring the full
+    switch safeguard workflow executes (checkpoint creation, handoff preview, continuation gate,
+    approval prompt, and state fingerprint verification). Never switches automatically.
+  - **Choose another**: Opens the agent drawer to select a different provider or adjust model/effort profiles.
+  - **Dismiss**: Dismisses the banner for the current run.
 
 Each agent row includes a **session profile** button. The picker discovers installed CLI
 versions and current model catalogs, offers only provider-supported effort levels, supports a

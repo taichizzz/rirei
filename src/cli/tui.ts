@@ -23,6 +23,12 @@ import type { LaunchSelection } from '../tui/launch-options.js';
 import { loadDashboardData, loadThreadsData } from '../tui/state.js';
 import { parseCanonicalActorRef } from '../tui/threads.js';
 import { createWorkspace } from '../worktrees/manager.js';
+import { getCachedTokenUsage } from '../token-usage/cache.js';
+import {
+  getTokenUsageOptIn,
+  setTokenUsageOptIn,
+} from '../token-usage/opt-in.js';
+import { safeTokenUsageError } from './usage.js';
 
 const ENTER_DASHBOARD = '\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l';
 const RESET_DASHBOARD = '\x1b[2J\x1b[H';
@@ -41,6 +47,7 @@ export async function startTuiAgent(
 ) {
   const request = {
     kind: 'agent',
+    ...(selection.command ? { command: selection.command } : {}),
     agent: selection.agent,
     model: selection.model,
     effort: selection.effort,
@@ -194,16 +201,8 @@ export function tuiCommand(): Command {
               })
               .catch(() => undefined);
           };
-          let inventory: Array<{
-            id: string;
-            provider: string;
-            project: string;
-            workspaceId: string;
-            branchLabel: string;
-            status: string;
-            attentionKind?: string | null;
-            activeRuntimeSeconds?: number;
-          }> = [];
+          let inventory: Awaited<ReturnType<typeof client.refreshInventory>> =
+            [];
           try {
             inventory = await client.refreshInventory();
           } catch {
@@ -221,6 +220,8 @@ export function tuiCommand(): Command {
               status: item.status,
               attentionKind: item.attentionKind,
               activeRuntimeSeconds: item.activeRuntimeSeconds,
+              exitReason: item.providerResult?.reason,
+              retryAt: item.providerResult?.retryAt,
             }),
           );
 
@@ -288,6 +289,20 @@ export function tuiCommand(): Command {
                 finish();
               },
               onRefreshThreads: () => loadThreadsData(process.cwd()),
+              onToggleTokenOptIn: (optIn: boolean) => setTokenUsageOptIn(optIn),
+              // Scans local agent logs only after consent; errors carry fixed
+              // wording so no path reaches the screen.
+              onRefreshTokens: async () => {
+                if (!(await getTokenUsageOptIn())) return null;
+                try {
+                  return await getCachedTokenUsage({
+                    days: 30,
+                    forceRefresh: true,
+                  });
+                } catch (error) {
+                  throw safeTokenUsageError(error);
+                }
+              },
               onSendMessage: async (draft: NewThreadDraft) => {
                 const context = await taskContext();
                 const actor = await resolveCurrentActor(

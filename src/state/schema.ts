@@ -239,6 +239,7 @@ const providerObservationSchema = z.object({
       'provider_unavailable',
     ])
     .optional(),
+  confidence: z.enum(['low', 'medium', 'high']).optional(),
 });
 
 const exitClassificationSchema = z.object({

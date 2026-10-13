@@ -78,6 +78,54 @@
           "next": "cycle"
         }
       }
+    },
+    {
+      "id": "json-patch-rollback",
+      "title": "Atomic JSON Patch with invertible rollback",
+      "request": "Implement applyPatch(doc, patch) in src/index.js without dependencies. Support RFC 6902 operations (add, remove, replace, move, copy, test) with RFC 6901 pointers including ~0 and ~1 unescaping and array '-' append. Apply operations atomically in-place: if any operation fails, completely roll back prior mutations using exact inverse operations in reverse order and throw an Error. Return { doc, inversePatch } on success. Never use JSON.parse or JSON.stringify cloning as doc may contain non-serializable or undefined values. Pass npm test.",
+      "rejectedNoteNeedle": "JSON.parse",
+      "rejectedSourcePattern": "JSON\\.parse\\s*\\(",
+      "expectedNotes": {
+        "requiredTypes": ["done", "rejected", "decision", "next"],
+        "needles": {
+          "done": "flat operations",
+          "rejected": "JSON.parse",
+          "decision": "inverse operations in reverse order",
+          "next": "pointer unescaping"
+        }
+      }
+    },
+    {
+      "id": "cursor-pagination-stream",
+      "title": "Opaque keyset cursor pagination stream",
+      "request": "Implement paginateStream(fetchPage, options) and keyset utilities in src/index.js without dependencies. paginateStream is an async generator that yields items across pages, halts when nextCursor is null or maxItems is reached, and rejects cursor cycles. encodeCursor and decodeCursor must encode composite keyset values as URL-safe base64url JSON without padding. applyKeysetFilter filters and slices items using composite keyset comparisons with deterministic NULLS LAST ordering for both asc and desc. Never use offset or page-number slicing. Pass npm test.",
+      "rejectedNoteNeedle": "offset",
+      "rejectedSourcePattern": "(?:offset|\\.slice\\s*\\(\\s*offset)",
+      "expectedNotes": {
+        "requiredTypes": ["done", "rejected", "decision", "next"],
+        "needles": {
+          "done": "stream generator",
+          "rejected": "offset",
+          "decision": "keyset cursor with base64url",
+          "next": "NULLS LAST"
+        }
+      }
+    },
+    {
+      "id": "sliding-window-rate-limiter",
+      "title": "Segmented ring sliding window rate limiter",
+      "request": "Implement SlidingWindowRateLimiter in src/index.js without dependencies. The constructor accepts { windowMs, maxTokens, subWindows = 10, now = Date.now }. acquire(tokens = 1) must be atomic: if tokens exceeds available capacity, return { allowed: false, remaining, retryAfterMs } without partial deduction. Compute sliding totals across a fixed-size circular ring of sub-window buckets with weighted interpolation and exact retryAfterMs. Export remaining() and reset(). Never store unbounded timestamp arrays. Pass npm test.",
+      "rejectedNoteNeedle": "timestamp array",
+      "rejectedSourcePattern": "(?:timestamps\\s*=\\s*\\[|\\.filter\\s*\\(.*=>.*now)",
+      "expectedNotes": {
+        "requiredTypes": ["done", "rejected", "decision", "next"],
+        "needles": {
+          "done": "token bucket foundation",
+          "rejected": "timestamp array",
+          "decision": "segmented circular ring buffer",
+          "next": "atomic multi-token acquire"
+        }
+      }
     }
   ]
 }

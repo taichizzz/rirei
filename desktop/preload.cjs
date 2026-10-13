@@ -88,4 +88,8 @@ contextBridge.exposeInMainWorld('relay', {
   renameSession: (request) =>
     ipcRenderer.invoke('relay:rename-session', request),
   activity: (request) => ipcRenderer.invoke('relay:activity', request),
+  usageTokens: (request) => ipcRenderer.invoke('relay:usage-tokens', request),
+  usageOptIn: (request) => ipcRenderer.invoke('relay:usage-opt-in', request),
+  setUsageOptIn: (request) =>
+    ipcRenderer.invoke('relay:usage-set-opt-in', request),
 });

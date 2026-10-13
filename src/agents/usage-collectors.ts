@@ -567,41 +567,61 @@ function codexWindow(value: CodexRateWindow | null | undefined):
   };
 }
 
+/**
+ * The rollout files most recently written, active sessions first. A filename
+ * found in both sessions/ and archived_sessions/ keeps every copy: callers read
+ * each one and keep the newest captured record, so an older archived copy can
+ * never win and an unreadable copy falls back to the other.
+ */
 async function listRolloutFiles(codexHome: string): Promise<string[]> {
   const sessions = path.join(codexHome, 'sessions');
-  let pending = [sessions];
-  const files: Array<{ file: string; mtime: number }> = [];
+  const archived = path.join(codexHome, 'archived_sessions');
+  // Popped last-in-first-out: active sessions are walked before the archive, so
+  // a large archive cannot use up the traversal cap before them.
+  const pending = [archived, sessions];
+  const copiesByName = new Map<
+    string,
+    Array<{ file: string; mtime: number }>
+  >();
   let visitedEntries = 0;
-  try {
-    while (pending.length > 0 && visitedEntries < CODEX_TRAVERSAL_FILE_CAP) {
-      const current = pending.pop()!;
-      const entries = await readdir(current, { withFileTypes: true });
-      for (const entry of entries) {
-        visitedEntries += 1;
-        if (visitedEntries > CODEX_TRAVERSAL_FILE_CAP) break;
-        const full = path.join(current, entry.name);
-        if (entry.isDirectory()) {
-          pending = [...pending, full];
-        } else if (/^rollout-.*\.jsonl$/.test(entry.name)) {
-          try {
-            const metadata = await stat(full);
-            files.push({ file: full, mtime: metadata.mtimeMs });
-          } catch {
-            // Skip unreadable rollout files.
-          }
+
+  while (pending.length > 0 && visitedEntries < CODEX_TRAVERSAL_FILE_CAP) {
+    const current = pending.pop()!;
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      visitedEntries += 1;
+      if (visitedEntries > CODEX_TRAVERSAL_FILE_CAP) break;
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(full);
+      } else if (/^rollout-.*\.jsonl$/.test(entry.name)) {
+        try {
+          const metadata = await stat(full);
+          const copies = copiesByName.get(entry.name) ?? [];
+          copies.push({ file: full, mtime: metadata.mtimeMs });
+          copiesByName.set(entry.name, copies);
+        } catch {
+          // Skip unreadable rollout files.
         }
       }
     }
-  } catch {
-    return [];
   }
-  return files
+
+  const newestMtime = (copies: Array<{ mtime: number }>) =>
+    Math.max(...copies.map((copy) => copy.mtime));
+  return [...copiesByName.entries()]
     .sort(
-      (left, right) =>
-        right.mtime - left.mtime || right.file.localeCompare(left.file),
+      ([leftName, left], [rightName, right]) =>
+        newestMtime(right) - newestMtime(left) ||
+        rightName.localeCompare(leftName),
     )
     .slice(0, CODEX_ROLLOUT_FILE_LIMIT)
-    .map((entry) => entry.file);
+    .flatMap(([, copies]) => copies.map((copy) => copy.file));
 }
 
 async function readCodexRecord(filePath: string): Promise<CodexRecord | null> {
@@ -647,7 +667,8 @@ async function readCodexRecord(filePath: string): Promise<CodexRecord | null> {
             : null,
         windows,
       };
-      if (!newest || capturedAt > newest.capturedAt) newest = candidate;
+      if (!newest || Date.parse(capturedAt) > Date.parse(newest.capturedAt))
+        newest = candidate;
     }
     return newest;
   } catch {
@@ -668,7 +689,11 @@ export async function codexReadUsage(
   for (const file of files) {
     const record = await readCodexRecord(file);
     if (!record) continue;
-    if (!newest || record.capturedAt > newest.capturedAt) newest = record;
+    if (
+      !newest ||
+      Date.parse(record.capturedAt) > Date.parse(newest.capturedAt)
+    )
+      newest = record;
   }
   if (!newest) return [];
   const metrics = newest.windows.map((window): UsageMetric => {
@@ -728,7 +753,11 @@ export async function readCodexUsageRaw(
   for (const file of files) {
     const record = await readCodexRecord(file);
     if (!record) continue;
-    if (!newest || record.capturedAt > newest.capturedAt) newest = record;
+    if (
+      !newest ||
+      Date.parse(record.capturedAt) > Date.parse(newest.capturedAt)
+    )
+      newest = record;
   }
   return newest;
 }

@@ -545,7 +545,9 @@ function classifyProcessExit(result: ProcessResult): ExitClassification {
               : 'provider_unavailable';
     return {
       reason,
-      confidence: providerEvent.kind === 'provider_error' ? 'medium' : 'high',
+      confidence:
+        providerEvent.confidence ??
+        (providerEvent.kind === 'provider_error' ? 'medium' : 'high'),
       source: 'provider_event',
       ...(providerEvent.detail ? { providerCode: providerEvent.detail } : {}),
     };

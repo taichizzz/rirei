@@ -29,7 +29,7 @@ import { attachCommand } from './cli/attach.js';
 const program = new Command()
   .name('relay')
   .description('Durable coding-task handoffs between official agent CLIs')
-  .version('0.1.0-alpha.4.2')
+  .version('0.1.0-alpha.5.0')
   .addCommand(initCommand())
   .addCommand(startCommand())
   .addCommand(statusCommand())

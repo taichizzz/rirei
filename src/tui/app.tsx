@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { DOMElement } from 'ink';
 import type { AgentCatalogEntry } from '../agents/registry.js';
+import { displayExitReason } from '../agents/limit-detection.js';
 import {
   cycleChoice,
   effortChoices,
@@ -16,6 +17,9 @@ import {
   ENABLE_MOUSE,
 } from './mouse.js';
 import type { DashboardData } from './state.js';
+import { compactTokens, fullTokens } from '../token-usage/normalize.js';
+import { setTokenUsageOptIn } from '../token-usage/opt-in.js';
+import type { TokenUsageReport } from '../token-usage/schema.js';
 import {
   canActOnReceipt,
   canonicalActorRef,
@@ -50,6 +54,8 @@ export interface TerminalSummary {
   readonly attentionKind?: string | null;
   readonly activeRuntimeSeconds?: number;
   readonly displayLabel?: string;
+  readonly exitReason?: string;
+  readonly retryAt?: string;
 }
 
 export interface AppProps {
@@ -73,6 +79,10 @@ export interface AppProps {
   onMarkMessageRead: (messageId: string) => Promise<ThreadsData>;
   onAcknowledgeMessage: (messageId: string) => Promise<ThreadsData>;
   subscribeThreads?: (listener: () => void) => () => void;
+  /** Persists the token analytics consent choice. */
+  onToggleTokenOptIn?: (optIn: boolean) => Promise<void>;
+  /** Consent-gated log scan; resolves with the fresh report (null if opted out). */
+  onRefreshTokens?: () => Promise<TokenUsageReport | null>;
   onQuit: () => void;
 }
 
@@ -142,6 +152,8 @@ export function createApp(
     onMarkMessageRead,
     onAcknowledgeMessage,
     subscribeThreads,
+    onToggleTokenOptIn,
+    onRefreshTokens,
     onQuit,
   }: AppProps) {
     const { exit } = useApp();
@@ -172,7 +184,15 @@ export function createApp(
     >('model');
     const [launchCustomModel, setLaunchCustomModel] = useState('');
     const [usageOpen, setUsageOpen] = useState(false);
+    const [usageTab, setUsageTab] = useState<'plans' | 'tokens'>('plans');
+    // Token data lives in component state so a scan updates the Usage screen
+    // in place instead of rebuilding the dashboard and closing it.
+    const [tokenUsage, setTokenUsage] = useState(initialData.tokenUsage);
+    const [tokenOptIn, setTokenOptIn] = useState(initialData.tokenOptIn);
+    const tokenRefreshPending = useRef(false);
     const [selectedUsage, setSelectedUsage] = useState(0);
+    const [handoffOfferDismissed, setHandoffOfferDismissed] = useState(false);
+    const handoffOffer = initialData.handoffOffer;
     const [threadsData, setThreadsData] = useState(initialData.threads);
     const [threadsOpen, setThreadsOpen] = useState(false);
     const [threadView, setThreadView] = useState<
@@ -197,6 +217,37 @@ export function createApp(
     const [terminalHeight, setTerminalHeight] = useState(stdout.rows ?? 24);
     const launchPending = useRef(false);
     const refreshPending = useRef(false);
+
+    const refreshTokens = (optedIn = tokenOptIn) => {
+      if (!optedIn || !onRefreshTokens || tokenRefreshPending.current) return;
+      tokenRefreshPending.current = true;
+      setFeedbackMessage('Scanning agent logs for token usage...');
+      void onRefreshTokens().then(
+        (report) => {
+          tokenRefreshPending.current = false;
+          if (report) setTokenUsage(report);
+          setFeedbackMessage(
+            report ? 'Token usage updated.' : 'Token analytics is off.',
+          );
+        },
+        (error: unknown) => {
+          tokenRefreshPending.current = false;
+          setFeedbackMessage(
+            `Token refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        },
+      );
+    };
+
+    // Opening the Tokens tab with missing or old data starts one scan; a
+    // failed scan waits for the next opening or an explicit refresh.
+    useEffect(() => {
+      if (!usageOpen || usageTab !== 'tokens') return;
+      const stale =
+        !tokenUsage ||
+        tokenUsage.agents.some((agent) => agent.freshness !== 'fresh');
+      if (stale) refreshTokens();
+    }, [usageOpen, usageTab]);
     const stopPending = useRef(false);
     const threadPending = useRef(false);
     const controls = useRef(new Map<string, DOMElement>());
@@ -533,12 +584,33 @@ export function createApp(
       }
       if (id === 'usage') {
         setUsageOpen(true);
+        setUsageTab('plans');
         setSelectedUsage(0);
         setFeedbackMessage(null);
         return;
       }
+      if (id === 'usage:tab') {
+        setUsageTab((c) => (c === 'plans' ? 'tokens' : 'plans'));
+        return;
+      }
       if (id === 'usage:back') {
         setUsageOpen(false);
+        return;
+      }
+      if (id === 'usage:opt-in-toggle') {
+        const next = !tokenOptIn;
+        const persist = onToggleTokenOptIn ?? setTokenUsageOptIn;
+        void persist(next).then(
+          () => {
+            setTokenOptIn(next);
+            if (next) refreshTokens(true);
+            else setTokenUsage(null);
+          },
+          (error: unknown) =>
+            setFeedbackMessage(
+              `Could not change token analytics: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+        );
         return;
       }
       if (id.startsWith('usage:provider:')) {
@@ -668,6 +740,21 @@ export function createApp(
       if (notificationCard && key.escape) {
         setNotificationCard(null);
         return;
+      }
+
+      if (handoffOffer && !handoffOfferDismissed && handoffOffer.target) {
+        if (input === 'h' || input === 'H') {
+          void onLaunchAgent({
+            agent: handoffOffer.target.id,
+            command: 'switch',
+          });
+          setHandoffOfferDismissed(true);
+          return;
+        }
+        if (input === 'd' || input === 'D') {
+          setHandoffOfferDismissed(true);
+          return;
+        }
       }
 
       if (stopConfirmation) {
@@ -833,8 +920,18 @@ export function createApp(
       if (usageOpen) {
         if (input === 'q' || input === 'b' || input === 'u') {
           activateControl.current('usage:back');
+        } else if (input === 'r' && usageTab === 'tokens' && tokenOptIn) {
+          refreshTokens();
         } else if (input === 'r') {
           activateControl.current('refresh');
+        } else if (input === 'o' || input === 'O') {
+          activateControl.current('usage:opt-in-toggle');
+        } else if (input === 't' || input === 'T' || key.tab) {
+          activateControl.current('usage:tab');
+        } else if (input === '1') {
+          setUsageTab('plans');
+        } else if (input === '2') {
+          setUsageTab('tokens');
         } else if (key.upArrow || key.downArrow) {
           setSelectedUsage((current) => {
             const delta = key.upArrow ? -1 : 1;
@@ -974,7 +1071,12 @@ export function createApp(
       else controls.current.delete(id);
     };
 
-    const renderStatus = (status: string, attention?: string | null) => {
+    const renderStatus = (
+      status: string,
+      attention?: string | null,
+      exitReason?: string,
+      retryAt?: string,
+    ) => {
       if (status === 'running') return <Text color="green">RUNNING</Text>;
       if (status === 'waiting') {
         return (
@@ -985,6 +1087,17 @@ export function createApp(
       }
       if (status === 'starting') return <Text color="yellow">STARTING</Text>;
       if (status === 'stopping') return <Text color="red">STOPPING</Text>;
+      if (status === 'completed') return <Text color="green">COMPLETED</Text>;
+      if (status === 'failed') {
+        if (exitReason) {
+          return (
+            <Text color="red">
+              {displayExitReason(exitReason, retryAt).toUpperCase()}
+            </Text>
+          );
+        }
+        return <Text color="red">FAILED</Text>;
+      }
       return <Text color="gray">{status.toUpperCase()}</Text>;
     };
 
@@ -1415,144 +1528,346 @@ export function createApp(
           overflow="hidden"
           paddingX={1}
         >
-          <Box
-            justifyContent="space-between"
-            borderStyle="single"
-            borderTop={false}
-            borderLeft={false}
-            borderRight={false}
-            borderColor="gray"
-            paddingY={1}
-            flexShrink={0}
-          >
-            <Box flexDirection="column">
-              <Text bold color="cyan">
-                PLAN <Text color="white">REMAINING</Text>
-              </Text>
-              <Text color="gray">Verified provider quota windows only</Text>
-            </Box>
-            <Text color="gray">5H / 7D</Text>
-          </Box>
+          {usageTab === 'plans' ? (
+            <>
+              <Box
+                justifyContent="space-between"
+                borderStyle="single"
+                borderTop={false}
+                borderLeft={false}
+                borderRight={false}
+                borderColor="gray"
+                paddingY={1}
+                flexShrink={0}
+              >
+                <Box flexDirection="column">
+                  <Text bold color="cyan">
+                    PLAN <Text color="white">REMAINING</Text>
+                  </Text>
+                  <Text color="gray">Verified provider quota windows only</Text>
+                </Box>
+                <Text color="gray">5H / 7D</Text>
+              </Box>
 
-          <Box flexDirection="column" flexGrow={1} overflow="hidden">
-            {usageActions.map((action, index) => {
-              const usage = initialData.planUsage[action.id];
-              const hasWindows = Boolean(usage?.fiveHour || usage?.week);
-              const metrics = usage?.metrics.slice(0, 2) ?? [];
-              const status = usage
-                ? (usageReasonLabels[usage.statusReason] ??
-                  usage.status.toUpperCase())
-                : 'UNAVAILABLE';
-              const statusColor =
-                usage?.status === 'available'
-                  ? 'green'
-                  : usage?.status === 'error'
-                    ? 'red'
-                    : 'yellow';
-              return (
-                <Box
-                  key={action.id}
-                  ref={controlRef(`usage:provider:${index}`)}
-                  flexDirection="column"
-                  height={3}
-                  overflow="hidden"
-                  borderStyle="single"
-                  borderTop={false}
-                  borderLeft={false}
-                  borderRight={false}
-                  borderColor={index === selectedUsage ? 'cyan' : 'gray'}
-                  paddingX={1}
-                >
-                  <Box justifyContent="space-between" height={1}>
-                    <Text wrap="truncate-end">
-                      <Text bold>
-                        {index === selectedUsage ? '> ' : '  '}
-                        {action.label.toUpperCase()}
-                      </Text>
-                      <Text color="gray">
-                        {' '}
-                        / {usage?.source ?? 'Unavailable'}
-                      </Text>
-                    </Text>
-                    <Text color={statusColor}>{status}</Text>
-                  </Box>
-                  {metrics.length > 0 ? (
-                    <Box justifyContent="space-between" height={1}>
-                      {metrics.map((metric) => {
-                        const remaining =
-                          metric.remaining ??
-                          (metric.unit === 'percent' &&
-                          metric.used !== undefined
-                            ? 100 - metric.used
-                            : null);
-                        return (
-                          <Text key={metric.id} wrap="truncate-end">
-                            {metric.window?.label ?? metric.id}{' '}
-                            {metric.unit === 'percent' ? (
-                              renderRemaining(remaining, 8, metric.status)
-                            ) : (
-                              <Text color="cyan">
-                                {remaining ?? '--'} {metric.unit} left
-                                {metric.status === 'stale' ? ' STALE' : ''}
+              <Box flexDirection="column" flexGrow={1} overflow="hidden">
+                {usageActions.map((action, index) => {
+                  const usage = initialData.planUsage[action.id];
+                  const hasWindows = Boolean(usage?.fiveHour || usage?.week);
+                  const metrics = usage?.metrics.slice(0, 2) ?? [];
+                  const status = usage
+                    ? (usageReasonLabels[usage.statusReason] ??
+                      usage.status.toUpperCase())
+                    : 'UNAVAILABLE';
+                  const statusColor =
+                    usage?.status === 'available'
+                      ? 'green'
+                      : usage?.status === 'error'
+                        ? 'red'
+                        : 'yellow';
+                  return (
+                    <Box
+                      key={action.id}
+                      ref={controlRef(`usage:provider:${index}`)}
+                      flexDirection="column"
+                      height={3}
+                      overflow="hidden"
+                      borderStyle="single"
+                      borderTop={false}
+                      borderLeft={false}
+                      borderRight={false}
+                      borderColor={index === selectedUsage ? 'cyan' : 'gray'}
+                      paddingX={1}
+                    >
+                      <Box justifyContent="space-between" height={1}>
+                        <Text wrap="truncate-end">
+                          <Text bold>
+                            {index === selectedUsage ? '> ' : '  '}
+                            {action.label.toUpperCase()}
+                          </Text>
+                          <Text color="gray">
+                            {' '}
+                            / {usage?.source ?? 'Unavailable'}
+                          </Text>
+                        </Text>
+                        <Text color={statusColor}>{status}</Text>
+                      </Box>
+                      {metrics.length > 0 ? (
+                        <Box justifyContent="space-between" height={1}>
+                          {metrics.map((metric) => {
+                            const remaining =
+                              metric.remaining ??
+                              (metric.unit === 'percent' &&
+                              metric.used !== undefined
+                                ? 100 - metric.used
+                                : null);
+                            return (
+                              <Text key={metric.id} wrap="truncate-end">
+                                {metric.window?.label ?? metric.id}{' '}
+                                {metric.unit === 'percent' ? (
+                                  renderRemaining(remaining, 8, metric.status)
+                                ) : (
+                                  <Text color="cyan">
+                                    {remaining ?? '--'} {metric.unit} left
+                                    {metric.status === 'stale' ? ' STALE' : ''}
+                                  </Text>
+                                )}
                               </Text>
+                            );
+                          })}
+                        </Box>
+                      ) : hasWindows ? (
+                        <Box justifyContent="space-between" height={1}>
+                          <Text>
+                            5H{' '}
+                            {renderRemaining(
+                              usage?.fiveHour?.remainingPercentage ?? null,
+                              10,
+                              usage?.fiveHour?.status,
                             )}
                           </Text>
-                        );
-                      })}
+                          <Text>
+                            7D{' '}
+                            {renderRemaining(
+                              usage?.week?.remainingPercentage ?? null,
+                              10,
+                              usage?.week?.status,
+                            )}
+                          </Text>
+                        </Box>
+                      ) : (
+                        <Text color="gray" wrap="truncate-end">
+                          {usage?.detail ??
+                            'No verified usage source is available.'}
+                        </Text>
+                      )}
                     </Box>
-                  ) : hasWindows ? (
-                    <Box justifyContent="space-between" height={1}>
-                      <Text>
-                        5H{' '}
-                        {renderRemaining(
-                          usage?.fiveHour?.remainingPercentage ?? null,
-                          10,
-                          usage?.fiveHour?.status,
-                        )}
-                      </Text>
-                      <Text>
-                        7D{' '}
-                        {renderRemaining(
-                          usage?.week?.remainingPercentage ?? null,
-                          10,
-                          usage?.week?.status,
-                        )}
-                      </Text>
-                    </Box>
-                  ) : (
-                    <Text color="gray" wrap="truncate-end">
-                      {usage?.detail ??
-                        'No verified usage source is available.'}
-                    </Text>
-                  )}
+                  );
+                })}
+              </Box>
+
+              <Box
+                flexDirection="column"
+                height={2}
+                flexShrink={0}
+                paddingX={1}
+              >
+                {feedbackMessage ? (
+                  <Text color="yellow" wrap="truncate-end">
+                    {feedbackMessage}
+                  </Text>
+                ) : (
+                  <Text color="gray" wrap="truncate-end">
+                    UPDATED {exactUsageTimestamp(selectedPlan?.capturedAt)}
+                  </Text>
+                )}
+                <Text color="gray" wrap="truncate-end">
+                  RESETS {resetSummary}
+                </Text>
+              </Box>
+
+              <Box justifyContent="space-between" height={1} flexShrink={0}>
+                <Text color="gray">
+                  UP/DOWN inspect {'  '} T token analytics {'  '} R refresh
+                </Text>
+                <Box ref={controlRef('usage:back')}>
+                  <Text bold color="cyan">
+                    B BACK
+                  </Text>
                 </Box>
-              );
-            })}
-          </Box>
+              </Box>
+            </>
+          ) : (
+            <>
+              <Box
+                justifyContent="space-between"
+                borderStyle="single"
+                borderTop={false}
+                borderLeft={false}
+                borderRight={false}
+                borderColor="gray"
+                paddingY={1}
+                flexShrink={0}
+              >
+                <Box flexDirection="column">
+                  <Text bold color="cyan">
+                    TOKEN <Text color="white">ANALYTICS</Text>
+                  </Text>
+                  <Text color="gray">
+                    Machine-wide · Last 30 days · Bundled ccusage
+                  </Text>
+                </Box>
+                {tokenUsage ? (
+                  <Text bold color="white">
+                    {tokenUsage.totals?.totalTokens != null
+                      ? `${compactTokens(tokenUsage.totals.totalTokens)} TOTAL`
+                      : 'UNAVAILABLE'}
+                  </Text>
+                ) : (
+                  <Text color="yellow">OPT-IN REQUIRED</Text>
+                )}
+              </Box>
 
-          <Box flexDirection="column" height={2} flexShrink={0} paddingX={1}>
-            {feedbackMessage ? (
-              <Text color="yellow" wrap="truncate-end">
-                {feedbackMessage}
-              </Text>
-            ) : (
-              <Text color="gray" wrap="truncate-end">
-                UPDATED {exactUsageTimestamp(selectedPlan?.capturedAt)}
-              </Text>
-            )}
-            <Text color="gray" wrap="truncate-end">
-              RESETS {resetSummary}
-            </Text>
-          </Box>
+              {tokenOptIn && tokenUsage ? (
+                <Box
+                  flexDirection="column"
+                  flexGrow={1}
+                  overflow="hidden"
+                  paddingX={1}
+                  paddingTop={1}
+                >
+                  <Box
+                    justifyContent="space-between"
+                    height={1}
+                    marginBottom={1}
+                    flexShrink={0}
+                  >
+                    <Text wrap="truncate-end">
+                      TOTAL:{' '}
+                      <Text bold color="white">
+                        {tokenUsage.totals?.totalTokens != null
+                          ? fullTokens(tokenUsage.totals.totalTokens)
+                          : 'Unavailable'}
+                      </Text>
+                      {tokenUsage.totals?.components ? (
+                        <Text color="gray">
+                          {' '}
+                          (In:{' '}
+                          {compactTokens(
+                            tokenUsage.totals.components.input ?? 0,
+                          )}{' '}
+                          · Out:{' '}
+                          {compactTokens(
+                            tokenUsage.totals.components.output ?? 0,
+                          )}{' '}
+                          · Cache:{' '}
+                          {compactTokens(
+                            (tokenUsage.totals.components.cacheRead ?? 0) +
+                              (tokenUsage.totals.components.cacheCreation ?? 0),
+                          )}
+                          {tokenUsage.totals.unitemizedTokens
+                            ? ` · Other: ${compactTokens(
+                                tokenUsage.totals.unitemizedTokens,
+                              )}`
+                            : ''}
+                          )
+                        </Text>
+                      ) : null}
+                    </Text>
+                  </Box>
 
-          <Box justifyContent="space-between" height={1} flexShrink={0}>
-            <Text color="gray">UP/DOWN inspect {'  '} R refresh</Text>
-            <Box ref={controlRef('usage:back')}>
-              <Text bold color="cyan">
-                B BACK
-              </Text>
-            </Box>
-          </Box>
+                  {tokenUsage.agents.map((agent) => {
+                    const total = tokenUsage?.totals?.totalTokens ?? 0;
+                    const agentTokens = agent.totalTokens ?? 0;
+                    const sharePct =
+                      total > 0 && agent.totalTokens != null
+                        ? Math.round((agentTokens / total) * 100)
+                        : 0;
+                    const barWidth = wide ? 20 : 12;
+                    const maxTokens = Math.max(
+                      ...tokenUsage!.agents.map((a) => a.totalTokens ?? 0),
+                      1,
+                    );
+                    const filled =
+                      agent.totalTokens != null
+                        ? Math.round((agentTokens / maxTokens) * barWidth)
+                        : 0;
+                    const bar =
+                      '█'.repeat(filled) +
+                      '░'.repeat(Math.max(0, barWidth - filled));
+                    const tokensStr =
+                      agent.totalTokens != null
+                        ? compactTokens(agent.totalTokens)
+                        : '—';
+
+                    let badgeColor = 'green';
+                    let badgeText = '[COMPLETE]';
+                    if (agent.status === 'unavailable') {
+                      badgeColor = 'gray';
+                      badgeText = '[NO LOGS]';
+                    } else if (agent.status === 'error') {
+                      badgeColor = 'red';
+                      badgeText = '[ERROR]';
+                    } else if (agent.coverage.noActivity) {
+                      badgeColor = 'gray';
+                      badgeText = '[NO ACTIVITY]';
+                    } else if (!agent.coverage.complete) {
+                      badgeColor = 'yellow';
+                      badgeText = '[PARTIAL]';
+                    } else if (
+                      agent.coverage.dataThrough &&
+                      agent.coverage.dataThrough < tokenUsage!.range.until
+                    ) {
+                      badgeColor = 'yellow';
+                      badgeText = `[THRU ${agent.coverage.dataThrough.slice(5)}]`;
+                    }
+
+                    return (
+                      <Box
+                        key={agent.id}
+                        justifyContent="space-between"
+                        height={1}
+                      >
+                        <Text wrap="truncate-end">
+                          <Text bold color="white">
+                            {agent.name.padEnd(12)}
+                          </Text>
+                          <Text color="cyan">{bar}</Text>
+                          <Text color="gray">
+                            {' '}
+                            {String(sharePct).padStart(3)}%{' '}
+                          </Text>
+                          <Text bold>{tokensStr.padStart(6)}</Text>
+                        </Text>
+                        <Text color={badgeColor}>{badgeText}</Text>
+                      </Box>
+                    );
+                  })}
+
+                  <Box marginTop={1} flexShrink={0}>
+                    <Text color="gray" wrap="truncate-end">
+                      Local agent logs only · Bundled ccusage · No prompts or
+                      code uploaded
+                    </Text>
+                  </Box>
+                </Box>
+              ) : (
+                <Box
+                  flexDirection="column"
+                  flexGrow={1}
+                  overflow="hidden"
+                  paddingX={1}
+                  paddingTop={1}
+                >
+                  <Text bold color="yellow">
+                    Token analytics disabled
+                  </Text>
+                  <Text color="gray" wrap="truncate-end">
+                    Local agent logs are processed on this computer by bundled
+                    ccusage.
+                  </Text>
+                  <Text color="gray" wrap="truncate-end">
+                    Nothing is uploaded; no prompts or conversations are read
+                    into Rirei.
+                  </Text>
+                  <Text color="cyan" wrap="truncate-end">
+                    Press O or run 'relay usage tokens --opt-in' to enable.
+                  </Text>
+                </Box>
+              )}
+
+              <Box justifyContent="space-between" height={1} flexShrink={0}>
+                <Text color="gray">
+                  T plan quotas {'  '} R refresh {'  '} O opt-
+                  {tokenOptIn ? 'out' : 'in'}
+                </Text>
+                <Box ref={controlRef('usage:back')}>
+                  <Text bold color="cyan">
+                    B BACK
+                  </Text>
+                </Box>
+              </Box>
+            </>
+          )}
         </Box>
       );
     }
@@ -1712,7 +2027,13 @@ export function createApp(
     const activeProjects = initialData.activity?.projects ?? [];
     const projectName = basename(initialData.currentProject);
     const feedbackIsError = feedbackMessage?.includes('failed:') ?? false;
-    const feedbackRows = (feedbackMessage ? 4 : 0) + (notificationCard ? 4 : 0);
+    const hasActiveOffer = Boolean(
+      handoffOffer && !handoffOfferDismissed && handoffOffer.target,
+    );
+    const feedbackRows =
+      (feedbackMessage ? 4 : 0) +
+      (notificationCard ? 4 : 0) +
+      (hasActiveOffer ? 5 : 0);
     const showSidePanel = wide || terminalHeight >= 28 + feedbackRows;
     const visibleSessionLimit = Math.min(
       8,
@@ -1793,7 +2114,12 @@ export function createApp(
                 <Box marginLeft={1} flexShrink={0}>
                   <Text wrap="truncate-end">
                     <Text color="gray">│ </Text>
-                    {renderStatus(terminal.status, terminal.attentionKind)}{' '}
+                    {renderStatus(
+                      terminal.status,
+                      terminal.attentionKind,
+                      terminal.exitReason,
+                      terminal.retryAt,
+                    )}{' '}
                     <Text color="gray">
                       {runtimeLabel(terminal.activeRuntimeSeconds)}
                     </Text>
@@ -1974,6 +2300,28 @@ export function createApp(
           {sessionsPanel}
           {showSidePanel ? sidePanel : null}
         </Box>
+
+        {hasActiveOffer && handoffOffer?.target && (
+          <Box
+            borderStyle="round"
+            borderColor="magenta"
+            paddingX={1}
+            marginTop={1}
+            flexDirection="column"
+            flexShrink={0}
+          >
+            <Text bold color="magenta">
+              {handoffOffer.headline}
+            </Text>
+            <Text color="dim">
+              {handoffOffer.target.displayName}: {handoffOffer.target.reason}
+            </Text>
+            {handoffOffer.notesWarning ? (
+              <Text color="yellow">{handoffOffer.notesWarning}</Text>
+            ) : null}
+            <Text color="cyan">Press H to hand off • D to dismiss</Text>
+          </Box>
+        )}
 
         {notificationCard && (
           <Box

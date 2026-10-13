@@ -33,6 +33,9 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   aggregateResults,
+  detectIdenticalPrompts,
+  HANDOFF_BUDGETS,
+  nonAliasConditions,
   parseProviderMetrics,
   summarizeHandoff,
 } from './lib.mjs';
@@ -50,7 +53,7 @@ const CODEX_MODEL = 'gpt-5.6-sol';
 function parseArguments(argv) {
   const options = {
     execute: false,
-    tasks: 5,
+    tasks: null,
     timeoutMs: DEFAULT_TIMEOUT_MS,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -63,11 +66,10 @@ function parseArguments(argv) {
     else throw new Error(`Unknown argument: ${argument}`);
   }
   if (
-    !Number.isInteger(options.tasks) ||
-    options.tasks < 1 ||
-    options.tasks > 5
+    options.tasks !== null &&
+    (!Number.isInteger(options.tasks) || options.tasks < 1)
   ) {
-    throw new Error('--tasks must be an integer from 1 through 5.');
+    throw new Error('--tasks must be a positive integer.');
   }
   if (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1_000) {
     throw new Error('--timeout-ms must be an integer of at least 1000.');
@@ -101,7 +103,15 @@ export async function loadTasks(count) {
   const manifest = JSON.parse(
     await readFile(join(FIXTURES, 'manifest.json'), 'utf8'),
   );
-  const tasks = manifest.tasks.slice(0, count);
+  if (count !== null && count !== undefined && count > manifest.tasks.length) {
+    throw new Error(
+      `--tasks exceeds available tasks (${manifest.tasks.length}).`,
+    );
+  }
+  const tasks =
+    count !== null && count !== undefined
+      ? manifest.tasks.slice(0, count)
+      : manifest.tasks;
   for (const task of tasks) {
     if (typeof task.request !== 'string' || task.request.length > 800) {
       throw new Error(
@@ -796,6 +806,66 @@ export async function preflightProviders(
   };
 }
 
+export async function renderHandoffNoNotes({
+  repo,
+  relayBin,
+  timeoutMs,
+  logDirectory,
+  taskRoot,
+}) {
+  const tempRepo = join(taskRoot, 'temp-no-notes-render');
+  await copyWorktree(repo, tempRepo, { includeRelay: true });
+  const stateFile = join(tempRepo, '.relay', 'state.json');
+  const state = JSON.parse(await readFile(stateFile, 'utf8'));
+  state.notes = [];
+  await writeFile(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  const handoffResult = await relayCommand({
+    args: ['handoff', '--json'],
+    cwd: tempRepo,
+    relayBin,
+    timeoutMs,
+    logDirectory,
+  });
+  await rm(tempRepo, { recursive: true, force: true });
+  return JSON.parse(handoffResult.stdout);
+}
+
+export async function renderHandoffForBudget({
+  repo,
+  budget,
+  relayBin,
+  timeoutMs,
+  logDirectory,
+  taskRoot,
+}) {
+  const tempRepo = join(taskRoot, `temp-budget-${budget}-render`);
+  await copyWorktree(repo, tempRepo, { includeRelay: true });
+  const configFile = join(tempRepo, '.relay', 'config.json');
+  let config = {};
+  try {
+    config = JSON.parse(await readFile(configFile, 'utf8'));
+  } catch {
+    config = { schemaVersion: 1 };
+  }
+  config.handoff = {
+    ...(config.handoff ?? {}),
+    maxTokens: budget,
+    targetTokens: budget,
+    maxCharacters: 4 * budget,
+    targetCharacters: 4 * budget,
+  };
+  await writeFile(configFile, `${JSON.stringify(config, null, 2)}\n`);
+  const handoffResult = await relayCommand({
+    args: ['handoff', '--json'],
+    cwd: tempRepo,
+    relayBin,
+    timeoutMs,
+    logDirectory,
+  });
+  await rm(tempRepo, { recursive: true, force: true });
+  return JSON.parse(handoffResult.stdout);
+}
+
 export async function runDryTask(task, taskRoot, relayBin, timeoutMs) {
   const repo = join(taskRoot, 'repo');
   await copyInitial(task, repo);
@@ -905,34 +975,131 @@ export async function runDryTask(task, taskRoot, relayBin, timeoutMs) {
       `${task.id}: dry-run note capture failed: ${capture.failures.join('; ')}`,
     );
 
-  const baselineRepo = join(taskRoot, 'dry-baseline');
-  const treatmentRepo = join(taskRoot, 'dry-treatment');
-  await copyWorktree(repo, baselineRepo);
-  await copyWorktree(repo, treatmentRepo);
-  const [baselineFingerprint, treatmentFingerprint] = await Promise.all([
-    repositoryFingerprint(baselineRepo),
-    repositoryFingerprint(treatmentRepo),
-  ]);
-  if (baselineFingerprint !== treatmentFingerprint)
+  const budgetHandoffs = {
+    300: rendered,
+  };
+  for (const budget of HANDOFF_BUDGETS) {
+    if (budget === 300) continue;
+    budgetHandoffs[budget] = await renderHandoffForBudget({
+      repo,
+      budget,
+      relayBin,
+      timeoutMs,
+      logDirectory: join(taskRoot, 'logs', `relay-handoff-budget-${budget}`),
+      taskRoot,
+    });
+  }
+
+  const budgetChecks = {};
+  for (const budget of HANDOFF_BUDGETS) {
+    const handoffForBudget = budgetHandoffs[budget];
+    const maxTokens = budget;
+    const maxCharacters = 4 * budget;
+    if ((handoffForBudget.budget?.estimatedTokens ?? null) > maxTokens) {
+      throw new Error(
+        `${task.id}: budget ${budget} handoff exceeds ${maxTokens} estimated tokens (${handoffForBudget.budget?.estimatedTokens}).`,
+      );
+    }
+    if ((handoffForBudget.budget?.usedCharacters ?? null) > maxCharacters) {
+      throw new Error(
+        `${task.id}: budget ${budget} handoff exceeds ${maxCharacters} characters (${handoffForBudget.budget?.usedCharacters}).`,
+      );
+    }
+    const bChecks = handoffContentChecks(handoffForBudget, task);
+    if (bChecks.duplicateTaskOccurrences !== 1) {
+      throw new Error(
+        `${task.id}: budget ${budget} task request must appear exactly once; found ${bChecks.duplicateTaskOccurrences}.`,
+      );
+    }
+    if (bChecks.containsNoteInstruction) {
+      throw new Error(
+        `${task.id}: budget ${budget} handoff must not instruct note recording.`,
+      );
+    }
+    budgetChecks[budget] = bChecks;
+  }
+
+  const budgetPromptAnalysis = detectIdenticalPrompts(budgetHandoffs);
+  const budgets = {};
+  for (const budget of HANDOFF_BUDGETS) {
+    budgets[budget] = {
+      ...budgetPromptAnalysis[budget],
+      duplicateTaskOccurrences: budgetChecks[budget].duplicateTaskOccurrences,
+      containsNoteInstruction: budgetChecks[budget].containsNoteInstruction,
+    };
+  }
+
+  const renderedNoNotes = await renderHandoffNoNotes({
+    repo,
+    relayBin,
+    timeoutMs,
+    logDirectory: join(taskRoot, 'logs', 'relay-handoff-no-notes'),
+    taskRoot,
+  });
+  if ((renderedNoNotes.budget?.estimatedTokens ?? null) > 300) {
     throw new Error(
-      `${task.id}: dry-run successor repositories are not identical.`,
+      `${task.id}: no-notes handoff exceeds 300 estimated tokens (${renderedNoNotes.budget.estimatedTokens}).`,
     );
-  const [baselineGates, treatmentGates] = await Promise.all([
-    assertCleanSuccessor({
-      repo: baselineRepo,
-      expectedFingerprint: baselineFingerprint,
-      condition: 'dry-baseline',
-      taskRoot,
-      timeoutMs,
+  }
+  if ((renderedNoNotes.budget?.usedCharacters ?? null) > 1_200) {
+    throw new Error(
+      `${task.id}: no-notes handoff exceeds 1,200 characters (${renderedNoNotes.budget.usedCharacters}).`,
+    );
+  }
+  const checksNoNotes = handoffContentChecks(renderedNoNotes, task);
+  if (checksNoNotes.duplicateTaskOccurrences !== 1) {
+    throw new Error(
+      `${task.id}: no-notes task request must appear exactly once; found ${checksNoNotes.duplicateTaskOccurrences}.`,
+    );
+  }
+  if (checksNoNotes.containsNoteInstruction) {
+    throw new Error(
+      `${task.id}: no-notes handoff must not instruct note recording.`,
+    );
+  }
+  if ((renderedNoNotes.capsule?.notes ?? []).length !== 0) {
+    throw new Error(`${task.id}: no-notes handoff must have empty notes.`);
+  }
+
+  const dryConditionNames = [
+    'baseline',
+    'handoff-no-notes',
+    'handoff-300',
+    'handoff-800',
+    'handoff-2000',
+  ];
+  const dryRepos = {};
+  for (const name of dryConditionNames) {
+    const dryPath = join(taskRoot, `dry-${name}`);
+    await copyWorktree(repo, dryPath);
+    dryRepos[name] = dryPath;
+  }
+  const dryFingerprints = await Promise.all(
+    dryConditionNames.map((name) => repositoryFingerprint(dryRepos[name])),
+  );
+  const baselineFingerprint = dryFingerprints[0];
+  for (let i = 1; i < dryFingerprints.length; i += 1) {
+    if (dryFingerprints[i] !== baselineFingerprint) {
+      throw new Error(
+        `${task.id}: dry-run successor repositories are not identical.`,
+      );
+    }
+  }
+  const gateEntries = await Promise.all(
+    dryConditionNames.map(async (name) => {
+      const gates = await assertCleanSuccessor({
+        repo: dryRepos[name],
+        expectedFingerprint: baselineFingerprint,
+        condition: `dry-${name}`,
+        taskRoot,
+        timeoutMs,
+      });
+      return [name, gates];
     }),
-    assertCleanSuccessor({
-      repo: treatmentRepo,
-      expectedFingerprint: baselineFingerprint,
-      condition: 'dry-treatment',
-      taskRoot,
-      timeoutMs,
-    }),
-  ]);
+  );
+  const successorGates = Object.fromEntries(gateEntries);
+  successorGates['handoff-with-notes'] = successorGates['handoff-300'];
+  successorGates.treatment = successorGates['handoff-300'];
 
   await cp(
     join(FIXTURES, task.id, 'reference', 'index.js'),
@@ -966,16 +1133,21 @@ export async function runDryTask(task, taskRoot, relayBin, timeoutMs) {
     ),
     relayExcludedAfterStart: true,
     captureValidated: true,
-    successorGates: {
-      baseline: baselineGates,
-      treatment: treatmentGates,
-    },
+    successorGates,
     handoff: {
       characters: checks.characters,
       estimatedTokens: checks.estimatedTokens,
       duplicateTaskOccurrences: checks.duplicateTaskOccurrences,
       containsNoteInstruction: checks.containsNoteInstruction,
+      sha256: budgets[300].sha256,
     },
+    handoffNoNotes: {
+      characters: checksNoNotes.characters,
+      estimatedTokens: checksNoNotes.estimatedTokens,
+      duplicateTaskOccurrences: checksNoNotes.duplicateTaskOccurrences,
+      containsNoteInstruction: checksNoNotes.containsNoteInstruction,
+    },
+    budgets,
   };
 }
 
@@ -986,8 +1158,12 @@ export async function runCondition({
   expectedFingerprint,
   prompt,
   handoff,
+  handoffWithNotes,
+  handoffNoNotes,
+  budgetHandoffs,
   taskRoot,
   timeoutMs,
+  reusedResult = null,
 }) {
   const gates = await assertCleanSuccessor({
     repo,
@@ -997,16 +1173,81 @@ export async function runCondition({
     timeoutMs,
   });
   const promptSha256 = await sha256(prompt);
-  let treatmentPromptHashEqual = null;
-  if (condition === 'treatment') {
-    const capturedHandoffSha256 = await sha256(handoff.text);
-    treatmentPromptHashEqual = promptSha256 === capturedHandoffSha256;
-    if (prompt !== handoff.text || !treatmentPromptHashEqual)
-      throw new Error(
-        'treatment: launched prompt differs from the captured handoff.',
-      );
-    if (/relay\s+note/i.test(prompt))
-      throw new Error('treatment: launched prompt instructs note recording.');
+  let handoffPromptHashEqual = null;
+  const withNotes = handoffWithNotes ?? handoff;
+  if (condition === 'treatment' || condition === 'handoff-with-notes') {
+    if (withNotes?.text) {
+      const capturedHandoffSha256 = await sha256(withNotes.text);
+      handoffPromptHashEqual = promptSha256 === capturedHandoffSha256;
+      if (prompt !== withNotes.text || !handoffPromptHashEqual) {
+        throw new Error(
+          `${condition}: launched prompt differs from the captured handoff with notes.`,
+        );
+      }
+      if (/relay\s+note/i.test(prompt)) {
+        throw new Error(
+          `${condition}: launched prompt instructs note recording.`,
+        );
+      }
+    }
+  } else if (condition === 'handoff-no-notes') {
+    if (handoffNoNotes?.text) {
+      const capturedNoNotesSha256 = await sha256(handoffNoNotes.text);
+      handoffPromptHashEqual = promptSha256 === capturedNoNotesSha256;
+      if (prompt !== handoffNoNotes.text || !handoffPromptHashEqual) {
+        throw new Error(
+          'handoff-no-notes: launched prompt differs from the captured no-notes handoff.',
+        );
+      }
+      if (/relay\s+note/i.test(prompt)) {
+        throw new Error(
+          'handoff-no-notes: launched prompt instructs note recording.',
+        );
+      }
+    }
+  } else if (condition.startsWith('handoff-')) {
+    const budgetMatch = condition.match(/^handoff-(\d+)$/);
+    const budgetNum = budgetMatch ? Number(budgetMatch[1]) : null;
+    const targetHandoff = budgetHandoffs?.[budgetNum];
+    if (targetHandoff?.text) {
+      const capturedBudgetSha256 = await sha256(targetHandoff.text);
+      handoffPromptHashEqual = promptSha256 === capturedBudgetSha256;
+      if (prompt !== targetHandoff.text || !handoffPromptHashEqual) {
+        throw new Error(
+          `${condition}: launched prompt differs from the captured handoff for budget ${budgetNum}.`,
+        );
+      }
+      if (/relay\s+note/i.test(prompt)) {
+        throw new Error(
+          `${condition}: launched prompt instructs note recording.`,
+        );
+      }
+    }
+  }
+
+  const promptKind =
+    condition === 'baseline'
+      ? 'full-request-plus-inspection'
+      : condition === 'handoff-no-notes'
+        ? 'exact-handoff-no-notes'
+        : condition === 'handoff-with-notes'
+          ? 'exact-handoff-with-notes'
+          : `exact-${condition}`;
+
+  if (reusedResult) {
+    return {
+      ...reusedResult,
+      condition,
+      prompt: {
+        kind: promptKind,
+        characters: prompt.length,
+        sha256: promptSha256,
+        matchesCapturedHandoff: handoffPromptHashEqual,
+      },
+      skippedProviderCall: true,
+      duplicateOf: reusedResult.condition,
+      ...gates,
+    };
   }
   const snapshot = join(taskRoot, `${condition}-predecessor-snapshot`);
   await snapshotWorktree(repo, snapshot);
@@ -1037,13 +1278,10 @@ export async function runCondition({
   return {
     condition,
     prompt: {
-      kind:
-        condition === 'baseline'
-          ? 'full-request-plus-inspection'
-          : 'exact-handoff',
+      kind: promptKind,
       characters: prompt.length,
       sha256: promptSha256,
-      matchesCapturedHandoff: treatmentPromptHashEqual,
+      matchesCapturedHandoff: handoffPromptHashEqual,
     },
     command: {
       executable: command.executable,
@@ -1058,7 +1296,11 @@ export async function runCondition({
     metrics: parseProviderMetrics('codex', providerResult.stdout),
     evaluation,
     changedLines: changes,
-    rejectedApproachRepeated: rejectedApproachRepeated(task, handoff, source),
+    rejectedApproachRepeated: rejectedApproachRepeated(
+      task,
+      withNotes ?? {},
+      source,
+    ),
     relayStateAccessed: /(?:^|[\s"'])\.relay(?:\/|[\s"'])/m.test(
       providerResult.stdout,
     ),
@@ -1204,14 +1446,14 @@ async function runExecuteTask(task, taskRoot, relayBin, timeoutMs, taskIndex) {
     timeoutMs,
     logDirectory: join(taskRoot, 'logs', 'relay-handoff'),
   });
-  const handoff = JSON.parse(handoffResult.stdout);
-  const capture = validateCapturedNotes(handoff, task);
+  const handoffWithNotes = JSON.parse(handoffResult.stdout);
+  const capture = validateCapturedNotes(handoffWithNotes, task);
   if (!capture.validated) {
     throw new Error(
       `${task.id}: predecessor capture validation failed before successor calls: ${capture.failures.join('; ')}`,
     );
   }
-  const contentChecks = handoffContentChecks(handoff, task);
+  const contentChecks = handoffContentChecks(handoffWithNotes, task);
   if (contentChecks.duplicateTaskOccurrences !== 1) {
     throw new Error(
       `${task.id}: task request must appear exactly once in the handoff; found ${contentChecks.duplicateTaskOccurrences}.`,
@@ -1220,39 +1462,190 @@ async function runExecuteTask(task, taskRoot, relayBin, timeoutMs, taskIndex) {
   if (contentChecks.containsNoteInstruction) {
     throw new Error(`${task.id}: handoff must not instruct note recording.`);
   }
-  const baselineRepo = join(taskRoot, 'baseline');
-  const treatmentRepo = join(taskRoot, 'treatment');
-  if (!isWithin(taskRoot, baselineRepo) || !isWithin(taskRoot, treatmentRepo)) {
-    throw new Error('Successor repo escaped disposable task root.');
-  }
-  await copyWorktree(predecessorRepo, baselineRepo);
-  await copyWorktree(predecessorRepo, treatmentRepo);
-  const [expectedFingerprint, treatmentFingerprint] = await Promise.all([
-    repositoryFingerprint(baselineRepo),
-    repositoryFingerprint(treatmentRepo),
-  ]);
-  if (expectedFingerprint !== treatmentFingerprint)
+
+  const handoffNoNotes = await renderHandoffNoNotes({
+    repo: predecessorRepo,
+    relayBin,
+    timeoutMs,
+    logDirectory: join(taskRoot, 'logs', 'relay-handoff-no-notes'),
+    taskRoot,
+  });
+  const contentChecksNoNotes = handoffContentChecks(handoffNoNotes, task);
+  if (contentChecksNoNotes.duplicateTaskOccurrences !== 1) {
     throw new Error(
-      `${task.id}: successor repositories differ before provider calls.`,
+      `${task.id}: task request must appear exactly once in no-notes handoff; found ${contentChecksNoNotes.duplicateTaskOccurrences}.`,
     );
+  }
+  if (contentChecksNoNotes.containsNoteInstruction) {
+    throw new Error(
+      `${task.id}: no-notes handoff must not instruct note recording.`,
+    );
+  }
+
+  const budgetHandoffs = {
+    300: handoffWithNotes,
+  };
+  for (const budget of HANDOFF_BUDGETS) {
+    if (budget === 300) continue;
+    budgetHandoffs[budget] = await renderHandoffForBudget({
+      repo: predecessorRepo,
+      budget,
+      relayBin,
+      timeoutMs,
+      logDirectory: join(taskRoot, 'logs', `relay-handoff-budget-${budget}`),
+      taskRoot,
+    });
+  }
+
+  const budgetChecks = {};
+  for (const budget of HANDOFF_BUDGETS) {
+    const h = budgetHandoffs[budget];
+    const maxTokens = budget;
+    const maxCharacters = 4 * budget;
+    if ((h.budget?.estimatedTokens ?? null) > maxTokens) {
+      throw new Error(
+        `${task.id}: budget ${budget} handoff exceeds ${maxTokens} estimated tokens (${h.budget?.estimatedTokens}).`,
+      );
+    }
+    if ((h.budget?.usedCharacters ?? null) > maxCharacters) {
+      throw new Error(
+        `${task.id}: budget ${budget} handoff exceeds ${maxCharacters} characters (${h.budget?.usedCharacters}).`,
+      );
+    }
+    const bChecks = handoffContentChecks(h, task);
+    if (bChecks.duplicateTaskOccurrences !== 1) {
+      throw new Error(
+        `${task.id}: budget ${budget} task request must appear exactly once in handoff; found ${bChecks.duplicateTaskOccurrences}.`,
+      );
+    }
+    if (bChecks.containsNoteInstruction) {
+      throw new Error(
+        `${task.id}: budget ${budget} handoff must not instruct note recording.`,
+      );
+    }
+    budgetChecks[budget] = bChecks;
+  }
+
+  const budgetPromptAnalysis = detectIdenticalPrompts(budgetHandoffs);
+  const budgets = {};
+  for (const budget of HANDOFF_BUDGETS) {
+    budgets[budget] = {
+      ...budgetPromptAnalysis[budget],
+      duplicateTaskOccurrences: budgetChecks[budget].duplicateTaskOccurrences,
+      containsNoteInstruction: budgetChecks[budget].containsNoteInstruction,
+    };
+  }
+
+  const conditionNames = [
+    'baseline',
+    'handoff-no-notes',
+    'handoff-300',
+    'handoff-800',
+    'handoff-2000',
+  ];
+  const repos = {};
+  for (const name of conditionNames) {
+    const repoPath = join(taskRoot, name);
+    if (!isWithin(taskRoot, repoPath)) {
+      throw new Error(
+        `Successor repo escaped disposable task root: ${repoPath}`,
+      );
+    }
+    await copyWorktree(predecessorRepo, repoPath);
+    repos[name] = repoPath;
+  }
+  const conditionFingerprints = await Promise.all(
+    conditionNames.map((name) => repositoryFingerprint(repos[name])),
+  );
+  const expectedFingerprint = conditionFingerprints[0];
+  for (let i = 1; i < conditionFingerprints.length; i += 1) {
+    if (conditionFingerprints[i] !== expectedFingerprint) {
+      throw new Error(
+        `${task.id}: successor repositories differ before provider calls.`,
+      );
+    }
+  }
+
   const baselinePrompt = `${task.request}\n\nInspect the working tree and preserve existing changes. Finish the implementation and run all public tests.`;
-  const prompts = { baseline: baselinePrompt, treatment: handoff.text };
-  const repos = { baseline: baselineRepo, treatment: treatmentRepo };
-  const order =
-    taskIndex % 2 === 0 ? ['baseline', 'treatment'] : ['treatment', 'baseline'];
+  const prompts = {
+    baseline: baselinePrompt,
+    'handoff-no-notes': handoffNoNotes.text,
+    'handoff-300': budgetHandoffs[300].text,
+    'handoff-800': budgetHandoffs[800].text,
+    'handoff-2000': budgetHandoffs[2000].text,
+  };
+  const ORDER_PERMUTATIONS = [
+    [
+      'baseline',
+      'handoff-no-notes',
+      'handoff-300',
+      'handoff-800',
+      'handoff-2000',
+    ],
+    [
+      'handoff-300',
+      'handoff-800',
+      'handoff-2000',
+      'baseline',
+      'handoff-no-notes',
+    ],
+    [
+      'handoff-no-notes',
+      'handoff-300',
+      'baseline',
+      'handoff-2000',
+      'handoff-800',
+    ],
+    [
+      'handoff-800',
+      'baseline',
+      'handoff-2000',
+      'handoff-no-notes',
+      'handoff-300',
+    ],
+    [
+      'handoff-2000',
+      'handoff-no-notes',
+      'handoff-800',
+      'handoff-300',
+      'baseline',
+    ],
+    [
+      'baseline',
+      'handoff-2000',
+      'handoff-800',
+      'handoff-300',
+      'handoff-no-notes',
+    ],
+  ];
+  const order = ORDER_PERMUTATIONS[taskIndex % ORDER_PERMUTATIONS.length];
+  const seenPromptHashes = new Map();
   const conditions = {};
   for (const condition of order) {
+    const promptText = prompts[condition];
+    const promptSha256 = await sha256(promptText);
+    const reusedConditionName = seenPromptHashes.get(promptSha256);
+    const reusedResult = reusedConditionName
+      ? conditions[reusedConditionName]
+      : null;
     conditions[condition] = await runCondition({
       task,
       condition,
       repo: repos[condition],
       expectedFingerprint,
-      prompt: prompts[condition],
-      handoff,
+      prompt: promptText,
+      handoffWithNotes,
+      handoffNoNotes,
+      budgetHandoffs,
       taskRoot,
       timeoutMs,
+      reusedResult,
     });
+    if (!seenPromptHashes.has(promptSha256)) {
+      seenPromptHashes.set(promptSha256, condition);
+    }
   }
+  conditions['handoff-with-notes'] = conditions['handoff-300'];
   return {
     taskId: task.id,
     title: task.title,
@@ -1263,9 +1656,15 @@ async function runExecuteTask(task, taskRoot, relayBin, timeoutMs, taskIndex) {
       noteTypes: capture.noteTypes,
     },
     handoff: {
-      ...summarizeHandoff(handoff),
+      ...summarizeHandoff(handoffWithNotes),
       ...contentChecks,
+      sha256: budgets[300].sha256,
     },
+    handoffNoNotes: {
+      ...summarizeHandoff(handoffNoNotes),
+      ...contentChecksNoNotes,
+    },
+    budgets,
     predecessor: {
       command: {
         executable: predecessorCommand.executable,
@@ -1301,18 +1700,44 @@ export function markdownReport(result, analysis) {
       '',
       ...result.tasks.map(
         (task) =>
-          `- ${task.taskId}: initial public failure expected; reference public+hidden pass; capture valid; handoff ${task.handoff?.estimatedTokens ?? 'n/a'} est. tokens / ${task.handoff?.characters ?? 'n/a'} chars, request once, no note instruction; both successors fingerprint-equal with .relay and hidden tests absent.`,
+          `- ${task.taskId}: initial public failure expected; reference public+hidden pass; capture valid; handoff ${task.handoff?.estimatedTokens ?? 'n/a'} est. tokens / ${task.handoff?.characters ?? 'n/a'} chars, request once, no note instruction; all successors fingerprint-equal with .relay and hidden tests absent.`,
       ),
       '',
-      'No provider command was invoked.',
     );
+    if (result.tasks.some((t) => t.budgets)) {
+      lines.push(
+        '## Budget sweep (300 / 800 / 2,000 tokens)',
+        '',
+        '| Task | Budget | Chars (limit) | Est. tokens (limit) | Prompt SHA-256 | Status |',
+        '| --- | ---: | ---: | ---: | --- | --- |',
+      );
+      for (const task of result.tasks) {
+        if (!task.budgets) continue;
+        for (const budget of [300, 800, 2000]) {
+          const b = task.budgets[budget];
+          if (!b) continue;
+          const status = b.isDuplicate
+            ? `duplicate (identical to ${b.identicalTo})`
+            : 'distinct';
+          lines.push(
+            `| ${task.taskId} | ${budget} | ${b.characters} (${b.maxCharacters}) | ${b.estimatedTokens} (${b.maxTokens}) | ${b.sha256.slice(0, 16)}... | ${status} |`,
+          );
+        }
+      }
+      lines.push(
+        '',
+        'Identical prompts detected across budgets were flagged to prevent redundant provider calls.',
+        '',
+      );
+    }
+    lines.push('No provider command was invoked.');
     return `${lines.join('\n')}\n`;
   }
   const providerFailures = result.tasks.reduce(
     (count, task) =>
       count +
       Number(task.predecessor?.exitCode !== 0) +
-      Object.values(task.conditions ?? {}).filter(
+      nonAliasConditions(task).filter(
         (condition) => condition.exitCode !== 0 || condition.timedOut,
       ).length,
     0,
@@ -1320,7 +1745,7 @@ export function markdownReport(result, analysis) {
   const missingMetricFields = result.tasks.reduce(
     (count, task) =>
       count +
-      Object.values(task.conditions ?? {}).reduce(
+      nonAliasConditions(task).reduce(
         (conditionCount, condition) =>
           conditionCount +
           ['inputTokens', 'cachedInputTokens', 'outputTokens'].filter(
@@ -1337,41 +1762,117 @@ export function markdownReport(result, analysis) {
       ? 'The predeclared directional decision rule passed.'
       : 'The predeclared directional decision rule did not pass.',
     '',
-    '## Paired results',
-    '',
-    '| Task | Order | Baseline pass | Treatment pass | Time delta ms | Non-cached token delta | >=20% | Handoff chars | Est. tokens | Captured note types | Relay absent |',
-    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |',
-    ...analysis.pairs.map((pair, index) => {
-      const task = result.tasks[index];
-      const relayAbsent = Object.values(task.conditions ?? {}).every(
-        (condition) =>
-          condition.relayStatePresentBeforeSuccessor === false &&
-          condition.relayPathInGitStatus === false,
-      );
-      return `| ${pair.taskId} | ${pair.order.join(' then ')} | ${pair.correctness.baseline} | ${pair.correctness.treatment} | ${pair.wallTimeDeltaMs} | ${pair.nonCachedTokenDelta ?? 'unavailable'} | ${pair.reachesTwentyPercent} | ${task.handoff?.characters ?? 'n/a'} | ${pair.handoffTokens} | ${(task.capture?.noteTypes ?? []).join(', ')} | ${relayAbsent} |`;
-    }),
-    '',
-    '## Totals',
-    '',
-    `- Non-cached successor tokens (input minus cached input plus output): baseline ${analysis.summary.totals.nonCachedTokens.baseline ?? 'unavailable'}; treatment ${analysis.summary.totals.nonCachedTokens.treatment ?? 'unavailable'}.`,
-    `- Successor wall time: baseline ${analysis.summary.totals.wallTimeMs.baseline} ms; treatment ${analysis.summary.totals.wallTimeMs.treatment} ms; delta ${analysis.summary.totals.wallTimeMs.delta} ms.`,
-    `- Paired non-cached-token delta: mean ${analysis.summary.nonCachedTokenDelta.mean ?? 'unavailable'}; median ${analysis.summary.nonCachedTokenDelta.median ?? 'unavailable'}.`,
-    `- Paired wall-time delta: mean ${analysis.summary.wallTimeDeltaMs.mean ?? 'unavailable'} ms; median ${analysis.summary.wallTimeDeltaMs.median ?? 'unavailable'} ms.`,
-    '',
-    '## Correctness',
-    '',
-    `- Baseline: ${analysis.summary.successCounts.baseline}/${result.taskCount}.`,
-    `- Treatment: ${analysis.summary.successCounts.treatment}/${result.taskCount}.`,
-    `- Tasks reaching the 20% threshold: ${analysis.summary.improvedTasks}/${result.taskCount}.`,
-    `- Decision rule passed: ${analysis.summary.decisionRule.passed}.`,
+  );
+
+  const hasBudgets = Boolean(analysis.summary?.budgets);
+  const isThreeArm = Boolean(
+    analysis.summary.totals?.nonCachedTokens?.['handoff-no-notes'] !==
+      undefined || analysis.summary.comparisons?.noNotesVsBaseline,
+  );
+
+  if (isThreeArm) {
+    lines.push(
+      '## Paired results',
+      '',
+      '| Task | Order | Baseline pass | No-notes pass | With-notes pass | Time delta ms | Non-cached token delta | WN >=20% | Handoff chars | Est. tokens | Captured note types | Relay absent |',
+      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |',
+      ...analysis.pairs.map((pair, index) => {
+        const task = result.tasks[index];
+        const relayAbsent = nonAliasConditions(task).every(
+          (condition) =>
+            condition.relayStatePresentBeforeSuccessor === false &&
+            condition.relayPathInGitStatus === false,
+        );
+        return `| ${pair.taskId} | ${pair.order.join(' then ')} | ${pair.correctness.baseline} | ${pair.correctness['handoff-no-notes'] ?? 'n/a'} | ${pair.correctness['handoff-with-notes'] ?? pair.correctness.treatment} | ${pair.wallTimeDeltaMs} | ${pair.nonCachedTokenDelta ?? 'unavailable'} | ${pair.reachesTwentyPercent} | ${task.handoff?.characters ?? 'n/a'} | ${pair.handoffTokens} | ${(task.capture?.noteTypes ?? []).join(', ')} | ${relayAbsent} |`;
+      }),
+      '',
+      '## Exploration metrics',
+      '',
+      '| Task | Tool calls (B / NN / WN) | Files read (B / NN / WN) | Time to edit ms (B / NN / WN) | Turns before edit (B / NN / WN) |',
+      '| --- | --- | --- | --- | --- |',
+      ...analysis.pairs.map((pair) => {
+        const e = pair.exploration ?? {};
+        const b = e.baseline ?? {};
+        const nn = e['handoff-no-notes'] ?? {};
+        const wn = e['handoff-with-notes'] ?? {};
+        const fmt = (k) =>
+          `${b[k] ?? 'null'} / ${nn[k] ?? 'null'} / ${wn[k] ?? 'null'}`;
+        return `| ${pair.taskId} | ${fmt('toolCalls')} | ${fmt('distinctFilesRead')} | ${fmt('timeToFirstEditMs')} | ${fmt('turnsBeforeFirstEdit')} |`;
+      }),
+      '',
+      '## Totals',
+      '',
+      `- Non-cached successor tokens (input minus cached input plus output): baseline ${analysis.summary.totals.nonCachedTokens.baseline ?? 'unavailable'}; with-notes ${analysis.summary.totals.nonCachedTokens['handoff-with-notes'] ?? 'unavailable'}; no-notes ${analysis.summary.totals.nonCachedTokens['handoff-no-notes'] ?? 'unavailable'}.`,
+      ...(hasBudgets
+        ? [
+            `- Budget non-cached successor tokens: 300 tokens: ${analysis.summary.totals.nonCachedTokens['handoff-300'] ?? 'unavailable'}; 800 tokens: ${analysis.summary.totals.nonCachedTokens['handoff-800'] ?? 'unavailable'}; 2,000 tokens: ${analysis.summary.totals.nonCachedTokens['handoff-2000'] ?? 'unavailable'}.`,
+          ]
+        : []),
+      `- Successor wall time: baseline ${analysis.summary.totals.wallTimeMs.baseline} ms; with-notes ${analysis.summary.totals.wallTimeMs['handoff-with-notes']} ms; no-notes ${analysis.summary.totals.wallTimeMs['handoff-no-notes']} ms; delta ${analysis.summary.totals.wallTimeMs.delta} ms.`,
+      ...(hasBudgets
+        ? [
+            `- Budget successor wall time: 300 tokens: ${analysis.summary.totals.wallTimeMs['handoff-300'] ?? 'unavailable'} ms; 800 tokens: ${analysis.summary.totals.wallTimeMs['handoff-800'] ?? 'unavailable'} ms; 2,000 tokens: ${analysis.summary.totals.wallTimeMs['handoff-2000'] ?? 'unavailable'} ms.`,
+          ]
+        : []),
+      `- Paired non-cached-token delta (with-notes vs baseline): mean ${analysis.summary.nonCachedTokenDelta.mean ?? 'unavailable'}; median ${analysis.summary.nonCachedTokenDelta.median ?? 'unavailable'}.`,
+      `- Paired wall-time delta (with-notes vs baseline): mean ${analysis.summary.wallTimeDeltaMs.mean ?? 'unavailable'} ms; median ${analysis.summary.wallTimeDeltaMs.median ?? 'unavailable'} ms.`,
+      '',
+      '## Correctness',
+      '',
+      `- Baseline: ${analysis.summary.successCounts.baseline}/${result.taskCount}.`,
+      `- Handoff with notes: ${analysis.summary.successCounts['handoff-with-notes']}/${result.taskCount}.`,
+      `- Handoff no notes: ${analysis.summary.successCounts['handoff-no-notes']}/${result.taskCount}.`,
+      ...(hasBudgets
+        ? [
+            `- Handoff 300 tokens: ${analysis.summary.successCounts['handoff-300'] ?? 'unavailable'}/${result.taskCount}.`,
+            `- Handoff 800 tokens: ${analysis.summary.successCounts['handoff-800'] ?? 'unavailable'}/${result.taskCount}.`,
+            `- Handoff 2,000 tokens: ${analysis.summary.successCounts['handoff-2000'] ?? 'unavailable'}/${result.taskCount}.`,
+          ]
+        : []),
+      `- Tasks reaching the 20% threshold: ${analysis.summary.improvedTasks}/${result.taskCount}.`,
+      `- Decision rule passed: ${analysis.summary.decisionRule.passed}.`,
+    );
+  } else {
+    lines.push(
+      '## Paired results',
+      '',
+      '| Task | Order | Baseline pass | Treatment pass | Time delta ms | Non-cached token delta | >=20% | Handoff chars | Est. tokens | Captured note types | Relay absent |',
+      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |',
+      ...analysis.pairs.map((pair, index) => {
+        const task = result.tasks[index];
+        const relayAbsent = nonAliasConditions(task).every(
+          (condition) =>
+            condition.relayStatePresentBeforeSuccessor === false &&
+            condition.relayPathInGitStatus === false,
+        );
+        return `| ${pair.taskId} | ${pair.order.join(' then ')} | ${pair.correctness.baseline} | ${pair.correctness.treatment} | ${pair.wallTimeDeltaMs} | ${pair.nonCachedTokenDelta ?? 'unavailable'} | ${pair.reachesTwentyPercent} | ${task.handoff?.characters ?? 'n/a'} | ${pair.handoffTokens} | ${(task.capture?.noteTypes ?? []).join(', ')} | ${relayAbsent} |`;
+      }),
+      '',
+      '## Totals',
+      '',
+      `- Non-cached successor tokens (input minus cached input plus output): baseline ${analysis.summary.totals.nonCachedTokens.baseline ?? 'unavailable'}; treatment ${analysis.summary.totals.nonCachedTokens.treatment ?? 'unavailable'}.`,
+      `- Successor wall time: baseline ${analysis.summary.totals.wallTimeMs.baseline} ms; treatment ${analysis.summary.totals.wallTimeMs.treatment} ms; delta ${analysis.summary.totals.wallTimeMs.delta} ms.`,
+      `- Paired non-cached-token delta: mean ${analysis.summary.nonCachedTokenDelta.mean ?? 'unavailable'}; median ${analysis.summary.nonCachedTokenDelta.median ?? 'unavailable'}.`,
+      `- Paired wall-time delta: mean ${analysis.summary.wallTimeDeltaMs.mean ?? 'unavailable'} ms; median ${analysis.summary.wallTimeDeltaMs.median ?? 'unavailable'} ms.`,
+      '',
+      '## Correctness',
+      '',
+      `- Baseline: ${analysis.summary.successCounts.baseline}/${result.taskCount}.`,
+      `- Treatment: ${analysis.summary.successCounts.treatment}/${result.taskCount}.`,
+      `- Tasks reaching the 20% threshold: ${analysis.summary.improvedTasks}/${result.taskCount}.`,
+      `- Decision rule passed: ${analysis.summary.decisionRule.passed}.`,
+    );
+  }
+
+  lines.push(
     '',
     '## Capture and integrity',
     '',
     `- Predecessor captures validated: ${result.tasks.filter((task) => task.capture?.validated).length}/${result.taskCount}.`,
     `- Handoff task-request occurrences: ${result.tasks.map((task) => task.handoff?.duplicateTaskOccurrences ?? 'n/a').join(', ')}.`,
     `- Handoffs containing successor note instructions: ${result.tasks.filter((task) => task.handoff?.containsNoteInstruction).length}.`,
-    `- Successor gate failures: ${result.tasks.reduce((count, task) => count + Object.values(task.conditions ?? {}).filter((condition) => condition.relayStatePresentBeforeSuccessor || condition.relayPathInGitStatus || !condition.conditionFingerprintEqual).length, 0)}.`,
-    `- Treatment prompt hashes matched the captured handoff before launch: ${result.tasks.filter((task) => task.conditions?.treatment?.prompt?.matchesCapturedHandoff === true).length}/${result.taskCount}.`,
+    `- Successor gate failures: ${result.tasks.reduce((count, task) => count + nonAliasConditions(task).filter((condition) => condition.relayStatePresentBeforeSuccessor || condition.relayPathInGitStatus || !condition.conditionFingerprintEqual).length, 0)}.`,
+    `- Treatment prompt hashes matched the captured handoff before launch: ${result.tasks.filter((task) => (task.conditions?.['handoff-with-notes'] ?? task.conditions?.treatment)?.prompt?.matchesCapturedHandoff === true).length}/${result.taskCount}.`,
     `- Dry-run reference validations completed before execution: ${result.dryRunValidation?.length ?? 0}/${result.taskCount}.`,
     '',
     '## Provider execution',
@@ -1380,9 +1881,60 @@ export function markdownReport(result, analysis) {
     `- Missing required successor metric fields: ${missingMetricFields}. Missing metrics remain null and are never inferred.`,
     '- No manual causal review was required when both conditions were correct; treatment failures would require one.',
     '',
+    ...(result.tasks.some((t) => t.budgets)
+      ? [
+          '## Budget sweep (300 / 800 / 2,000 tokens)',
+          '',
+          '| Task | Budget | Chars (limit) | Est. tokens (limit) | Prompt SHA-256 | Status |',
+          '| --- | ---: | ---: | ---: | --- | --- |',
+          ...result.tasks.flatMap((task) => {
+            if (!task.budgets) return [];
+            return [300, 800, 2000]
+              .map((budget) => {
+                const b = task.budgets[budget];
+                if (!b) return '';
+                const status = b.isDuplicate
+                  ? `duplicate (identical to ${b.identicalTo})`
+                  : 'distinct';
+                return `| ${task.taskId} | ${budget} | ${b.characters} (${b.maxCharacters}) | ${b.estimatedTokens} (${b.maxTokens}) | ${b.sha256.slice(0, 16)}... | ${status} |`;
+              })
+              .filter(Boolean);
+          }),
+          '',
+          'Identical prompts detected across budgets were flagged to prevent redundant provider calls.',
+          '',
+        ]
+      : []),
+    ...(hasBudgets && !result.dryRun
+      ? [
+          '## Budget arm performance (300 / 800 / 2,000 tokens)',
+          '',
+          '| Task | Budget | Pass | Non-cached tokens | Wall time ms | vs Baseline tokens | Provider call |',
+          '| --- | ---: | ---: | ---: | ---: | ---: | --- |',
+          ...analysis.pairs.flatMap((pair) => {
+            if (!pair.budgets) return [];
+            return [300, 800, 2000]
+              .map((budget) => {
+                const b = pair.budgets[budget];
+                if (!b) return '';
+                const callStatus = b.skippedProviderCall
+                  ? `reused (${b.duplicateOf})`
+                  : 'executed';
+                const tokenDelta = b.vsBaseline?.nonCachedTokenDelta;
+                const tokenDeltaStr =
+                  typeof tokenDelta === 'number'
+                    ? `${tokenDelta > 0 ? '+' : ''}${tokenDelta}`
+                    : 'unavailable';
+                return `| ${pair.taskId} | ${budget} | ${b.correct} | ${b.nonCachedTokens ?? 'unavailable'} | ${b.wallTimeMs ?? 'unavailable'} | ${tokenDeltaStr} | ${callStatus} |`;
+              })
+              .filter(Boolean);
+          }),
+          '',
+        ]
+      : []),
     '## Limitations',
     '',
-    '- These are five fixed synthetic tasks and do not establish statistical significance.',
+    '- These are fixed synthetic tasks and do not establish statistical significance.',
     '- The experiment measures successor continuation cost; incremental predecessor note-capture cost is excluded from paired deltas.',
     '- Machine load, provider releases, authentication state, and JSONL schema changes can affect results.',
     '- Raw prompts, provider logs, Relay state, credentials, and private paths are excluded from publication artifacts.',
@@ -1425,7 +1977,7 @@ async function main() {
   );
   process.stdout.write(`Run root: ${runRoot}\n`);
   process.stdout.write(
-    `${options.execute ? 'Execute' : 'Dry-run'} mode; ${tasks.length} task(s); expected provider commands: ${options.execute ? tasks.length * 3 : 0}\n`,
+    `${options.execute ? 'Execute' : 'Dry-run'} mode; ${tasks.length} task(s); expected provider commands: ${options.execute ? `up to ${tasks.length * 6} (subject to identical-prompt deduplication)` : 0}\n`,
   );
   const dryRunValidation = [];
   if (options.execute) {
@@ -1465,6 +2017,16 @@ async function main() {
         : await runDryTask(task, taskRoot, relayBin, options.timeoutMs),
     );
   }
+  const providerCommandCount = options.execute
+    ? taskResults.reduce((count, task) => {
+        const predecessorCalls = task.predecessor ? 1 : 0;
+        const conditionCalls = (task.order ?? []).filter(
+          (condition) => !task.conditions?.[condition]?.skippedProviderCall,
+        ).length;
+        return count + predecessorCalls + conditionCalls;
+      }, 0)
+    : 0;
+
   const result = {
     schemaVersion: 1,
     integrityVersion: 'v2-full-git-state-v1',
@@ -1472,7 +2034,7 @@ async function main() {
     createdAt: new Date().toISOString(),
     runRoot,
     taskCount: tasks.length,
-    providerCommandCount: options.execute ? tasks.length * 3 : 0,
+    providerCommandCount,
     relayBundle: RELAY_BUNDLE,
     preflight,
     dryRunValidation,

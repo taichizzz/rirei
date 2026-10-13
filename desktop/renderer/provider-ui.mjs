@@ -76,6 +76,37 @@ export function formatExactTimestamp(iso, { locale, timeZone } = {}) {
   }).format(value);
 }
 
+export function formatLocalReset(retryAt, { locale, timeZone } = {}) {
+  if (!retryAt) return null;
+  const value = new Date(retryAt);
+  if (Number.isNaN(value.getTime())) return null;
+  return new Intl.DateTimeFormat(locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
+  }).format(value);
+}
+
+export function displayExitReason(reason, retryAt, options) {
+  if (!reason) return 'Result unknown';
+  let base;
+  if (reason === 'usage_limit') {
+    base = 'Usage limit reached';
+  } else if (reason === 'rate_limit') {
+    base = 'Rate limited';
+  } else {
+    base = reason
+      .split('_')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+  if (retryAt) {
+    const local = formatLocalReset(retryAt, options);
+    if (local) return `${base} (until ${local})`;
+  }
+  return base;
+}
+
 function authenticationReadiness(entry) {
   if (!entry.installed)
     return {

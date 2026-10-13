@@ -74,7 +74,9 @@ decisions, and blockers.
 
 The human-readable status continues to summarize current and previous agents. Detailed
 per-run history is intentionally confined to `--json` so the default terminal output remains
-compact.
+compact. If the most recent run ended at a usage limit or rate limit, `relay status` prints a
+suggested alternative provider and switch command; in `--json` mode, an optional `handoffOffer`
+structure is included detailing candidate targets, reasons, and continuation note warnings.
 
 ---
 
@@ -194,13 +196,17 @@ before launch.
 records the terminal that owns the run. Frontends should generate these; ordinary interactive
 CLI use can omit both.
 
+**Option:** `--fail-on-exhausted` — refuse to launch if the provider's fresh telemetry reports an exhausted quota. By default, interactive runs prompt for confirmation before proceeding, while non-interactive runs log a warning.
+
 Behavior:
 
 - Validates the agent id.
 - Builds the prompt (the handoff by default, or `--prompt`).
+- Checks pre-flight quota status if the provider supports `readUsage`. If exhausted and `--fail-on-exhausted` is set, launch aborts. In an interactive terminal, prompts for confirmation.
 - `launchAgent()` verifies the executable is installed, records `agent_started`, spawns the
   CLI with **inherited stdio** in the repository root, classifies the exit, and records
   `agent_ended`. Relay's exit code mirrors the agent's non-zero exit code.
+- If the agent exits with a usage limit or rate limit, Relay prints a handoff suggestion with available alternative providers and the corresponding `relay switch <agent>` command.
 
 The launched CLI handles its own authentication. Relay passes the prompt and any explicit
 model/effort selection.
@@ -215,7 +221,8 @@ Checkpoint, preview a handoff, then launch another agent.
 `--terminal-id <id>` use the same session controls as `relay run` for the incoming agent.
 `--yes` is required for non-interactive launches and skips confirmation after the caller has
 reviewed the generated preview. `--allow-empty-notes` overrides the continuation gate and
-launches even when no unresolved continuation note exists.
+launches even when no unresolved continuation note exists. `--fail-on-exhausted` refuses to
+launch if the incoming provider reports an exhausted quota.
 
 Sequence:
 
@@ -230,6 +237,7 @@ Sequence:
 6. Recheck state and Git after approval; if either changed, refuse the stale preview.
 7. `launchAgent()` for the target CLI (records `agent_started` / `agent_ended`). A cancellation
    or refusal keeps the checkpoint but launches nothing.
+8. If the run exits at a usage or rate limit, Relay suggests alternative providers and commands.
 
 > Current limitation: `switch` records agent start/end events but does not append a distinct
 > `switch` event.
@@ -322,6 +330,33 @@ fields parsed from bounded tails of recent local Codex session logs). Providers 
 report `status: "unknown"` instead of a guess. Captured values become `stale` after 15 minutes
 or after their reset time passes. No credentials are read; Codex rollout files are scanned
 locally for numeric rate-limit events only.
+
+### `relay usage tokens`
+
+Show machine-wide token analytics across all coding agents on this computer, powered by a pinned `ccusage` integration.
+
+**Options:**
+
+- `--json` — Output structured `TokenUsageReport` JSON schema.
+- `--days <number>` — Number of days to report (`7`, `30`, `90`; default: `30`).
+- `--agent <id>` — Limit refresh to a specific agent (`claude`, `codex`, `gemini`, `antigravity`, `opencode`).
+- `--opt-in` — Explicitly enable machine-wide token usage collection from local agent logs.
+- `--opt-out` — Disable machine-wide token usage analytics.
+- `--check-opt-in` — Check whether token usage analytics is currently enabled.
+- `--refresh` — Bypass the cache and rescan local agent logs immediately.
+
+Behavior and guarantees:
+
+- Local agent logs are parsed strictly on this machine by the bundled native `ccusage` binary. Nothing is uploaded; prompts, conversations, code, and credentials are never read.
+- Project labels are sanitized across CLI and IPC boundaries: usernames and full paths are purged or hashed so private filesystem structure is never exposed.
+- Results are cached in `rireiDataHome()/token-usage-cache.json` with 180-day history per agent, file-lock-based single-flight deduplication, and instant range derivation (7D/30D/90D) without rescanning.
+- Coverage is judged against the selected range. An agent is `(Partial)` only when its logs start after the range begins, `No activity found` when it has no logs in the 180-day window, and `[data through YYYY-MM-DD]` when the last scan predates today. Days after that date were not collected and are not counted as zero.
+- JSON reports include `coverage.complete`, `coverage.dataThrough`, and `coverage.noActivity` per agent, a report-level `dataThrough`, `unitemizedTokens` (the part of a total its components don't account for; within a 1% gap the components are still shown), `sessionsUntimed` (sessions logged without times, such as OpenCode's), and a 13-week `calendar` used by the activity heatmap.
+- Models and sessions are limited to the selected range. An available agent with `sessions: null` had its session scan fail; that is unknown, not zero.
+- Each available agent carries `previous.tokens` (the preceding equal-length window) and `previous.shortHistory`, and `comparison` carries `previousSince`/`previousUntil`, so a filtered view can compare only the agents it shows.
+- ccusage output missing a canonical `totalTokens` (per day, per model entry, per session, or in `totals`) is rejected as `invalid_output` rather than read as zero. A missing component stays unknown and falls into the unitemized remainder.
+- The ccusage binary is resolved next to the running CLI, so the command works from any directory; it is never taken from the working directory.
+- Failures print fixed messages with no paths or usernames. A refresh that finds another scan of the same agent running waits for it instead of failing.
 
 ---
 

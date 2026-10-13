@@ -5,6 +5,7 @@ export interface LaunchSelection {
   readonly agent: AgentId;
   readonly model?: string;
   readonly effort?: string;
+  readonly command?: string;
 }
 
 export interface LaunchChoice {

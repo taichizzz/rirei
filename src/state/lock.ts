@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
+import path from 'node:path';
 import {
   lstat,
   mkdir,
@@ -160,10 +161,10 @@ function validateLockName(name: string): string {
 }
 
 async function acquireGate(
-  root: string,
+  lockDir: string,
   lockName = 'state',
 ): Promise<LockOwner> {
-  const directory = relayPath(root, `${lockName}.lock.gate`);
+  const directory = path.join(lockDir, `${lockName}.lock.gate`);
   for (let attempt = 0; attempt < ACQUIRE_ATTEMPTS; attempt += 1) {
     try {
       return await createOwnedDirectory(directory);
@@ -178,17 +179,21 @@ async function acquireGate(
     }
   }
   throw new RelayLockError(
-    `Another Relay process is acquiring or releasing the repository ${lockName} lock. ` +
-      `Wait for it to finish, or remove .relay/${lockName}.lock.gate if no Relay is running.`,
+    `Another Relay process is acquiring or releasing the ${lockName} lock. ` +
+      `Wait for it to finish, or remove ${directory} if no Relay is running.`,
   );
 }
 
-async function acquire(root: string, lockName = 'state'): Promise<LockOwner> {
-  const directory = relayPath(root, `${lockName}.lock`);
-  const gateDirectory = relayPath(root, `${lockName}.lock.gate`);
-  await mkdir(relayPath(root), { recursive: true, mode: 0o700 });
-  for (let attempt = 0; attempt < ACQUIRE_ATTEMPTS; attempt += 1) {
-    const gate = await acquireGate(root, lockName);
+async function acquire(
+  lockDir: string,
+  lockName = 'state',
+  attempts = ACQUIRE_ATTEMPTS,
+): Promise<LockOwner> {
+  const directory = path.join(lockDir, `${lockName}.lock`);
+  const gateDirectory = path.join(lockDir, `${lockName}.lock.gate`);
+  await mkdir(lockDir, { recursive: true, mode: 0o700 });
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const gate = await acquireGate(lockDir, lockName);
     let busy = false;
     try {
       try {
@@ -210,22 +215,46 @@ async function acquire(root: string, lockName = 'state'): Promise<LockOwner> {
     if (busy) await delay(ACQUIRE_INTERVAL_MS);
   }
   throw new RelayLockError(
-    `Another Relay process is holding the repository ${lockName} lock. ` +
-      `Wait for it to finish, or remove .relay/${lockName}.lock if no Relay is running.`,
+    `Another Relay process is holding the ${lockName} lock. ` +
+      `Wait for it to finish, or remove ${directory} if no Relay is running.`,
   );
 }
 
 async function release(
-  root: string,
+  lockDir: string,
   owner: LockOwner,
   lockName = 'state',
 ): Promise<void> {
-  const gateDirectory = relayPath(root, `${lockName}.lock.gate`);
-  const gate = await acquireGate(root, lockName);
+  const gateDirectory = path.join(lockDir, `${lockName}.lock.gate`);
+  const gate = await acquireGate(lockDir, lockName);
   try {
-    await removeIfOwned(relayPath(root, `${lockName}.lock`), owner);
+    await removeIfOwned(path.join(lockDir, `${lockName}.lock`), owner);
   } finally {
     await removeIfOwned(gateDirectory, gate);
+  }
+}
+
+/**
+ * Run `fn` while holding a named directory-scoped writer lock (e.g. in rireiDataHome or custom directory).
+ * `waitMs` lets a caller wait out a holder whose work is known to be long,
+ * such as a log scan; the default matches the repository lock (~2s).
+ */
+export async function withDirectoryLock<T>(
+  directory: string,
+  name: string,
+  fn: () => Promise<T>,
+  options: { waitMs?: number } = {},
+): Promise<T> {
+  const validatedName = validateLockName(name);
+  const attempts =
+    options.waitMs && options.waitMs > 0
+      ? Math.max(1, Math.ceil(options.waitMs / ACQUIRE_INTERVAL_MS))
+      : ACQUIRE_ATTEMPTS;
+  const owner = await acquire(directory, validatedName, attempts);
+  try {
+    return await fn();
+  } finally {
+    await release(directory, owner, validatedName);
   }
 }
 
@@ -237,13 +266,7 @@ export async function withNamedRepositoryLock<T>(
   name: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const validatedName = validateLockName(name);
-  const owner = await acquire(root, validatedName);
-  try {
-    return await fn();
-  } finally {
-    await release(root, owner, validatedName);
-  }
+  return withDirectoryLock(relayPath(root), name, fn);
 }
 
 /**

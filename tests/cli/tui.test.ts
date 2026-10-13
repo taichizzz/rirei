@@ -62,4 +62,28 @@ describe('TUI agent workspace selection', () => {
     ).rejects.toBe(failure);
     expect(createWorkspace).not.toHaveBeenCalled();
   });
+
+  it('passes command when specified in selection (e.g. switch)', async () => {
+    const start = vi
+      .fn()
+      .mockResolvedValue({ id: 'terminal-switch', status: 'starting' });
+    const createWorkspace = vi.fn();
+
+    await startTuiAgent(
+      { start },
+      { ...selection, command: 'switch' },
+      '/repo',
+      createWorkspace,
+    );
+
+    expect(start).toHaveBeenCalledWith({
+      kind: 'agent',
+      command: 'switch',
+      agent: 'opencode',
+      model: 'test-model',
+      effort: undefined,
+      project: '/repo',
+      workspaceId: 'default',
+    });
+  });
 });

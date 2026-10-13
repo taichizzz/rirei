@@ -114,6 +114,18 @@ path. Checkpoint pruning also deletes only paths resolved through this policy.
 - The desktop app runs its renderer with `contextIsolation: true`, `nodeIntegration: false`,
   and `sandbox: true`, exposing only a small `window.relay` bridge. See [desktop.md](desktop.md).
 
+## Token analytics privacy and log isolation
+
+Machine-wide token analytics (`relay usage tokens` and desktop Usage View) inspect local agent logs using a pinned native `ccusage` binary. The following security and privacy boundaries are strictly enforced:
+
+1. **Local-only offline execution**: `ccusage` is invoked with `--offline --no-cost` and a neutral working directory (`tmpdir()`). It never initiates network requests, never connects to provider APIs, and never sends data to any external server.
+2. **Telemetry only**: Only token counts, timestamps, and model identifiers are extracted. Prompts, completions, reasoning traces, terminal buffers, and credentials are never read into Rirei or retained in memory.
+3. **Strict path sanitization**: Project directories in session telemetry are scrubbed through `sanitizeProjectLabel`. Usernames (`$USER`, `$USERNAME`, `os.userInfo().username`), user home directories (`~`, `/Users/*`, `/home/*`), and full directory hierarchies are stripped, leaving only the immediate folder basename or a deterministic privacy hash.
+4. **Explicit opt-in**: Token counting requires explicit user opt-in saved to `rireiDataHome()/token-usage-opt-in.json`. Un-opted installations show an explanatory consent card and do not execute log scans.
+5. **Periodic quota poll separation**: The 1-minute background quota poll in the desktop app and daemon uses `--plans-only` to read status-line telemetry; it never invokes `ccusage` or executes full log scans.
+6. **Binary comes only from Rirei's own install**: the `ccusage` binary is resolved from the packaged app's resources or from `node_modules` beside the running CLI (walking up its parent folders), never from the working directory. The working directory is the opened project, so a repository cannot supply a binary that Rirei would execute.
+7. **Errors carry fixed wording**: token usage failures reach stderr and the desktop window as fixed messages ("Another token usage refresh is still running", "failed a privacy check", "could not be read"), never a lock path, cache path, or the username a privacy check matched. The desktop app forwards only that message, not raw stderr.
+
 ## Secrets
 
 The strongest protection is that Relay avoids collecting secrets at all: it stores Git

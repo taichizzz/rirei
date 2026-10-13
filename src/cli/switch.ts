@@ -14,6 +14,7 @@ import {
   renderHandoffDocument,
   taskContext,
 } from '../lifecycle.js';
+import { printHandoffSuggestion } from '../application/handoff-suggestion.js';
 import { readState } from '../state/store.js';
 
 export async function verifySwitchPreview(
@@ -50,6 +51,10 @@ export function switchCommand(): Command {
       '--allow-empty-notes',
       'launch even when no continuation notes were recorded',
     )
+    .option(
+      '--fail-on-exhausted',
+      'refuse to launch if the provider reports an exhausted quota',
+    )
     .action(
       async (
         agent: string,
@@ -60,6 +65,7 @@ export function switchCommand(): Command {
           terminalId?: string;
           yes?: boolean;
           allowEmptyNotes?: boolean;
+          failOnExhausted?: boolean;
         },
       ) => {
         if (!isAgentId(agent)) throw new Error(`Unknown agent: ${agent}.`);
@@ -115,7 +121,7 @@ export function switchCommand(): Command {
         }
         const latestState = await verifySwitchPreview(context.root, handoff);
         process.stdout.write(`Launching ${agent}...\n`);
-        const { result } = await launchAgent(
+        const { result, state: finalState } = await launchAgent(
           context.root,
           latestState,
           getAgent(agent),
@@ -126,9 +132,24 @@ export function switchCommand(): Command {
             operationId: options.operationId,
             terminalId: options.terminalId,
             expectedHandoffStateFingerprint,
+            failOnExhausted: options.failOnExhausted,
           },
         );
-        if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
+        if (result.exitCode !== 0) {
+          process.exitCode = result.exitCode ?? 1;
+          const lastRun = finalState.agentHistory.at(-1);
+          if (
+            lastRun?.exitClassification?.reason === 'usage_limit' ||
+            lastRun?.exitClassification?.reason === 'rate_limit'
+          ) {
+            await printHandoffSuggestion(
+              context.root,
+              finalState,
+              agent,
+              lastRun.exitClassification,
+            );
+          }
+        }
       },
     );
 }

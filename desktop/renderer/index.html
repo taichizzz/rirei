@@ -186,6 +186,25 @@
             <button id="recoverRun" hidden>Recover stale run</button>
             <button id="resumeRecovered" hidden>Resume in new terminal</button>
           </div>
+
+          <div id="handoffOfferBanner" class="handoff-offer-banner" hidden>
+            <div class="handoff-offer-body">
+              <span
+                id="handoffOfferHeadline"
+                class="handoff-offer-headline"
+              ></span>
+              <span
+                id="handoffOfferNotes"
+                class="handoff-offer-notes"
+                hidden
+              ></span>
+            </div>
+            <div class="handoff-offer-actions">
+              <button id="handoffOfferAccept" class="primary">Hand off</button>
+              <button id="handoffOfferChoose">Choose another</button>
+              <button id="handoffOfferDismiss">Dismiss</button>
+            </div>
+          </div>
         </div>
 
         <main id="mainContent" class="workspace" aria-label="Project workspace">
@@ -390,6 +409,205 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
             </div>
           </aside>
         </main>
+
+        <section id="usageView" class="usage-view" hidden>
+          <div class="usage-content">
+            <div class="page-head">
+              <h1>Token usage</h1>
+              <div class="privacy">
+                Read from agent logs on <b>this computer</b> with ccusage. Token
+                counts only — no prompts or conversations, nothing uploaded.
+              </div>
+            </div>
+
+            <!-- Opt-in card when opt-in is false -->
+            <div
+              id="usageOptInCard"
+              class="card hero s12"
+              hidden
+              style="margin-top: 16px"
+            >
+              <div class="card-head">
+                <div>
+                  <h2 style="font-size: 15px; margin-bottom: 6px">
+                    Enable Machine-Wide Token Usage Analytics
+                  </h2>
+                  <p
+                    style="
+                      font-size: 12.5px;
+                      line-height: 1.6;
+                      color: var(--text-soft);
+                    "
+                  >
+                    Local agent logs are processed on this computer by bundled
+                    ccusage to extract token counts. Nothing is uploaded; no
+                    prompts or conversations are read into Rirei.
+                  </p>
+                </div>
+              </div>
+              <div style="margin-top: 14px; display: flex; gap: 10px">
+                <button
+                  id="enableUsageBtn"
+                  class="primary"
+                  style="
+                    padding: 7px 16px;
+                    border-radius: var(--radius-sm);
+                    font-weight: 600;
+                    cursor: pointer;
+                    background: var(--accent);
+                    color: var(--accent-ink);
+                    border: 0;
+                  "
+                >
+                  Enable Usage Analytics
+                </button>
+              </div>
+            </div>
+
+            <!-- Main dashboard (visible when opted in) -->
+            <div id="usageDashWrapper">
+              <div class="filters" role="toolbar" aria-label="Usage filters">
+                <div class="seg" id="range" aria-label="Date range">
+                  <button data-days="7" aria-pressed="false">7D</button>
+                  <button data-days="30" aria-pressed="true">30D</button>
+                  <button data-days="90" aria-pressed="false">90D</button>
+                </div>
+                <div class="chips" id="agentChips" aria-label="Agents"></div>
+                <div class="spacer"></div>
+                <span class="updated" id="updated">Updated just now</span>
+                <button class="btn" id="refresh">Refresh</button>
+              </div>
+
+              <section class="grid" id="dash">
+                <article class="card hero s4" aria-labelledby="heroLabel">
+                  <div class="label" id="heroLabel">Tokens · last 30 days</div>
+                  <div class="hero-value" id="heroValue">—</div>
+                  <div>
+                    <div class="hero-sub" id="heroSub"></div>
+                    <div class="delta na" id="heroDelta"></div>
+                  </div>
+                </article>
+
+                <article class="card s8">
+                  <div class="tiles" id="tiles"></div>
+                </article>
+
+                <article class="card s8" aria-labelledby="dailyTitle">
+                  <div class="card-head">
+                    <div>
+                      <h2 id="dailyTitle">Daily tokens by agent</h2>
+                      <p>Stacked, in the order agents are listed</p>
+                    </div>
+                    <button class="ghost" id="dailyToggle" aria-pressed="false">
+                      Table
+                    </button>
+                  </div>
+                  <div class="legend" id="dailyLegend"></div>
+                  <div
+                    class="chart"
+                    id="daily"
+                    tabindex="0"
+                    role="img"
+                    aria-label="Daily tokens by agent. Use arrow keys to step through days."
+                  ></div>
+                  <div class="tbl-wrap" id="dailyTable" hidden></div>
+                  <div class="notice" id="claudeNotice" hidden>
+                    <svg viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 8v5M12 16h.01" />
+                    </svg>
+                    <span id="claudeNoticeText"
+                      >Claude Code deletes logs after 30 days by default, so
+                      earlier Claude usage isn't shown. Raise
+                      <code>cleanupPeriodDays</code> in Claude's settings to
+                      keep more history.</span
+                    >
+                  </div>
+                </article>
+
+                <article class="card s4" aria-labelledby="rankTitle">
+                  <div class="card-head">
+                    <div>
+                      <h2 id="rankTitle">Which agents you use most</h2>
+                      <p>Share of tokens this period</p>
+                    </div>
+                  </div>
+                  <div class="rank" id="rank"></div>
+                </article>
+
+                <article class="card s7" aria-labelledby="heatTitle">
+                  <div class="card-head">
+                    <div>
+                      <h2 id="heatTitle">Activity</h2>
+                      <p>Tokens per day · last 13 weeks</p>
+                    </div>
+                  </div>
+                  <div class="heat-wrap">
+                    <div
+                      class="chart"
+                      id="heat"
+                      tabindex="0"
+                      role="img"
+                      aria-label="Daily activity heatmap. Use arrow keys to move between days."
+                    ></div>
+                  </div>
+                  <div class="heat-legend" aria-hidden="true">
+                    Less <i style="background: var(--heat-none)"></i
+                    ><i style="background: #4a6824"></i
+                    ><i style="background: #6c9432"></i
+                    ><i style="background: #98c248"></i
+                    ><i style="background: #cdf875"></i> More
+                  </div>
+                </article>
+
+                <article class="card s5" aria-labelledby="quotaTitle">
+                  <div class="card-head">
+                    <div>
+                      <h2 id="quotaTitle">Quota remaining</h2>
+                      <p>Subscription limits — separate from token counts</p>
+                    </div>
+                  </div>
+                  <div class="quota" id="quota"></div>
+                </article>
+
+                <article class="card s7" aria-labelledby="modelTitle">
+                  <div class="card-head">
+                    <div>
+                      <h2 id="modelTitle">By model</h2>
+                      <p>
+                        Bars take the colour of the agent that ran the model
+                      </p>
+                    </div>
+                  </div>
+                  <div class="tbl-wrap" id="models"></div>
+                </article>
+
+                <article class="card s5" aria-labelledby="bdTitle">
+                  <div class="card-head">
+                    <div>
+                      <h2 id="bdTitle">What the tokens were</h2>
+                      <p>Parts of the total, not added again</p>
+                    </div>
+                  </div>
+                  <div class="bd" id="breakdown"></div>
+                </article>
+
+                <article class="card s12" aria-labelledby="sessTitle">
+                  <div class="card-head">
+                    <div>
+                      <h2 id="sessTitle">Recent sessions</h2>
+                      <p>
+                        Every agent on this computer, including sessions started
+                        outside Rirei · project names only, never paths
+                      </p>
+                    </div>
+                  </div>
+                  <div class="tbl-wrap" id="sessions"></div>
+                </article>
+              </section>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -586,32 +804,7 @@ Choose a Git project, initialize it, start a task, then Run an agent here.</pre>
       </div>
     </div>
 
-    <div
-      id="usageModal"
-      class="modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="usageModalTitle"
-      hidden
-    >
-      <div class="modal-panel">
-        <div class="modal-head">
-          <div>
-            <p class="label">Provider plans</p>
-            <h2 id="usageModalTitle">Usage remaining</h2>
-          </div>
-          <button id="usageClose" aria-label="Close usage">Close</button>
-        </div>
-        <p id="usageTask" class="usage-task"></p>
-        <div id="usageSummary" class="usage-summary"></div>
-        <div id="usageGrid" class="usage-grid"></div>
-        <p class="usage-note">
-          Percentages appear only when an official machine-readable provider
-          source is available. Unknown means Rirei refused to guess. No provider
-          credentials are read or stored.
-        </p>
-      </div>
-    </div>
+    <div class="usage-tip" id="usageTip" role="tooltip" hidden></div>
 
     <div
       id="historyModal"

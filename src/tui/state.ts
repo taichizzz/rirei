@@ -16,6 +16,14 @@ import {
   type ThreadsData,
   unavailableThreadsData,
 } from './threads.js';
+import {
+  buildHandoffOffer,
+  type HandoffOffer,
+} from '../application/handoff-suggestion.js';
+import type { AgentId } from '../agents/adapter.js';
+import { getTokenUsageOptIn } from '../token-usage/opt-in.js';
+import { getCachedTokenUsage } from '../token-usage/cache.js';
+import type { TokenUsageReport } from '../token-usage/schema.js';
 
 export interface DashboardData {
   readonly activity: ActivitySnapshot | null;
@@ -23,6 +31,9 @@ export interface DashboardData {
   readonly currentProject: string;
   readonly lastUpdated: string;
   readonly threads: ThreadsData;
+  readonly handoffOffer?: HandoffOffer | null;
+  readonly tokenUsage?: TokenUsageReport | null;
+  readonly tokenOptIn?: boolean;
 }
 
 export async function loadThreadsData(
@@ -74,11 +85,51 @@ export async function loadDashboardData(
 
   const threads = await loadThreadsData(currentProject);
 
+  let handoffOffer: HandoffOffer | null = null;
+  try {
+    const root = await discoverRepositoryAuthority(
+      process.env.RIREI_PROJECT_ROOT?.trim() || currentProject,
+    );
+    if (root) {
+      const state = await readState(root);
+      const latestRun = state.agentHistory.at(-1);
+      if (
+        latestRun?.exitClassification &&
+        ['usage_limit', 'rate_limit'].includes(
+          latestRun.exitClassification.reason,
+        )
+      ) {
+        handoffOffer = await buildHandoffOffer(
+          root,
+          state,
+          latestRun.agent as AgentId,
+          latestRun.exitClassification,
+        );
+      }
+    }
+  } catch {
+    // Ignore suggestion lookup errors
+  }
+
+  let tokenOptIn = false;
+  let tokenUsage: TokenUsageReport | null = null;
+  try {
+    tokenOptIn = await getTokenUsageOptIn();
+    if (tokenOptIn) {
+      tokenUsage = await getCachedTokenUsage({ days: 30 });
+    }
+  } catch {
+    // Token usage unavailable
+  }
+
   return {
     activity,
     planUsage,
     currentProject,
     lastUpdated: new Date().toLocaleTimeString(),
     threads,
+    handoffOffer,
+    tokenUsage,
+    tokenOptIn,
   };
 }

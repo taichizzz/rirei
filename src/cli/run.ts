@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { getAgent, isAgentId } from '../agents/registry.js';
+import { printHandoffSuggestion } from '../application/handoff-suggestion.js';
 import { launchAgent, renderHandoff, taskContext } from '../lifecycle.js';
 import { resolveWorkspace } from '../worktrees/registry.js';
 
@@ -19,6 +20,10 @@ export function runCommand(): Command {
       '--workspace <id>',
       'run inside a Rirei workspace worktree instead of the main working tree',
     )
+    .option(
+      '--fail-on-exhausted',
+      'refuse to launch if the provider reports an exhausted quota',
+    )
     .action(
       async (
         agent: string,
@@ -29,6 +34,7 @@ export function runCommand(): Command {
           workspace?: string;
           operationId?: string;
           terminalId?: string;
+          failOnExhausted?: boolean;
         },
       ) => {
         if (!isAgentId(agent)) throw new Error(`Unknown agent: ${agent}.`);
@@ -39,7 +45,7 @@ export function runCommand(): Command {
         const prompt =
           options.prompt ??
           (await renderHandoff(root, state, workspace?.worktreePath));
-        const { result } = await launchAgent(
+        const { result, state: finalState } = await launchAgent(
           root,
           state,
           getAgent(agent),
@@ -50,9 +56,24 @@ export function runCommand(): Command {
             workspace,
             operationId: options.operationId,
             terminalId: options.terminalId,
+            failOnExhausted: options.failOnExhausted,
           },
         );
-        if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
+        if (result.exitCode !== 0) {
+          process.exitCode = result.exitCode ?? 1;
+          const lastRun = finalState.agentHistory.at(-1);
+          if (
+            lastRun?.exitClassification?.reason === 'usage_limit' ||
+            lastRun?.exitClassification?.reason === 'rate_limit'
+          ) {
+            await printHandoffSuggestion(
+              root,
+              finalState,
+              agent,
+              lastRun.exitClassification,
+            );
+          }
+        }
       },
     );
 }

@@ -1,9 +1,10 @@
 # Rirei handoff benchmark
 
-This harness runs the user-approved paired experiment: five Antigravity predecessor runs and
-ten independent cold Codex successor runs. It compares a strong baseline prompt with the exact
-text rendered by `relay handoff --json` while holding each interrupted dirty repository
-checkpoint fixed.
+This harness runs the user-approved multi-arm experiment: Antigravity predecessor runs and
+independent cold Codex successor runs. It compares a strong baseline prompt against both a
+no-notes handoff capsule (`handoff-no-notes`) and the full handoff text with notes
+(`handoff-with-notes`, formerly treatment) rendered by `relay handoff --json` while holding each
+interrupted dirty repository checkpoint fixed.
 
 Reports:
 
@@ -25,19 +26,25 @@ node --test benchmarks/handoff/lib.test.mjs benchmarks/handoff/recover.test.mjs 
 node benchmarks/handoff/run.mjs --dry-run
 ```
 
-Execute all 15 paid/provider runs only after reviewing command metadata in `run.mjs`:
+Execute paid/provider runs only after reviewing command metadata in `run.mjs`:
 
 ```sh
 node benchmarks/handoff/run.mjs --execute
 ```
 
-`--tasks N` selects the first 1-5 tasks and defaults to 5. `--timeout-ms N` controls the
-per-command timeout. Default invocation and explicit `--dry-run` never invoke `agy` or `codex`.
-Execution refuses to start unless the approved temp parent, built Relay bundle, provider
-executables, authentication status, and configured model IDs are verified. Dry-run also gates on fixture quality, handoff budget and content
-checks, successor repository hygiene, and capture-schema validity before any paid run is
-allowed. Execute mode reruns all five zero-provider dry gates inside the fresh run root before
-the first provider call.
+`--tasks N` selects the first 1-8 tasks and defaults to all tasks in `manifest.json`.
+`--timeout-ms N` controls the per-command timeout. Default invocation and explicit `--dry-run`
+never invoke `agy` or `codex`. Execution refuses to start unless the approved temp parent, built
+Relay bundle, provider executables, authentication status, and configured model IDs are verified.
+Dry-run also gates on fixture quality, handoff budget and content checks across both with-notes and
+no-notes handoffs, successor repository hygiene, and capture-schema validity before any paid run is
+allowed. It sweeps handoff budgets across 300, 800, and 2,000 tokens from the same checkpoint and
+state, setting token limits to B and character limits to 4 × B, recording each prompt's size and
+SHA-256 hash, and detecting identical prompts to prevent paying for duplicate provider calls.
+Execute mode reruns all zero-provider dry gates inside the fresh run root before the first
+provider call. Each task executes up to 6 provider commands (1 predecessor + 5 successors: baseline,
+handoff-no-notes, handoff-300, handoff-800, and handoff-2000), deduplicating identical prompts via
+SHA-256 hashes to prevent redundant calls. `handoff-with-notes` is preserved as an alias for `handoff-300`.
 
 ## Recovery
 
@@ -96,32 +103,48 @@ relay note import --stdin --source agent --agent antigravity
 with a `schemaVersion: 1` JSON payload covering the fixture's expected semantic categories.
 The runner validates the captured notes against `manifest.json` expectations (required types
 and text needles, agent provenance, current freshness) before any successor call; a missing or
-invalid capture aborts that task before either Codex run. It never synthesizes or copies notes
-after the predecessor exits. It then creates a checkpoint and renders the exact handoff once.
+invalid capture aborts that task before successor runs. It never synthesizes or copies notes
+after the predecessor exits. It then creates a checkpoint and renders both the with-notes handoff
+and the no-notes handoff capsule (`state.notes = []`).
 
-Both successor repositories are copied from the same interrupted snapshot, physically
-excluding `.relay/` and `test/hidden.test.js`. Before each successor call the runner asserts:
-`.relay/` does not exist; `git status` shows no Relay path; the successor repository's full
-fingerprint (HEAD, branch, index, status/diff, file modes and symlink targets, and working-tree
-contents) equals the pristine predecessor copy; hidden tests are absent;
-and the treatment prompt is byte-for-byte equal to the captured `handoff.text`. Baseline
-receives the full request plus the same preserve-work
-instruction; treatment receives only the exact rendered handoff text. No repository-local
-Relay wrapper is present in either condition. Condition order alternates by task. Codex runs
-are ephemeral and sequential.
+All successor repositories (`baseline`, `handoff-no-notes`, `handoff-300`, `handoff-800`, and `handoff-2000`) are
+copied from the same interrupted snapshot, physically excluding `.relay/` and `test/hidden.test.js`.
+Before each successor call the runner asserts: `.relay/` does not exist; `git status` shows no
+Relay path; each successor repository's full fingerprint (HEAD, branch, index, status/diff, file modes
+and symlink targets, and working-tree contents) equals the pristine predecessor copy; hidden tests are
+absent; and the handoff prompts are byte-for-byte equal to the captured handoffs. Baseline receives the
+full request plus the preserve-work instruction; handoff-no-notes receives the handoff without notes;
+handoff-300, handoff-800, and handoff-2000 receive the exact rendered handoffs for their respective budgets.
+No repository-local Relay wrapper is present in any condition. Condition execution order is rotated across
+balanced permutations across tasks. Codex runs are ephemeral and sequential, skipping provider calls via
+hash-based deduplication when budget prompts are identical.
 
 After each successor exits, the runner evaluates public tests, injects the task's hidden test,
 runs the hidden test alone, and runs public plus hidden tests together. The dry-run instead
 confirms each initial implementation fails its public foundation, each reference solution
 passes both public and hidden tests, and exercises the full product path without providers:
 it runs the built Relay binary end-to-end (`init`, `start`, `note import --stdin`, `handoff
---json`), asserts `.relay` is absent from `git status` and matched by `check-ignore`, and gates
-the rendered handoff at the 1,200-character/300-token budget with the task request appearing
-exactly once and no note-recording instruction. It then creates both successor copies, proves
-their full Git/working-tree fingerprints match, and runs the same Relay-state and hidden-test
-absence gates used immediately before paid calls. Spawned children strip Node's
-`NODE_TEST_CONTEXT`/`NODE_TEST_NAME` variables so `node --test` fixtures behave identically
-inside the test runner.
+--json`), asserts `.relay` is absent from `git status` and matched by `check-ignore`, and sweeps
+handoff budgets at 300, 800, and 2,000 tokens (bounding each budget B at B tokens and 4 × B characters)
+with the task request appearing exactly once and no note-recording instruction for both with-notes and
+no-notes capsules. It records each prompt's size and SHA-256 hash, identifies duplicate prompts across
+budgets, creates all successor copies, proves their full Git/working-tree fingerprints match, and runs
+the same Relay-state and hidden-test absence gates used immediately before paid calls. Spawned children
+strip Node's `NODE_TEST_CONTEXT`/`NODE_TEST_NAME` variables so `node --test` fixtures behave
+identically inside the test runner.
+
+## Tasks
+
+The benchmark includes 8 fixed tasks:
+
+1. `retry-after`: Nonnegative integer delay-seconds and IMF-fixdate parsing with header lookup and overflow clamping.
+2. `deep-config-merge`: Security-conscious deep plain-object merge blocking prototype pollution keys at every depth.
+3. `ttl-lru-cache`: Monotonic TTL/LRU cache with lazy expiry on access and capacity eviction.
+4. `workspace-path`: Symlink-safe path resolution with boundary checks and escaped traversal rejection.
+5. `event-reconciliation`: Deterministic topological event reconciliation with Kahn's algorithm and cycle detection.
+6. `json-patch-rollback`: Atomic RFC 6902 JSON patch with RFC 6901 pointer unescaping (`~0`, `~1`), array append `-`, and invertible rollback in reverse order without `JSON.parse` cloning.
+7. `cursor-pagination-stream`: Async generator keyset pagination stream with URL-safe base64url encoding, deterministic `NULLS LAST` ordering for asc/desc, cycle detection, and maxItems bounding without offset/slice.
+8. `sliding-window-rate-limiter`: Segmented circular ring sliding window rate limiter with atomic multi-token acquire (zero partial deduction) and exact retryAfterMs calculation without unbounded timestamp arrays.
 
 ## Results
 
@@ -145,13 +168,15 @@ versus baseline's 87,455 (+15.5%) while finishing in 288,487 ms versus 299,322 m
 ## Measurement and interpretation
 
 The result records wall time, exit status, test outcomes, emitted input/cached/output/reasoning
-tokens, model turns, tool calls, successor changed lines, handoff size/omissions, note
-type/provenance/freshness, task-specific rejected-approach detection, and the V2 integrity
-fields: `relayStatePresentBeforeSuccessor`, `relayPathInGitStatus`, `conditionFingerprintEqual`,
-`captureValidated`, `capturedNoteTypes`, `handoff.duplicateTaskOccurrences`,
-`handoff.containsNoteInstruction`, and prompt SHA-256 for both conditions. Metrics not present
-in provider JSONL are `null`; they are never estimated. The report gives paired deltas,
-means/medians, correctness counts, integrity proof, and caveats.
+tokens, model turns, tool calls, distinct files read, time to first edit (ms), turns before first edit,
+successor changed lines, handoff size/omissions, note type/provenance/freshness, task-specific
+rejected-approach detection, and integrity fields: `relayStatePresentBeforeSuccessor`,
+`relayPathInGitStatus`, `conditionFingerprintEqual`, `captureValidated`, `capturedNoteTypes`,
+`handoff.duplicateTaskOccurrences`, `handoff.containsNoteInstruction`, and prompt SHA-256 for all
+conditions. Metrics not present in provider JSONL are `null`; they are never estimated. The report
+evaluates all three arms separately without collapsing comparisons, computing pairwise deltas
+(`withNotesVsBaseline`, `noNotesVsBaseline`, `withNotesVsNoNotes`), means/medians, correctness counts,
+integrity proof, and caveats.
 
 The predeclared decision rule is: treatment must maintain correctness and reduce non-cached
 tokens or wall time by at least 20% on at least 3/5 tasks, with no misleading handoff-caused
@@ -160,10 +185,11 @@ without manual review. This small, fixed benchmark is directional evidence only.
 support a claim of statistical significance, and model/provider updates, authentication state,
 machine load, and JSONL schema changes remain limitations.
 
-The V2 experiment measures successor continuation cost, not total end-to-end workflow cost:
+The experiment measures successor continuation cost, not total end-to-end workflow cost:
 predecessor capture tokens are recorded separately and are not part of the paired successor
 deltas.
 
-Provider use may incur cost and consume quota. The harness makes exactly three provider calls
-per selected task and performs no network-dependent setup; provider CLIs may still use their
-normal remote services during `--execute`.
+Provider use may incur cost and consume quota. The harness makes up to six provider calls
+per selected task (one predecessor and five successors), deduplicates identical prompts, and
+performs no network-dependent setup;
+provider CLIs may still use their normal remote services during `--execute`.

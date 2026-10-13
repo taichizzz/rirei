@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getTokenUsageOptIn,
   optInNotice,
@@ -11,6 +11,7 @@ import {
 const directories: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     directories
       .splice(0)
@@ -21,6 +22,7 @@ afterEach(async () => {
 async function makeTmpDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), prefix));
   directories.push(dir);
+  vi.stubEnv('RIREI_DATA_HOME', path.join(dir, 'data'));
   return dir;
 }
 

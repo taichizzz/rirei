@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { hostname } from 'node:os';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { safeTokenUsageError } from '../../src/cli/usage.js';
 import { rireiDataHome } from '../../src/platform/runtime-paths.js';
 import { RelayLockError } from '../../src/state/lock.js';
@@ -26,6 +26,7 @@ import type {
 const directories: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     directories
       .splice(0)
@@ -36,6 +37,8 @@ afterEach(async () => {
 async function makeTmpDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), prefix));
   directories.push(dir);
+  // Isolate the data root even when LOCALAPPDATA or XDG_DATA_HOME is set.
+  vi.stubEnv('RIREI_DATA_HOME', path.join(dir, 'data'));
   return dir;
 }
 

@@ -6,6 +6,31 @@ branding changes.
 
 ## Unreleased
 
+## 0.1.0-alpha.5.0 - 2026-10-13
+
+### Machine-wide token usage dashboard and analytics
+
+- Added `relay usage tokens` powered by a pinned `ccusage` (20.0.24) integration to provide machine-wide token analytics across Claude, Codex, Gemini, Antigravity, and OpenCode.
+- Replaced the desktop usage modal with a full-stage Usage View containing 10 interactive widgets: range selector (7D/30D/90D), agent filter chips, hero metrics, stat tiles, daily stacked bar chart (with table toggle and keyboard navigation), 13-week activity heatmap, quota remaining cards, by-model breakdown, token component breakdown, and recent sessions table.
+- Added TUI subview tab toggle (`T` / `Tab` / `1` / `2`) within the Usage screen to inspect machine-wide token totals, per-agent text bars (`█`), percentage shares, and coverage badges. Opening the Tokens tab with missing or old data starts a scan, `r` on that tab rescans, and turning analytics on starts the first scan; results update the screen in place.
+- Implemented privacy-first architecture: offline local log parsing only with neutral working directory, strict username and path stripping via `sanitizeProjectLabel`, explicit user opt-in (`token-usage-opt-in.json`), and 10-minute cache TTL (`token-usage-cache.json`) with single-flight request deduplication.
+- Updated Codex quota collector to scan both `sessions/` and `archived_sessions/` directories with capture-timestamp ordering and filename deduplication.
+- Documented usage sources, ccusage binary status, and rollout counts in `relay doctor`.
+- Fixed coverage being judged against the 180-day collection window instead of the selected range, which marked most agents Partial on every range. Partial now appears only when an agent's logs start after the range begins, and agents with no logs show No activity.
+- Days after the last scan now show as not collected instead of zero usage, and the comparison with the previous period explains the real reason when it can't be made.
+- A total whose parts fall short by at most 1% is broken down with an explicit Not broken down remainder instead of being dropped from the breakdown.
+- Models and sessions now follow the selected range, and the activity heatmap always shows 13 weeks.
+- OpenCode sessions no longer get an invented "now" timestamp, and the Codex quota card no longer shows placeholder values when Codex hasn't reported a window.
+- Fixed the Task, Agents, and Notes rail entries not leaving the Usage view; only Escape did.
+- Fixed the bundled CLI not finding ccusage outside this repository, so refreshes failed whenever another project was open. The binary is now found beside the CLI and is never taken from the opened project's directory.
+- A refresh that meets another scan of the same agent now waits for it instead of failing after two seconds, and token usage errors no longer include lock paths, cache paths, or usernames.
+- The dashboard's total, availability, and comparison now follow the selected agents; filtering to one agent no longer shows the all-agent change, and selecting only a failed agent shows Unavailable instead of 0.
+- The token cache is tied to the timezone it was collected in and is never relabelled for another one.
+- Missing token totals in ccusage output are rejected instead of read as zero.
+- The Codex quota collector reads active sessions before the archive and, when a rollout file exists in both, keeps whichever copy holds the newest reading.
+- "Updated" in the Usage view now shows when the data was last scanned, and a failed session scan shows as unknown instead of zero sessions.
+- The Codex quota card now labels old readings "As of <time>" and shows "Reset since last reading" once a window's reset time has passed, instead of presenting weeks-old numbers as current. Quota windows now load in the Usage view even with no project open.
+
 ### Usage limit detection and reset time surfacing
 
 - Detected provider usage limits from existing usage snapshots across both controller (`SessionManager.finalize()`) and terminal daemon (`finalizeTerminalRun()`) exit paths.
@@ -35,7 +60,9 @@ branding changes.
 - Captured direct exploration metrics where exposed by provider telemetry: tool calls made, distinct files read, time to first file edit (ms), and turns before first edit, preserving nulls when telemetry omits them.
 - Evaluated all three arms with pairwise deltas (`withNotesVsBaseline`, `noNotesVsBaseline`, `withNotesVsNoNotes`) without collapsing comparisons into a single summary.
 - Added three harder benchmark tasks where naive baselines fail due to unrecorded decisions or subtle architectural constraints: `json-patch-rollback` (atomic RFC 6902 patch with RFC 6901 pointer unescaping and reverse-order rollback without `JSON.parse` cloning), `cursor-pagination-stream` (async generator keyset stream with URL-safe base64url encoding and deterministic `NULLS LAST` ordering for asc/desc), and `sliding-window-rate-limiter` (segmented ring buffer rate limiter with atomic multi-token rejection and exact retryAfterMs calculation).
-- Extended dry-run gate validation to cover all 8 fixtures and all 3 successor arms without requiring paid provider execution.
+- Extended dry-run gate validation to cover all 8 fixtures and all 5 successor conditions without requiring paid provider execution.
+- Extended execution and analysis to five successor conditions: baseline, no-notes, and 300/800/2,000-token handoffs. Identical prompts reuse one execution, aliases are excluded from call/failure totals, and reports retain separate budget comparisons.
+- Made token-collector error tests platform-independent and isolated missing-binary resolver tests from installed host dependencies.
 
 ## 0.1.0-alpha.4.2 - 2026-09-11
 

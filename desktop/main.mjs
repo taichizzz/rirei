@@ -372,6 +372,28 @@ function safePercentage(value) {
     : undefined;
 }
 
+// The CLI reports token usage failures in fixed wording. Forward only that
+// message to the window, never raw stderr, which can carry paths.
+function tokenUsageFailure(result) {
+  const lines = String(result?.stderr ?? '')
+    .split('\n')
+    .reverse();
+  for (const line of lines) {
+    try {
+      const message = JSON.parse(line)?.error?.message;
+      if (
+        typeof message === 'string' &&
+        message.length <= 200 &&
+        !/[\\/]/.test(message)
+      )
+        return { ok: false, output: message };
+    } catch {
+      // Not the JSON error line.
+    }
+  }
+  return { ok: false, output: 'Token usage could not be read.' };
+}
+
 function sanitizeUsageWindow(value) {
   if (!value || typeof value !== 'object') return undefined;
   const remainingPercentage = safePercentage(value.remainingPercentage);
@@ -1242,9 +1264,11 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle('relay:usage', async (_event, request) => {
-    if (!request || !validProject(request.project))
+    // Plan windows are machine-wide, so the Usage view can read them with no
+    // project open; a supplied project must still be a valid absolute path.
+    if (request?.project != null && !validProject(request.project))
       return { ok: false, output: 'Invalid project.' };
-    const result = await runCli(request.project, 'usage', [
+    const result = await runCli(request?.project ?? os.homedir(), 'usage', [
       '--plans-only',
       '--json',
     ]);
@@ -1257,6 +1281,68 @@ function registerIpc() {
     } catch {
       return { ok: false, output: result.output || 'Could not read usage.' };
     }
+  });
+  ipcMain.handle('relay:usage-tokens', async (event, request) => {
+    const activeProject = usageSubscriptions.get(event.sender.id)?.project;
+    const project =
+      request?.project && validProject(request.project)
+        ? request.project
+        : activeProject && validProject(activeProject)
+          ? activeProject
+          : process.cwd();
+    const days =
+      typeof request?.days === 'number' && request.days > 0 ? request.days : 30;
+    const args = ['tokens', '--json', '--days', String(days)];
+    if (request?.refresh) args.push('--refresh');
+    if (request?.agent) args.push('--agent', String(request.agent));
+    const result = await runCli(project, 'usage', args);
+    if (!result.ok) return tokenUsageFailure(result);
+    try {
+      const data = JSON.parse(result.stdout);
+      return { ok: true, data };
+    } catch {
+      return tokenUsageFailure(result);
+    }
+  });
+  ipcMain.handle('relay:usage-opt-in', async (event, request) => {
+    const activeProject = usageSubscriptions.get(event.sender.id)?.project;
+    const project =
+      request?.project && validProject(request.project)
+        ? request.project
+        : activeProject && validProject(activeProject)
+          ? activeProject
+          : process.cwd();
+    const result = await runCli(project, 'usage', [
+      'tokens',
+      '--check-opt-in',
+      '--json',
+    ]);
+    if (!result.ok) return { ok: false, optedIn: false, output: result.output };
+    try {
+      const data = JSON.parse(result.stdout);
+      return { ok: true, optedIn: data.optedIn === true };
+    } catch {
+      return {
+        ok: false,
+        optedIn: false,
+        output: result.output || 'Could not check opt-in state.',
+      };
+    }
+  });
+  ipcMain.handle('relay:usage-set-opt-in', async (event, request) => {
+    const activeProject = usageSubscriptions.get(event.sender.id)?.project;
+    const project =
+      request?.project && validProject(request.project)
+        ? request.project
+        : activeProject && validProject(activeProject)
+          ? activeProject
+          : process.cwd();
+    const optIn = Boolean(request?.optIn);
+    const result = await runCli(project, 'usage', [
+      'tokens',
+      optIn ? '--opt-in' : '--opt-out',
+    ]);
+    return { ok: result.ok, output: result.output };
   });
   ipcMain.handle('relay:activity', async (event, request) => {
     if (!validProject(request?.project))

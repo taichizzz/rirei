@@ -2,7 +2,7 @@
 
 Rirei ships an artifact-backed harness under [`benchmarks/handoff/`](../benchmarks/handoff/).
 It compares a strong full-request baseline with the exact text produced by
-`relay handoff --json` for five fixed coding tasks. Each condition starts from the same
+`relay handoff --json` for eight fixed coding tasks. Each condition starts from the same
 interrupted repository snapshot and is evaluated with public and hidden tests.
 
 ## Recorded result
@@ -36,19 +36,22 @@ For each task, the harness:
 
 1. Creates a dependency-free Git repository from a checked-in fixture.
 2. Runs a controlled predecessor and validates the notes it records.
-3. Captures one checkpoint and renders both the with-notes and no-notes handoffs.
-4. Copies identical repository snapshots for three successor arms: baseline, handoff-with-notes, and handoff-no-notes.
+3. Captures one checkpoint and renders the with-notes handoff across 300, 800, and 2,000-token
+   budgets (setting character limits to 4 × B) as well as the no-notes handoff capsule.
+4. Copies identical repository snapshots for successor arms: baseline, handoff-no-notes, handoff-300,
+   handoff-800, and handoff-2000 (`handoff-with-notes` is retained as an alias for `handoff-300`).
 5. Confirms that Relay state and hidden tests are absent before each successor starts.
-6. Verifies handoff prompt hashes against the captured handoff texts.
+6. Verifies handoff prompt hashes against the captured handoff texts and detects identical prompts
+   across budgets to avoid paying for duplicate provider calls via hash-based deduplication.
 7. Measures successor performance and exploration metrics directly where exposed:
    tool calls made, distinct files read, time to first file edit (ms), and turns before first edit.
 8. Runs public tests, a separately injected hidden test, and the combined suite after each
    successor exits.
 
-Condition execution order rotates through balanced 6-way permutations across tasks. The archived
-result records prompt hashes, repository fingerprints, test outcomes, provider metrics, exploration
-metrics, note provenance, and handoff budget checks. Missing provider metrics remain `null`; the
-harness never estimates them.
+Condition execution order rotates through balanced permutations across tasks. Identical-prompt conditions
+skip provider calls via hash deduplication. The archived result records prompt hashes, repository fingerprints,
+test outcomes, provider metrics, exploration metrics, note provenance, and handoff budget checks. Missing
+provider metrics remain `null`; the harness never estimates them.
 
 ## Tasks
 
@@ -67,15 +70,15 @@ naive baseline can fail due to rejected approaches or subtle architectural const
 ## Run without provider calls
 
 The default benchmark command builds Relay, runs the harness tests, and executes all eight dry-run
-fixtures across all three successor conditions without invoking a provider:
+fixtures across all five successor conditions without invoking a provider:
 
 ```sh
 npm run benchmark
 ```
 
 The dry run reports `Provider commands: 0`. It validates fixture quality, the complete Relay
-handoff path (both with-notes and no-notes), repository equality, hidden-test isolation, note capture,
-and the 1,200-character / 300-token handoff budget.
+handoff path (both with-notes across 300, 800, and 2,000-token budgets and no-notes), repository equality,
+hidden-test isolation, note capture, and identical-prompt deduplication.
 
 The harness creates disposable repositories under the platform temporary directory's `opencode/`
 child. That directory must already exist and be writable.
@@ -88,8 +91,9 @@ The live experiment is separate from the default command:
 node benchmarks/handoff/run.mjs --execute
 ```
 
-With all eight tasks selected, this command makes 32 provider calls: eight Antigravity
-predecessors and 24 cold Codex successors (three per task). It consumes provider quota and may incur charges. Run
+With all eight tasks selected, this command makes up to 48 provider calls: eight Antigravity
+predecessors and up to 40 cold Codex successors (five per task). Identical prompts share one
+execution, so the report records the actual call count. It consumes provider quota and may incur charges. Run
 it only after reviewing [`benchmarks/handoff/run.mjs`](../benchmarks/handoff/run.mjs), the selected
 model IDs, authentication state, and the publication rules in the harness README.
 
@@ -99,8 +103,9 @@ require review before they are copied into the repository.
 
 ## Limits
 
-This is a small directional experiment with five synthetic tasks. It does not establish
-statistical significance or show that Rirei generally reduces tokens, cost, or latency. Provider
+The archived result is a small directional experiment with five synthetic tasks. The expanded
+eight-task protocol has not produced a new paid result for this release. These results do not
+establish statistical significance or show that Rirei generally reduces tokens, cost, or latency. Provider
 versions, model behavior, authentication state, machine load, and output schemas can change the
 result.
 

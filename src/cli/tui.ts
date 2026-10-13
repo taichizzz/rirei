@@ -23,6 +23,12 @@ import type { LaunchSelection } from '../tui/launch-options.js';
 import { loadDashboardData, loadThreadsData } from '../tui/state.js';
 import { parseCanonicalActorRef } from '../tui/threads.js';
 import { createWorkspace } from '../worktrees/manager.js';
+import { getCachedTokenUsage } from '../token-usage/cache.js';
+import {
+  getTokenUsageOptIn,
+  setTokenUsageOptIn,
+} from '../token-usage/opt-in.js';
+import { safeTokenUsageError } from './usage.js';
 
 const ENTER_DASHBOARD = '\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l';
 const RESET_DASHBOARD = '\x1b[2J\x1b[H';
@@ -283,6 +289,20 @@ export function tuiCommand(): Command {
                 finish();
               },
               onRefreshThreads: () => loadThreadsData(process.cwd()),
+              onToggleTokenOptIn: (optIn: boolean) => setTokenUsageOptIn(optIn),
+              // Scans local agent logs only after consent; errors carry fixed
+              // wording so no path reaches the screen.
+              onRefreshTokens: async () => {
+                if (!(await getTokenUsageOptIn())) return null;
+                try {
+                  return await getCachedTokenUsage({
+                    days: 30,
+                    forceRefresh: true,
+                  });
+                } catch (error) {
+                  throw safeTokenUsageError(error);
+                }
+              },
               onSendMessage: async (draft: NewThreadDraft) => {
                 const context = await taskContext();
                 const actor = await resolveCurrentActor(

@@ -21,6 +21,9 @@ import {
   type HandoffOffer,
 } from '../application/handoff-suggestion.js';
 import type { AgentId } from '../agents/adapter.js';
+import { getTokenUsageOptIn } from '../token-usage/opt-in.js';
+import { getCachedTokenUsage } from '../token-usage/cache.js';
+import type { TokenUsageReport } from '../token-usage/schema.js';
 
 export interface DashboardData {
   readonly activity: ActivitySnapshot | null;
@@ -29,6 +32,8 @@ export interface DashboardData {
   readonly lastUpdated: string;
   readonly threads: ThreadsData;
   readonly handoffOffer?: HandoffOffer | null;
+  readonly tokenUsage?: TokenUsageReport | null;
+  readonly tokenOptIn?: boolean;
 }
 
 export async function loadThreadsData(
@@ -106,6 +111,17 @@ export async function loadDashboardData(
     // Ignore suggestion lookup errors
   }
 
+  let tokenOptIn = false;
+  let tokenUsage: TokenUsageReport | null = null;
+  try {
+    tokenOptIn = await getTokenUsageOptIn();
+    if (tokenOptIn) {
+      tokenUsage = await getCachedTokenUsage({ days: 30 });
+    }
+  } catch {
+    // Token usage unavailable
+  }
+
   return {
     activity,
     planUsage,
@@ -113,5 +129,7 @@ export async function loadDashboardData(
     lastUpdated: new Date().toLocaleTimeString(),
     threads,
     handoffOffer,
+    tokenUsage,
+    tokenOptIn,
   };
 }

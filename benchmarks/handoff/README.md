@@ -38,9 +38,13 @@ never invoke `agy` or `codex`. Execution refuses to start unless the approved te
 Relay bundle, provider executables, authentication status, and configured model IDs are verified.
 Dry-run also gates on fixture quality, handoff budget and content checks across both with-notes and
 no-notes handoffs, successor repository hygiene, and capture-schema validity before any paid run is
-allowed. Execute mode reruns all zero-provider dry gates inside the fresh run root before the first
-provider call. Each task executes 4 provider commands (1 predecessor + 3 successors: baseline,
-handoff-with-notes, handoff-no-notes).
+allowed. It sweeps handoff budgets across 300, 800, and 2,000 tokens from the same checkpoint and
+state, setting token limits to B and character limits to 4 × B, recording each prompt's size and
+SHA-256 hash, and detecting identical prompts to prevent paying for duplicate provider calls.
+Execute mode reruns all zero-provider dry gates inside the fresh run root before the first
+provider call. Each task executes up to 6 provider commands (1 predecessor + 5 successors: baseline,
+handoff-no-notes, handoff-300, handoff-800, and handoff-2000), deduplicating identical prompts via
+SHA-256 hashes to prevent redundant calls. `handoff-with-notes` is preserved as an alias for `handoff-300`.
 
 ## Recovery
 
@@ -103,26 +107,28 @@ invalid capture aborts that task before successor runs. It never synthesizes or 
 after the predecessor exits. It then creates a checkpoint and renders both the with-notes handoff
 and the no-notes handoff capsule (`state.notes = []`).
 
-All three successor repositories (`baseline`, `handoff-with-notes`, and `handoff-no-notes`) are
+All successor repositories (`baseline`, `handoff-no-notes`, `handoff-300`, `handoff-800`, and `handoff-2000`) are
 copied from the same interrupted snapshot, physically excluding `.relay/` and `test/hidden.test.js`.
 Before each successor call the runner asserts: `.relay/` does not exist; `git status` shows no
 Relay path; each successor repository's full fingerprint (HEAD, branch, index, status/diff, file modes
 and symlink targets, and working-tree contents) equals the pristine predecessor copy; hidden tests are
 absent; and the handoff prompts are byte-for-byte equal to the captured handoffs. Baseline receives the
-full request plus the preserve-work instruction; handoff-with-notes receives only the exact rendered
-handoff with notes; handoff-no-notes receives the handoff without notes. No repository-local Relay
-wrapper is present in any condition. Condition execution order is rotated across all 6 permutations
-balanced across tasks. Codex runs are ephemeral and sequential.
+full request plus the preserve-work instruction; handoff-no-notes receives the handoff without notes;
+handoff-300, handoff-800, and handoff-2000 receive the exact rendered handoffs for their respective budgets.
+No repository-local Relay wrapper is present in any condition. Condition execution order is rotated across
+balanced permutations across tasks. Codex runs are ephemeral and sequential, skipping provider calls via
+hash-based deduplication when budget prompts are identical.
 
 After each successor exits, the runner evaluates public tests, injects the task's hidden test,
 runs the hidden test alone, and runs public plus hidden tests together. The dry-run instead
 confirms each initial implementation fails its public foundation, each reference solution
 passes both public and hidden tests, and exercises the full product path without providers:
 it runs the built Relay binary end-to-end (`init`, `start`, `note import --stdin`, `handoff
---json`), asserts `.relay` is absent from `git status` and matched by `check-ignore`, and gates
-the rendered handoff at the 1,200-character/300-token budget with the task request appearing
-exactly once and no note-recording instruction for both with-notes and no-notes capsules. It then
-creates all three successor copies, proves their full Git/working-tree fingerprints match, and runs
+--json`), asserts `.relay` is absent from `git status` and matched by `check-ignore`, and sweeps
+handoff budgets at 300, 800, and 2,000 tokens (bounding each budget B at B tokens and 4 × B characters)
+with the task request appearing exactly once and no note-recording instruction for both with-notes and
+no-notes capsules. It records each prompt's size and SHA-256 hash, identifies duplicate prompts across
+budgets, creates all successor copies, proves their full Git/working-tree fingerprints match, and runs
 the same Relay-state and hidden-test absence gates used immediately before paid calls. Spawned children
 strip Node's `NODE_TEST_CONTEXT`/`NODE_TEST_NAME` variables so `node --test` fixtures behave
 identically inside the test runner.
@@ -183,6 +189,7 @@ The experiment measures successor continuation cost, not total end-to-end workfl
 predecessor capture tokens are recorded separately and are not part of the paired successor
 deltas.
 
-Provider use may incur cost and consume quota. The harness makes exactly four provider calls
-per selected task (one predecessor and three successors) and performs no network-dependent setup;
+Provider use may incur cost and consume quota. The harness makes up to six provider calls
+per selected task (one predecessor and five successors), deduplicates identical prompts, and
+performs no network-dependent setup;
 provider CLIs may still use their normal remote services during `--execute`.

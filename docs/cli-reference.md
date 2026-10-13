@@ -331,6 +331,33 @@ report `status: "unknown"` instead of a guess. Captured values become `stale` af
 or after their reset time passes. No credentials are read; Codex rollout files are scanned
 locally for numeric rate-limit events only.
 
+### `relay usage tokens`
+
+Show machine-wide token analytics across all coding agents on this computer, powered by a pinned `ccusage` integration.
+
+**Options:**
+
+- `--json` — Output structured `TokenUsageReport` JSON schema.
+- `--days <number>` — Number of days to report (`7`, `30`, `90`; default: `30`).
+- `--agent <id>` — Limit refresh to a specific agent (`claude`, `codex`, `gemini`, `antigravity`, `opencode`).
+- `--opt-in` — Explicitly enable machine-wide token usage collection from local agent logs.
+- `--opt-out` — Disable machine-wide token usage analytics.
+- `--check-opt-in` — Check whether token usage analytics is currently enabled.
+- `--refresh` — Bypass the cache and rescan local agent logs immediately.
+
+Behavior and guarantees:
+
+- Local agent logs are parsed strictly on this machine by the bundled native `ccusage` binary. Nothing is uploaded; prompts, conversations, code, and credentials are never read.
+- Project labels are sanitized across CLI and IPC boundaries: usernames and full paths are purged or hashed so private filesystem structure is never exposed.
+- Results are cached in `rireiDataHome()/token-usage-cache.json` with 180-day history per agent, file-lock-based single-flight deduplication, and instant range derivation (7D/30D/90D) without rescanning.
+- Coverage is judged against the selected range. An agent is `(Partial)` only when its logs start after the range begins, `No activity found` when it has no logs in the 180-day window, and `[data through YYYY-MM-DD]` when the last scan predates today. Days after that date were not collected and are not counted as zero.
+- JSON reports include `coverage.complete`, `coverage.dataThrough`, and `coverage.noActivity` per agent, a report-level `dataThrough`, `unitemizedTokens` (the part of a total its components don't account for; within a 1% gap the components are still shown), `sessionsUntimed` (sessions logged without times, such as OpenCode's), and a 13-week `calendar` used by the activity heatmap.
+- Models and sessions are limited to the selected range. An available agent with `sessions: null` had its session scan fail; that is unknown, not zero.
+- Each available agent carries `previous.tokens` (the preceding equal-length window) and `previous.shortHistory`, and `comparison` carries `previousSince`/`previousUntil`, so a filtered view can compare only the agents it shows.
+- ccusage output missing a canonical `totalTokens` (per day, per model entry, per session, or in `totals`) is rejected as `invalid_output` rather than read as zero. A missing component stays unknown and falls into the unitemized remainder.
+- The ccusage binary is resolved next to the running CLI, so the command works from any directory; it is never taken from the working directory.
+- Failures print fixed messages with no paths or usernames. A refresh that finds another scan of the same agent running waits for it instead of failing.
+
 ---
 
 ## `relay finish`

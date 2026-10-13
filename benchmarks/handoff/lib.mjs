@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 const numberAt = (object, keys) => {
@@ -315,6 +316,70 @@ export function summarizeHandoff(handoff) {
   };
 }
 
+export const HANDOFF_BUDGETS = [300, 800, 2000];
+
+export function hashPrompt(text) {
+  return createHash('sha256')
+    .update(text ?? '')
+    .digest('hex');
+}
+
+export function detectIdenticalPrompts(budgetHandoffs) {
+  const entries = (
+    Array.isArray(budgetHandoffs)
+      ? budgetHandoffs
+      : Object.entries(budgetHandoffs).map(([budget, handoff]) => ({
+          budget: Number(budget),
+          handoff,
+        }))
+  ).sort((a, b) => a.budget - b.budget);
+
+  const seenHashes = new Map();
+  const results = {};
+
+  for (const entry of entries) {
+    const budget = entry.budget;
+    const handoff = entry.handoff ?? entry;
+    const text = typeof handoff === 'string' ? handoff : (handoff?.text ?? '');
+    const sha256 = handoff?.sha256 ?? hashPrompt(text);
+    const characters =
+      typeof handoff?.characters === 'number'
+        ? handoff.characters
+        : text.length;
+    const estimatedTokens =
+      handoff?.estimatedTokens ?? handoff?.budget?.estimatedTokens ?? null;
+    const omittedItems =
+      handoff?.omissions ??
+      handoff?.omittedItems ??
+      handoff?.budget?.omittedItems ??
+      null;
+
+    let isDuplicate = false;
+    let identicalTo = null;
+
+    if (seenHashes.has(sha256)) {
+      isDuplicate = true;
+      identicalTo = seenHashes.get(sha256);
+    } else {
+      seenHashes.set(sha256, budget);
+    }
+
+    results[budget] = {
+      budget,
+      maxTokens: budget,
+      maxCharacters: 4 * budget,
+      characters,
+      estimatedTokens,
+      omittedItems,
+      sha256,
+      isDuplicate,
+      identicalTo,
+    };
+  }
+
+  return results;
+}
+
 export function nonCachedTokens(metrics) {
   if (
     metrics?.inputTokens === null ||
@@ -386,6 +451,26 @@ function compareArms(referenceArm, testArm) {
   };
 }
 
+export function nonAliasConditions(task) {
+  if (Array.isArray(task.order) && task.order.length > 0) {
+    return task.order.map((c) => task.conditions?.[c]).filter(Boolean);
+  }
+  return Object.entries(task.conditions ?? {})
+    .filter(([name]) => {
+      if (
+        (name === 'handoff-with-notes' || name === 'treatment') &&
+        task.conditions?.['handoff-300']
+      ) {
+        return false;
+      }
+      if (name === 'treatment' && task.conditions?.['handoff-with-notes']) {
+        return false;
+      }
+      return true;
+    })
+    .map(([, condition]) => condition);
+}
+
 export function aggregateResults(taskResults) {
   const hasLegacyTreatment = taskResults.some(
     (task) =>
@@ -395,22 +480,62 @@ export function aggregateResults(taskResults) {
   const hasNoNotes = taskResults.some(
     (task) => task.conditions?.['handoff-no-notes'] !== undefined,
   );
+  const hasBudgetArms = taskResults.some(
+    (task) =>
+      task.conditions?.['handoff-300'] !== undefined ||
+      task.conditions?.['handoff-800'] !== undefined ||
+      task.conditions?.['handoff-2000'] !== undefined,
+  );
 
   const pairs = taskResults.map((task) => {
     const baseline = task.conditions.baseline;
     const withNotes =
-      task.conditions['handoff-with-notes'] ?? task.conditions.treatment;
+      task.conditions['handoff-with-notes'] ??
+      task.conditions.treatment ??
+      task.conditions?.['handoff-300'];
     const noNotes = task.conditions['handoff-no-notes'] ?? null;
+    const handoff300 = task.conditions?.['handoff-300'] ?? withNotes;
+    const handoff800 = task.conditions?.['handoff-800'] ?? null;
+    const handoff2000 = task.conditions?.['handoff-2000'] ?? null;
 
     const baselineCorrect = baseline?.evaluation?.combined?.passed ?? false;
     const withNotesCorrect = withNotes?.evaluation?.combined?.passed ?? false;
     const noNotesCorrect = noNotes
       ? (noNotes.evaluation?.combined?.passed ?? false)
       : null;
+    const handoff300Correct = handoff300?.evaluation?.combined?.passed ?? false;
+    const handoff800Correct = handoff800
+      ? (handoff800.evaluation?.combined?.passed ?? false)
+      : null;
+    const handoff2000Correct = handoff2000
+      ? (handoff2000.evaluation?.combined?.passed ?? false)
+      : null;
 
     const withNotesVsBaseline = compareArms(baseline, withNotes);
     const noNotesVsBaseline = noNotes ? compareArms(baseline, noNotes) : null;
     const withNotesVsNoNotes = noNotes ? compareArms(noNotes, withNotes) : null;
+
+    const handoff300VsBaseline = compareArms(baseline, handoff300);
+    const handoff800VsBaseline = handoff800
+      ? compareArms(baseline, handoff800)
+      : null;
+    const handoff2000VsBaseline = handoff2000
+      ? compareArms(baseline, handoff2000)
+      : null;
+
+    const handoff300VsNoNotes =
+      noNotes && handoff300 ? compareArms(noNotes, handoff300) : null;
+    const handoff800VsNoNotes =
+      noNotes && handoff800 ? compareArms(noNotes, handoff800) : null;
+    const handoff2000VsNoNotes =
+      noNotes && handoff2000 ? compareArms(noNotes, handoff2000) : null;
+
+    const handoff800VsHandoff300 =
+      handoff300 && handoff800 ? compareArms(handoff300, handoff800) : null;
+    const handoff2000VsHandoff300 =
+      handoff300 && handoff2000 ? compareArms(handoff300, handoff2000) : null;
+    const handoff2000VsHandoff800 =
+      handoff800 && handoff2000 ? compareArms(handoff800, handoff2000) : null;
 
     const primaryComparison = withNotesVsBaseline ?? {};
 
@@ -423,6 +548,15 @@ export function aggregateResults(taskResults) {
     }
     if (hasNoNotes) {
       correctness['handoff-no-notes'] = noNotesCorrect;
+    }
+    if (hasBudgetArms) {
+      correctness['handoff-300'] = handoff300Correct;
+      if (handoff800) {
+        correctness['handoff-800'] = handoff800Correct;
+      }
+      if (handoff2000) {
+        correctness['handoff-2000'] = handoff2000Correct;
+      }
     }
 
     const pair = {
@@ -437,19 +571,91 @@ export function aggregateResults(taskResults) {
       misleadingHandoffFailure: withNotesCorrect ? false : null,
       captureNotes: task.capture?.count ?? null,
       handoffTokens: task.handoff?.estimatedTokens ?? null,
-      relayLeaks:
-        baseline?.relayStateAccessed ||
-        withNotes?.relayStateAccessed ||
-        noNotes?.relayStateAccessed
-          ? 'yes'
-          : 'no',
+      relayLeaks: nonAliasConditions(task).some((c) => c?.relayStateAccessed)
+        ? 'yes'
+        : 'no',
     };
 
     pair.comparisons = {
       withNotesVsBaseline,
       noNotesVsBaseline,
       withNotesVsNoNotes,
+      ...(hasBudgetArms
+        ? {
+            handoff300VsBaseline,
+            handoff800VsBaseline,
+            handoff2000VsBaseline,
+            handoff300VsNoNotes,
+            handoff800VsNoNotes,
+            handoff2000VsNoNotes,
+            handoff800VsHandoff300,
+            handoff2000VsHandoff300,
+            handoff2000VsHandoff800,
+            'handoff-300VsBaseline': handoff300VsBaseline,
+            'handoff-800VsBaseline': handoff800VsBaseline,
+            'handoff-2000VsBaseline': handoff2000VsBaseline,
+            'handoff-300VsNoNotes': handoff300VsNoNotes,
+            'handoff-800VsNoNotes': handoff800VsNoNotes,
+            'handoff-2000VsNoNotes': handoff2000VsNoNotes,
+            budgets: {
+              300: {
+                vsBaseline: handoff300VsBaseline,
+                vsNoNotes: handoff300VsNoNotes,
+              },
+              800: {
+                vsBaseline: handoff800VsBaseline,
+                vsNoNotes: handoff800VsNoNotes,
+                vsHandoff300: handoff800VsHandoff300,
+              },
+              2000: {
+                vsBaseline: handoff2000VsBaseline,
+                vsNoNotes: handoff2000VsNoNotes,
+                vsHandoff300: handoff2000VsHandoff300,
+                vsHandoff800: handoff2000VsHandoff800,
+              },
+            },
+          }
+        : {}),
     };
+
+    if (hasBudgetArms) {
+      pair.budgets = {
+        300: {
+          correct: handoff300Correct,
+          wallTimeMs: handoff300?.wallTimeMs ?? null,
+          nonCachedTokens: nonCachedTokens(handoff300?.metrics),
+          skippedProviderCall: Boolean(handoff300?.skippedProviderCall),
+          duplicateOf: handoff300?.duplicateOf ?? null,
+          vsBaseline: handoff300VsBaseline,
+          vsNoNotes: handoff300VsNoNotes,
+        },
+        800: handoff800
+          ? {
+              correct: handoff800Correct,
+              wallTimeMs: handoff800.wallTimeMs ?? null,
+              nonCachedTokens: nonCachedTokens(handoff800.metrics),
+              skippedProviderCall: Boolean(handoff800.skippedProviderCall),
+              duplicateOf: handoff800.duplicateOf ?? null,
+              vsBaseline: handoff800VsBaseline,
+              vsNoNotes: handoff800VsNoNotes,
+              vsHandoff300: handoff800VsHandoff300,
+            }
+          : null,
+        2000: handoff2000
+          ? {
+              correct: handoff2000Correct,
+              wallTimeMs: handoff2000.wallTimeMs ?? null,
+              nonCachedTokens: nonCachedTokens(handoff2000.metrics),
+              skippedProviderCall: Boolean(handoff2000.skippedProviderCall),
+              duplicateOf: handoff2000.duplicateOf ?? null,
+              vsBaseline: handoff2000VsBaseline,
+              vsNoNotes: handoff2000VsNoNotes,
+              vsHandoff300: handoff2000VsHandoff300,
+              vsHandoff800: handoff2000VsHandoff800,
+            }
+          : null,
+      };
+    }
 
     pair.exploration = {
       baseline: baseline?.metrics
@@ -476,6 +682,35 @@ export function aggregateResults(taskResults) {
             turnsBeforeFirstEdit: noNotes.metrics.turnsBeforeFirstEdit,
           }
         : null,
+      ...(hasBudgetArms
+        ? {
+            'handoff-300': handoff300?.metrics
+              ? {
+                  toolCalls: handoff300.metrics.toolCalls,
+                  distinctFilesRead: handoff300.metrics.distinctFilesRead,
+                  timeToFirstEditMs: handoff300.metrics.timeToFirstEditMs,
+                  turnsBeforeFirstEdit: handoff300.metrics.turnsBeforeFirstEdit,
+                }
+              : null,
+            'handoff-800': handoff800?.metrics
+              ? {
+                  toolCalls: handoff800.metrics.toolCalls,
+                  distinctFilesRead: handoff800.metrics.distinctFilesRead,
+                  timeToFirstEditMs: handoff800.metrics.timeToFirstEditMs,
+                  turnsBeforeFirstEdit: handoff800.metrics.turnsBeforeFirstEdit,
+                }
+              : null,
+            'handoff-2000': handoff2000?.metrics
+              ? {
+                  toolCalls: handoff2000.metrics.toolCalls,
+                  distinctFilesRead: handoff2000.metrics.distinctFilesRead,
+                  timeToFirstEditMs: handoff2000.metrics.timeToFirstEditMs,
+                  turnsBeforeFirstEdit:
+                    handoff2000.metrics.turnsBeforeFirstEdit,
+                }
+              : null,
+          }
+        : {}),
     };
 
     return pair;
@@ -503,6 +738,24 @@ export function aggregateResults(taskResults) {
       (pair) => pair.correctness['handoff-no-notes'],
     ).length;
   }
+  if (hasBudgetArms) {
+    for (const budget of HANDOFF_BUDGETS) {
+      const condName = `handoff-${budget}`;
+      if (
+        taskResults.some(
+          (t) =>
+            t.conditions?.[condName] !== undefined ||
+            (budget === 300 &&
+              (t.conditions?.['handoff-with-notes'] ||
+                t.conditions?.treatment)),
+        )
+      ) {
+        successCounts[condName] = pairs.filter(
+          (pair) => pair.correctness[condName],
+        ).length;
+      }
+    }
+  }
 
   const improvedTasks = pairs.filter(
     (pair) => pair.reachesTwentyPercent,
@@ -514,13 +767,21 @@ export function aggregateResults(taskResults) {
     (pair) => pair.misleadingHandoffFailure === false,
   );
 
+  const sumTokens = (arr) =>
+    arr && arr.every((value) => value !== null)
+      ? arr.reduce((total, value) => total + value, 0)
+      : null;
+
   const baselineTokenTotals = taskResults.map((task) =>
     nonCachedTokens(task.conditions.baseline?.metrics),
   );
   const withNotesTokenTotals = taskResults.map((task) =>
     nonCachedTokens(
-      (task.conditions['handoff-with-notes'] ?? task.conditions.treatment)
-        ?.metrics,
+      (
+        task.conditions['handoff-with-notes'] ??
+        task.conditions.treatment ??
+        task.conditions?.['handoff-300']
+      )?.metrics,
     ),
   );
   const noNotesTokenTotals = hasNoNotes
@@ -536,8 +797,11 @@ export function aggregateResults(taskResults) {
   const withNotesWallTimeTotal = taskResults.reduce(
     (total, task) =>
       total +
-      ((task.conditions['handoff-with-notes'] ?? task.conditions.treatment)
-        ?.wallTimeMs ?? 0),
+      ((
+        task.conditions['handoff-with-notes'] ??
+        task.conditions.treatment ??
+        task.conditions?.['handoff-300']
+      )?.wallTimeMs ?? 0),
     0,
   );
   const noNotesWallTimeTotal = hasNoNotes
@@ -548,13 +812,36 @@ export function aggregateResults(taskResults) {
       )
     : null;
 
-  const sumTokens = (arr) =>
-    arr && arr.every((value) => value !== null)
-      ? arr.reduce((total, value) => total + value, 0)
-      : null;
+  const budgetWallTimeTotals = {};
+  const budgetTokenTotals = {};
+  if (hasBudgetArms) {
+    for (const budget of HANDOFF_BUDGETS) {
+      const condName = `handoff-${budget}`;
+      budgetWallTimeTotals[condName] = taskResults.reduce((sum, task) => {
+        const cond =
+          task.conditions?.[condName] ??
+          (budget === 300
+            ? (task.conditions?.['handoff-with-notes'] ??
+              task.conditions?.treatment)
+            : null);
+        return sum + (cond?.wallTimeMs ?? 0);
+      }, 0);
+      const tokenList = taskResults.map((task) => {
+        const cond =
+          task.conditions?.[condName] ??
+          (budget === 300
+            ? (task.conditions?.['handoff-with-notes'] ??
+              task.conditions?.treatment)
+            : null);
+        return nonCachedTokens(cond?.metrics);
+      });
+      budgetTokenTotals[condName] = sumTokens(tokenList);
+    }
+  }
 
   const wallTimeTotals = {
     baseline: baselineWallTimeTotal,
+    ...budgetWallTimeTotals,
   };
   if (hasLegacyTreatment) {
     wallTimeTotals.treatment = withNotesWallTimeTotal;
@@ -569,6 +856,7 @@ export function aggregateResults(taskResults) {
 
   const nonCachedTokenTotals = {
     baseline: sumTokens(baselineTokenTotals),
+    ...budgetTokenTotals,
   };
   if (hasLegacyTreatment) {
     nonCachedTokenTotals.treatment = sumTokens(withNotesTokenTotals);
@@ -586,7 +874,11 @@ export function aggregateResults(taskResults) {
       .map((t) =>
         armName === 'handoff-with-notes'
           ? (t.conditions['handoff-with-notes'] ?? t.conditions.treatment)
-          : t.conditions[armName],
+          : (t.conditions?.[armName] ??
+            (armName === 'handoff-300'
+              ? (t.conditions?.['handoff-with-notes'] ??
+                t.conditions?.treatment)
+              : null)),
       )
       .filter(Boolean);
     const extractNums = (key) =>
@@ -660,6 +952,37 @@ export function aggregateResults(taskResults) {
         withNotesVsBaseline: summarizePairComparison('withNotesVsBaseline'),
         noNotesVsBaseline: summarizePairComparison('noNotesVsBaseline'),
         withNotesVsNoNotes: summarizePairComparison('withNotesVsNoNotes'),
+        ...(hasBudgetArms
+          ? {
+              handoff300VsBaseline: summarizePairComparison(
+                'handoff300VsBaseline',
+              ),
+              handoff800VsBaseline: summarizePairComparison(
+                'handoff800VsBaseline',
+              ),
+              handoff2000VsBaseline: summarizePairComparison(
+                'handoff2000VsBaseline',
+              ),
+              handoff300VsNoNotes: summarizePairComparison(
+                'handoff300VsNoNotes',
+              ),
+              handoff800VsNoNotes: summarizePairComparison(
+                'handoff800VsNoNotes',
+              ),
+              handoff2000VsNoNotes: summarizePairComparison(
+                'handoff2000VsNoNotes',
+              ),
+              handoff800VsHandoff300: summarizePairComparison(
+                'handoff800VsHandoff300',
+              ),
+              handoff2000VsHandoff300: summarizePairComparison(
+                'handoff2000VsHandoff300',
+              ),
+              handoff2000VsHandoff800: summarizePairComparison(
+                'handoff2000VsHandoff800',
+              ),
+            }
+          : {}),
       },
       exploration: {
         baseline: summarizeExplorationForArm('baseline'),
@@ -670,7 +993,51 @@ export function aggregateResults(taskResults) {
                 summarizeExplorationForArm('handoff-no-notes'),
             }
           : {}),
+        ...(hasBudgetArms
+          ? {
+              'handoff-300': summarizeExplorationForArm('handoff-300'),
+              'handoff-800': summarizeExplorationForArm('handoff-800'),
+              'handoff-2000': summarizeExplorationForArm('handoff-2000'),
+            }
+          : {}),
       },
+      ...(hasBudgetArms
+        ? {
+            budgets: {
+              300: {
+                successCount: successCounts['handoff-300'],
+                wallTimeMs: wallTimeTotals['handoff-300'],
+                nonCachedTokens: nonCachedTokenTotals['handoff-300'],
+                vsBaseline: summarizePairComparison('handoff300VsBaseline'),
+                vsNoNotes: summarizePairComparison('handoff300VsNoNotes'),
+                exploration: summarizeExplorationForArm('handoff-300'),
+              },
+              800: {
+                successCount: successCounts['handoff-800'],
+                wallTimeMs: wallTimeTotals['handoff-800'],
+                nonCachedTokens: nonCachedTokenTotals['handoff-800'],
+                vsBaseline: summarizePairComparison('handoff800VsBaseline'),
+                vsNoNotes: summarizePairComparison('handoff800VsNoNotes'),
+                vsHandoff300: summarizePairComparison('handoff800VsHandoff300'),
+                exploration: summarizeExplorationForArm('handoff-800'),
+              },
+              2000: {
+                successCount: successCounts['handoff-2000'],
+                wallTimeMs: wallTimeTotals['handoff-2000'],
+                nonCachedTokens: nonCachedTokenTotals['handoff-2000'],
+                vsBaseline: summarizePairComparison('handoff2000VsBaseline'),
+                vsNoNotes: summarizePairComparison('handoff2000VsNoNotes'),
+                vsHandoff300: summarizePairComparison(
+                  'handoff2000VsHandoff300',
+                ),
+                vsHandoff800: summarizePairComparison(
+                  'handoff2000VsHandoff800',
+                ),
+                exploration: summarizeExplorationForArm('handoff-2000'),
+              },
+            },
+          }
+        : {}),
       decisionRule: {
         text: 'Treatment must maintain correctness and reduce non-cached tokens or wall time by at least 20% on at least 3/5 tasks, with no misleading handoff-caused failure.',
         correctnessMaintained,

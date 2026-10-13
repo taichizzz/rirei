@@ -6,11 +6,30 @@ import {
   effortsForModel,
   formatExactTimestamp,
   launchProfileOverrides,
-  planStatusLabel,
   selectedModelValue,
-  usageWindowPresentation,
 } from './provider-ui.mjs';
-/* global document, localStorage, window, Terminal, FitAddon */
+/* global document, localStorage, window, Terminal, FitAddon, ResizeObserver */
+
+function relTime(iso) {
+  if (!iso) return 'never';
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return 'unknown';
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
 const tabsModel = new TerminalTabsModel();
 
 let project = localStorage.getItem('relay-project') || '';
@@ -2283,160 +2302,1333 @@ checkpointClose.addEventListener('click', closeCheckpointViewer);
 checkpointModal.addEventListener('click', (event) => {
   if (event.target === checkpointModal) closeCheckpointViewer();
 });
-/* ---- usage panel ---- */
+/* ---- token usage dashboard (stage view) ---- */
 const usageBtn = document.querySelector('#usageBtn');
-const usageModal = document.querySelector('#usageModal');
-const usageClose = document.querySelector('#usageClose');
-const usageGrid = document.querySelector('#usageGrid');
-const usageTask = document.querySelector('#usageTask');
-const usageSummary = document.querySelector('#usageSummary');
-let usageRequest = 0;
-let usageCapturedAt = 0;
+const usageView = document.querySelector('#usageView');
+const usageOptInCard = document.querySelector('#usageOptInCard');
+const usageDashWrapper = document.querySelector('#usageDashWrapper');
+const enableUsageBtn = document.querySelector('#enableUsageBtn');
+const usageTip = document.querySelector('#usageTip');
 
-function relTime(iso) {
-  if (!iso) return 'never';
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return 'unknown';
-  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
+const USAGE_AGENTS = [
+  { id: 'claude', name: 'Claude', color: '#3987e5' },
+  { id: 'codex', name: 'Codex', color: '#d95926' },
+  { id: 'gemini', name: 'Gemini', color: '#199e70' },
+  { id: 'antigravity', name: 'Antigravity', color: '#c98500' },
+  { id: 'opencode', name: 'OpenCode', color: '#d55181' },
+];
+const USAGE_BY_ID = Object.fromEntries(USAGE_AGENTS.map((a) => [a.id, a]));
+const USAGE_HEAT = ['#18181b', '#4a6824', '#6c9432', '#98c248', '#cdf875'];
+
+let usageRangeDays = 30;
+const usageHiddenAgents = new Set();
+let tokenUsageReport = null;
+let latestLivePlans = [];
+let dailyNavIndex = -1;
+let heatNavIndex = -1;
+
+function compactTokens(n) {
+  if (n == null) return '—';
+  const f = (x, s) =>
+    (x >= 100 ? x.toFixed(0) : x.toFixed(1).replace(/\.0$/, '')) + s;
+  if (n >= 1e9) return f(n / 1e9, 'B');
+  if (n >= 1e6) return f(n / 1e6, 'M');
+  if (n >= 1e3) return f(n / 1e3, 'K');
+  return String(n);
 }
 
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
+function fullTokens(n) {
+  if (n == null) return '—';
+  return n.toLocaleString('en-US');
 }
 
-function renderUsage(data) {
-  usageCapturedAt = Math.max(
-    usageCapturedAt,
-    ...data.plans.map((plan) => Date.parse(plan.capturedAt ?? '') || 0),
+function dShort(d) {
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function dLong(d) {
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function escHtml(s) {
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c],
   );
-  usageTask.textContent = '';
-  usageTask.append(
-    document.createTextNode(`${data.task.title}  `),
-    el('span', null, `· ${data.task.status}`),
-  );
-  usageGrid.textContent = '';
-  usageSummary.textContent = '';
-  const reporting = data.plans.filter((plan) =>
-    ['available', 'stale'].includes(plan.status),
-  );
-  const summary = el('div', 'plan-summary');
-  summary.append(
-    el('strong', null, `${reporting.length}/${data.plans.length}`),
-    el('span', null, 'providers reporting'),
-  );
-  usageSummary.append(summary);
-  for (const plan of data.plans) {
-    const card = el('div', `usage-card plan-card ${plan.status}`);
-    const name = el('div', 'agent');
-    name.append(el('span', 'dot'), document.createTextNode(plan.displayName));
-    const status = el('div', 'plan-status', planStatusLabel(plan));
-    const windows = el('div', 'agent-windows');
-    const windowEntries =
-      plan.metrics && plan.metrics.length > 0
-        ? plan.metrics.map((metric) => [
-            metric.window?.label ?? metric.id,
-            metric,
-          ])
-        : [
-            ['5-hour', plan.fiveHour],
-            ['Weekly', plan.week],
-          ];
-    for (const [label, window] of windowEntries) {
-      const row = el('div', 'window-row');
-      const presentation = usageWindowPresentation(window);
-      if (presentation.stale) row.classList.add('stale');
-      const track = el('span', 'usage-track');
-      const fill = el('span', 'usage-fill');
-      const { percent } = presentation;
-      fill.style.width = `${Math.max(0, Math.min(100, percent ?? 0))}%`;
-      if (percent != null && percent < 20) fill.classList.add('critical');
-      else if (percent != null && percent < 50) fill.classList.add('warning');
-      track.append(fill);
-      const exactReset = formatExactTimestamp(window?.resetsAt);
-      const reset = el(
-        'small',
-        null,
-        exactReset ? `resets ${exactReset}` : 'reset unknown',
-      );
-      if (window?.resetsAt) reset.title = window.resetsAt;
-      row.append(
-        el('span', 'window-label', label),
-        track,
-        el('strong', null, presentation.valueLabel),
-        reset,
-      );
-      windows.append(row);
-    }
-    const meta = el('div', 'meta');
-    const exactCapture = formatExactTimestamp(plan.capturedAt);
-    const capture = el(
-      'span',
-      null,
-      exactCapture
-        ? `updated ${exactCapture} (${relTime(plan.capturedAt)})`
-        : 'not reported',
-    );
-    if (plan.capturedAt) capture.title = plan.capturedAt;
-    meta.append(
-      el('span', null, plan.detail),
-      el('span', null, `source: ${plan.source}`),
-      capture,
-    );
-    card.append(name, status, windows, meta);
-    usageGrid.append(card);
+}
+
+const shownUsageAgents = () =>
+  USAGE_AGENTS.filter((a) => !usageHiddenAgents.has(a.id));
+
+function usageAgentReport(id) {
+  return tokenUsageReport?.agents.find((a) => a.id === id);
+}
+
+// Coverage is measured against the selected range: logs start after it begins.
+function isAgentPartial(id) {
+  if (usageHiddenAgents.has(id)) return false;
+  const agentReport = usageAgentReport(id);
+  return agentReport?.status === 'available'
+    ? !agentReport.coverage.complete
+    : false;
+}
+
+function fmtDate(dateStr) {
+  return dShort(new Date(`${dateStr}T00:00:00Z`));
+}
+
+function joinNames(names) {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+// Oldest capture date among shown agents when it ends before the range does.
+function shownDataThrough() {
+  const until = tokenUsageReport?.range?.until;
+  let oldest = null;
+  for (const a of shownUsageAgents()) {
+    const rep = usageAgentReport(a.id);
+    const through =
+      rep?.status === 'available' ? rep.coverage?.dataThrough : null;
+    if (through && (!oldest || through < oldest)) oldest = through;
   }
+  return oldest && until && oldest < until ? oldest : null;
 }
 
-async function openUsage() {
-  if (!project)
-    return show({ ok: false, output: 'Choose a project folder first.' });
-  const requestedProject = project;
-  const request = ++usageRequest;
-  usageCapturedAt = 0;
-  usageModal.hidden = false;
-  usageModal.setAttribute('aria-busy', 'true');
-  usageTask.textContent = 'Reading verified provider usage sources…';
-  usageSummary.textContent = 'Loading usage';
-  usageSummary.classList.add('loading-status');
-  usageGrid.textContent = '';
-  usageClose.focus();
-  const res = await window.relay.usage({ project: requestedProject });
-  if (request !== usageRequest) return;
-  if (project !== requestedProject) return closeUsage();
-  usageModal.setAttribute('aria-busy', 'false');
-  usageSummary.classList.remove('loading-status');
-  if (!res.ok) {
-    usageTask.textContent = res.output || 'Could not read usage.';
-    usageSummary.textContent = '';
+// Shown agents whose value for this day was not collected yet.
+function uncollectedAgents(r) {
+  return shownUsageAgents().filter((a) => r[a.id] === null);
+}
+
+function showUsageTip(html, x, y) {
+  if (!usageTip) return;
+  usageTip.innerHTML = html;
+  usageTip.hidden = false;
+  const w = usageTip.offsetWidth;
+  const h = usageTip.offsetHeight;
+  let left = x + 14;
+  let top = y - h - 10;
+  if (left + w > window.innerWidth - 8) left = x - w - 14;
+  if (top < 8) top = y + 16;
+  usageTip.style.left = `${Math.max(8, left)}px`;
+  usageTip.style.top = `${top}px`;
+}
+
+function hideUsageTip() {
+  if (usageTip) usageTip.hidden = true;
+}
+
+function tipRowsHtml(pairs, totalLabel, totalVal) {
+  return (
+    pairs
+      .map(
+        ([a, v]) =>
+          `<div class="r"><span><i class="sw" style="background:${a.color}"></i>${escHtml(a.name)}</span><b>${v === null ? 'Not collected' : v === undefined ? '—' : fullTokens(v)}</b></div>`,
+      )
+      .join('') +
+    (totalLabel
+      ? `<div class="r t"><span>${escHtml(totalLabel)}</span><b>${fullTokens(totalVal)}</b></div>`
+      : '')
+  );
+}
+
+function dailyMapsOf(agentList) {
+  return new Map(
+    (agentList ?? []).map((a) => [
+      a.id,
+      new Map((a.daily ?? []).map((d) => [d.date, d.totalTokens])),
+    ]),
+  );
+}
+
+function getDailyDays() {
+  if (!tokenUsageReport || !tokenUsageReport.agents) return [];
+  return buildDayRows(
+    tokenUsageReport.range?.since,
+    tokenUsageReport.range?.until,
+    dailyMapsOf(tokenUsageReport.agents),
+  );
+}
+
+// The heatmap always covers 13 weeks, whatever range is selected.
+function getCalendarDays() {
+  const cal = tokenUsageReport?.calendar;
+  if (!cal) return getDailyDays();
+  return buildDayRows(cal.since, cal.until, dailyMapsOf(cal.agents));
+}
+
+// Days after an agent's last capture were not collected: null, never zero.
+function buildDayRows(since, until, dailyById) {
+  if (!since || !until) return [];
+
+  // Full continuous calendar sequence independent of any single agent
+  const dates = [];
+  let cur = since;
+  while (cur <= until) {
+    dates.push(cur);
+    const parts = cur.split('-').map(Number);
+    const nextMs = Date.UTC(parts[0], parts[1] - 1, parts[2]) + 86400000;
+    const nextD = new Date(nextMs);
+    cur = `${nextD.getUTCFullYear()}-${String(nextD.getUTCMonth() + 1).padStart(2, '0')}-${String(nextD.getUTCDate()).padStart(2, '0')}`;
+  }
+
+  const throughById = new Map();
+  for (const a of tokenUsageReport?.agents ?? []) {
+    if (a.status === 'available' && a.coverage?.dataThrough) {
+      throughById.set(a.id, a.coverage.dataThrough);
+    }
+  }
+
+  const len = dates.length;
+  return dates.map((dateStr, idx) => {
+    const date = new Date(`${dateStr}T00:00:00Z`);
+    const row = { date, dateStr, age: len - 1 - idx };
+    for (const a of USAGE_AGENTS) {
+      const through = throughById.get(a.id);
+      row[a.id] =
+        through && dateStr > through
+          ? null
+          : (dailyById.get(a.id)?.get(dateStr) ?? 0);
+    }
+    return row;
+  });
+}
+
+function dayTotal(r) {
+  return shownUsageAgents().reduce((s, a) => s + (r[a.id] || 0), 0);
+}
+
+function sumAgent(rows, id) {
+  return rows.reduce((s, r) => s + (r[id] || 0), 0);
+}
+
+function niceStep(raw) {
+  if (raw <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const m of [1, 2, 2.5, 5, 10]) {
+    if (m * p >= raw) return m * p;
+  }
+  return 10 * p;
+}
+
+function roundedTop(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+
+// Total, availability, and comparison all follow the selected agents, so a
+// filtered view never shows the whole machine's change.
+function shownComparison() {
+  const shown = shownUsageAgents();
+  const unavailable = [];
+  const shortHistory = [];
+  let current = 0;
+  let previous = 0;
+  for (const a of shown) {
+    const rep = usageAgentReport(a.id);
+    if (rep?.status !== 'available' || !rep.previous) {
+      unavailable.push(a.name);
+      continue;
+    }
+    current += rep.totalTokens ?? 0;
+    previous += rep.previous.tokens;
+    if (rep.previous.shortHistory) shortHistory.push(a.name);
+  }
+  const since = tokenUsageReport?.comparison?.previousSince;
+  if (shown.length === 0) return { reason: 'No agents selected' };
+  if (unavailable.length > 0) {
+    return {
+      reason: `No comparison — ${joinNames(unavailable)} data ${unavailable.length === 1 ? 'is' : 'are'} unavailable`,
+    };
+  }
+  const through = shownDataThrough();
+  if (through) {
+    return { reason: `No comparison — data only through ${fmtDate(through)}` };
+  }
+  if (shortHistory.length > 0) {
+    return {
+      reason: `No comparison — ${joinNames(shortHistory)} logs don’t reach back${since ? ` to ${fmtDate(since)}` : ''}`,
+    };
+  }
+  if (previous === 0) return { reason: 'No earlier activity to compare' };
+  return { pct: Math.round(((current - previous) / previous) * 100) };
+}
+
+function renderHero() {
+  const heroLabel = document.getElementById('heroLabel');
+  const heroValue = document.getElementById('heroValue');
+  const heroSub = document.getElementById('heroSub');
+  const heroDelta = document.getElementById('heroDelta');
+
+  if (heroLabel) heroLabel.textContent = `Tokens · last ${usageRangeDays} days`;
+
+  // Section 2.6: failures are never zero. With no selected agent available,
+  // the hero says Unavailable instead of counting 0 tokens.
+  const shown = shownUsageAgents();
+  const shownAvailable = shown.filter(
+    (a) => usageAgentReport(a.id)?.status === 'available',
+  );
+  if (!tokenUsageReport || shownAvailable.length === 0) {
+    if (heroValue) heroValue.textContent = 'Unavailable';
+    if (heroSub)
+      heroSub.textContent =
+        shown.length === 0
+          ? 'No agents selected'
+          : 'Unable to collect token usage data';
+    if (heroDelta) {
+      heroDelta.className = 'delta na';
+      heroDelta.textContent = 'No data available';
+    }
     return;
   }
-  const responseCapturedAt = Math.max(
-    0,
-    ...res.data.plans.map((plan) => Date.parse(plan.capturedAt ?? '') || 0),
+
+  const rows = getDailyDays();
+  const t = rows.reduce((s, r) => s + dayTotal(r), 0);
+  if (heroValue) heroValue.textContent = compactTokens(t);
+  if (heroSub) {
+    const shownCount = shown.length;
+    let sub = `${fullTokens(t)} tokens across ${shownCount} agent${shownCount === 1 ? '' : 's'}`;
+    const missing = shown.filter(
+      (a) => usageAgentReport(a.id)?.status !== 'available',
+    );
+    if (missing.length > 0) {
+      sub += ` · Missing: ${missing.map((a) => a.name).join(', ')}`;
+    }
+    const through = shownDataThrough();
+    if (through) sub += ` · Data through ${fmtDate(through)}`;
+    heroSub.textContent = sub;
+  }
+
+  // Section 4.1: Comparison against preceding equal-length window from cached history
+  if (heroDelta) {
+    const cmp = shownComparison();
+    if (cmp.pct != null) {
+      heroDelta.className = 'delta';
+      heroDelta.style.color = 'var(--text-soft)';
+      heroDelta.textContent = `${cmp.pct >= 0 ? '▲' : '▼'} ${Math.abs(cmp.pct)}% vs previous ${usageRangeDays} days`;
+    } else {
+      heroDelta.className = 'delta na';
+      heroDelta.textContent = cmp.reason;
+    }
+  }
+}
+
+function renderTiles() {
+  const rows = getDailyDays();
+  const today = rows[rows.length - 1] ?? { date: new Date() };
+  const mondayAge = (today.date.getUTCDay() + 6) % 7;
+  const weekRows = rows.slice(-(mondayAge + 1));
+  const weekTotal = weekRows.reduce((s, r) => s + dayTotal(r), 0);
+  const through = shownDataThrough();
+
+  // Today: unknown when no collected agent has a value; never a false zero.
+  const todayMissing = today.dateStr ? uncollectedAgents(today) : [];
+  const todayKnown = shownUsageAgents().some((a) => (today[a.id] ?? 0) > 0);
+  let todayValue = compactTokens(dayTotal(today));
+  let todaySub = dLong(today.date);
+  if (todayMissing.length > 0 && !todayKnown) {
+    todayValue = '—';
+    todaySub = `Not collected yet · data through ${fmtDate(through ?? today.dateStr)}`;
+  } else if (todayMissing.length > 0) {
+    todaySub = `${dLong(today.date)} · ${joinNames(todayMissing.map((a) => a.name))} not collected`;
+  }
+  const weekSub = weekRows.some((r) => uncollectedAgents(r).length > 0)
+    ? `Since Monday · data through ${fmtDate(through ?? today.dateStr)}`
+    : 'Since Monday';
+
+  let totalSessions = 0;
+  const untimedAgents = [];
+  for (const a of shownUsageAgents()) {
+    const rep = usageAgentReport(a.id);
+    totalSessions += rep?.sessions ?? 0;
+    // A failed session scan (null) is excluded and named, never counted as 0.
+    if (
+      (rep?.sessionsUntimed ?? 0) > 0 ||
+      (rep?.status === 'available' && rep.sessions == null)
+    )
+      untimedAgents.push(a.name);
+  }
+
+  const totals = shownUsageAgents()
+    .map((a) => [a, sumAgent(rows, a.id)])
+    .sort((x, y) => y[1] - x[1]);
+  const all = totals.reduce((s, [, v]) => s + v, 0) || 1;
+  const [top, topV] = totals[0] || [USAGE_AGENTS[0], 0];
+
+  const partialAgents = USAGE_AGENTS.filter((a) => isAgentPartial(a.id));
+  const tilesEl = document.getElementById('tiles');
+  if (!tilesEl) return;
+
+  tilesEl.innerHTML = `
+    <div class="tile">
+      <div class="label">Today</div>
+      <div class="tile-value">${todayValue}</div>
+      <div class="tile-sub">${escHtml(todaySub)}</div>
+    </div>
+    <div class="tile">
+      <div class="label">This week</div>
+      <div class="tile-value">${compactTokens(weekTotal)}</div>
+      <div class="tile-sub">${escHtml(weekSub)}</div>
+    </div>
+    <div class="tile">
+      <div class="label">Sessions</div>
+      <div class="tile-value">${fullTokens(totalSessions)}</div>
+      <div class="tile-sub"${
+        untimedAgents.length > 0
+          ? ` title="${escHtml(`${joinNames(untimedAgents)}: sessions have no recorded times or couldn’t be read, so they aren’t counted`)}"`
+          : ''
+      }>Last ${usageRangeDays} days${
+        untimedAgents.length > 0
+          ? ` · excl. ${escHtml(joinNames(untimedAgents))}`
+          : ''
+      }</div>
+    </div>
+    <div class="tile">
+      <div class="label">Most used</div>
+      <div class="tile-value">${escHtml(top.name)} <small>${Math.round((topV / all) * 100)}%</small></div>
+      <div class="tile-sub"><i class="sw" style="background:${top.color}"></i>${compactTokens(topV)} tokens</div>
+      ${
+        partialAgents.length > 0
+          ? `<div class="tile-sub">Ranking may be off: ${partialAgents.map((a) => a.name).join(', ')} history is partial</div>`
+          : ''
+      }
+    </div>`;
+}
+
+function renderDaily() {
+  const el = document.getElementById('daily');
+  if (!el) return;
+  const rows = getDailyDays();
+  const W = Math.max(300, el.clientWidth || 700);
+  const H = 250;
+  const m = { t: 22, r: 6, b: 24, l: 44 };
+  const pw = W - m.l - m.r;
+  const ph = H - m.t - m.b;
+  const totals = rows.map(dayTotal);
+  const dataMax = Math.max(...totals, 1);
+  const step = niceStep(dataMax / 4);
+  const max = Math.ceil((dataMax * 1.06) / step) * step;
+  const band = pw / (rows.length || 1);
+  const bw = Math.max(2, Math.min(24, band * 0.72));
+  const y = (v) => m.t + ph - (v / max) * ph;
+
+  let s = `<svg viewBox="0 0 ${W} ${H}" height="${H}" aria-hidden="true">`;
+  s += `<defs><pattern id="usageNcHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="1.5" height="5" fill="var(--axis)"/></pattern></defs>`;
+  for (let i = 0; i <= Math.round(max / step); i += 1) {
+    const v = step * i;
+    const yy = Math.round(y(v)) + 0.5;
+    s += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" stroke="${i === 0 ? 'var(--axis)' : 'var(--grid)'}" stroke-width="1"/>`;
+    s += `<text class="tick" x="${m.l - 8}" y="${yy + 3}" text-anchor="end">${compactTokens(v)}</text>`;
+  }
+
+  s += `<rect class="daily-hover" x="0" y="${m.t}" width="${band}" height="${ph}" fill="rgb(255 255 255 / 4%)" rx="3" visibility="hidden"/>`;
+  const peakI = totals.indexOf(Math.max(...totals));
+  let anyUncollected = false;
+
+  rows.forEach((r, i) => {
+    // A hatched column marks a day not collected yet, so it never reads as zero.
+    if (uncollectedAgents(r).length > 0) {
+      anyUncollected = true;
+      s += `<rect class="daily-nc" x="${m.l + band * i + 1}" y="${m.t}" width="${Math.max(1, band - 2)}" height="${ph}" fill="url(#usageNcHatch)" rx="2"/>`;
+    }
+    const cx = m.l + band * i + (band - bw) / 2;
+    let acc = 0;
+    const segs = shownUsageAgents().filter((a) => (r[a.id] || 0) > 0);
+    segs.forEach((a, k) => {
+      const v = r[a.id];
+      const y0 = y(acc);
+      const y1 = y(acc + v);
+      acc += v;
+      let h = y0 - y1;
+      const gap = k < segs.length - 1 ? 2 : 0;
+      h = Math.max(0, h - gap);
+      if (h <= 0.4) return;
+      const isTop = k === segs.length - 1;
+      s += isTop
+        ? `<path d="${roundedTop(cx, y1, bw, h, 4)}" fill="${a.color}"/>`
+        : `<rect x="${cx}" y="${y1 + gap}" width="${bw}" height="${h}" fill="${a.color}"/>`;
+    });
+
+    const every = rows.length <= 7 ? 1 : rows.length <= 30 ? 7 : 14;
+    if ((rows.length - 1 - i) % every === 0) {
+      s += `<text class="tick" x="${m.l + band * i + band / 2}" y="${H - 6}" text-anchor="middle">${dShort(r.date)}</text>`;
+    }
+  });
+
+  if (totals[peakI] > 0) {
+    s += `<text class="peak" x="${m.l + band * peakI + band / 2}" y="${y(totals[peakI]) - 7}" text-anchor="middle">peak ${compactTokens(totals[peakI])}</text>`;
+  }
+  s += `<rect id="dailyHit" x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="transparent"/></svg>`;
+  el.innerHTML = s;
+  el._geo = { m, band, rows, H };
+
+  const legend = document.getElementById('dailyLegend');
+  if (legend) {
+    legend.innerHTML =
+      shownUsageAgents()
+        .map(
+          (a) =>
+            `<span><i class="sw" style="background:${a.color}"></i>${escHtml(a.name)} <b>${compactTokens(sumAgent(rows, a.id))}</b></span>`,
+        )
+        .join('') +
+      (anyUncollected
+        ? '<span><i class="sw nc"></i>Not collected yet</span>'
+        : '');
+  }
+
+  // Shown only when Claude's own logs start after the selected range begins.
+  const notice = document.getElementById('claudeNotice');
+  const noticeText = document.getElementById('claudeNoticeText');
+  const claudeStart = isAgentPartial('claude')
+    ? usageAgentReport('claude')?.coverage?.earliestDate
+    : null;
+  if (notice) notice.hidden = !claudeStart;
+  if (noticeText && claudeStart) {
+    noticeText.innerHTML = `Claude logs on this computer start ${escHtml(fmtDate(claudeStart))}, so earlier Claude usage isn’t shown. Claude Code deletes logs after 30 days by default; raise <code>cleanupPeriodDays</code> in Claude’s settings to keep more history.`;
+  }
+
+  renderDailyTable();
+}
+
+function dailyTipAt(i, clientX, clientY) {
+  const el = document.getElementById('daily');
+  if (!el || !el._geo) return;
+  const { m, band, rows } = el._geo;
+  const r = rows[i];
+  if (!r) return;
+  const hover = el.querySelector('.daily-hover');
+  if (hover) {
+    hover.setAttribute('x', m.l + band * i);
+    hover.setAttribute('visibility', 'visible');
+  }
+  const pairs = shownUsageAgents().map((a) => [
+    a,
+    r[a.id] === null ? null : r[a.id] || 0,
+  ]);
+  showUsageTip(
+    `<h4>${dLong(r.date)}</h4>${tipRowsHtml(pairs, 'Total', dayTotal(r))}`,
+    clientX,
+    clientY,
   );
-  if (responseCapturedAt >= usageCapturedAt) renderUsage(res.data);
 }
 
-function closeUsage() {
-  usageRequest += 1;
-  usageModal.hidden = true;
-  usageBtn.focus();
+function clearDailyHover() {
+  const h = document.querySelector('.daily-hover');
+  if (h) h.setAttribute('visibility', 'hidden');
+  hideUsageTip();
 }
 
-usageBtn.addEventListener('click', openUsage);
-usageClose.addEventListener('click', closeUsage);
-usageModal.addEventListener('click', (event) => {
-  if (event.target === usageModal) closeUsage();
+function renderDailyTable() {
+  const tableEl = document.getElementById('dailyTable');
+  if (!tableEl) return;
+  const rows = getDailyDays().slice().reverse();
+  const agents = shownUsageAgents();
+  tableEl.innerHTML = `<table><thead><tr><th>Day</th>${agents.map((x) => `<th class="num">${escHtml(x.name)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>${rows
+    .map(
+      (r) =>
+        `<tr><td>${dLong(r.date)}</td>${agents.map((x) => `<td class="num">${r[x.id] === null ? 'Not collected' : r[x.id] ? fullTokens(r[x.id]) : '—'}</td>`).join('')}<td class="num mono">${uncollectedAgents(r).length === agents.length && agents.length > 0 ? '—' : fullTokens(dayTotal(r))}</td></tr>`,
+    )
+    .join('')}</tbody></table>`;
+}
+
+function formatErrorCode(code, reason) {
+  switch (code) {
+    case 'timed_out':
+      return 'Timed out';
+    case 'binary_unavailable':
+      return 'ccusage not found';
+    case 'nonzero_exit':
+      return 'Process error';
+    case 'output_too_large':
+      return 'Output too large';
+    case 'invalid_output':
+      return 'Invalid output';
+    case 'not_opted_in':
+      return 'Not opted in';
+    default:
+      return reason || 'Error';
+  }
+}
+
+function renderRank() {
+  const rankEl = document.getElementById('rank');
+  if (!rankEl) return;
+  const rows = getDailyDays();
+  const totals = USAGE_AGENTS.map((a) => [
+    a,
+    usageHiddenAgents.has(a.id) ? null : sumAgent(rows, a.id),
+  ]);
+  const shownT = totals.filter(([, v]) => v !== null);
+  const all = shownT.reduce((s, [, v]) => s + v, 0) || 1;
+  const max = Math.max(...shownT.map(([, v]) => v), 1);
+  shownT.sort((x, y) => y[1] - x[1]);
+
+  rankEl.innerHTML = shownT
+    .map(([a, v]) => {
+      const pct = Math.round((v / all) * 100);
+      const isPartial = isAgentPartial(a.id);
+      const agentReport = usageAgentReport(a.id);
+      const isLoading = loadingAgentIds.has(a.id);
+      const isError = agentReport?.status === 'error';
+      const isAvailable = agentReport?.status === 'available';
+      const cov = agentReport?.coverage;
+      const notItemized = isAvailable && !agentReport.itemized;
+      const through =
+        isAvailable &&
+        cov?.dataThrough &&
+        cov.dataThrough < tokenUsageReport.range.until
+          ? cov.dataThrough
+          : null;
+
+      // One badge, most important first.
+      let badge = '';
+      if (isPartial) {
+        badge = `<span class="partial" title="${escHtml(`${a.name} logs start ${fmtDate(cov.earliestDate)}, after this range begins`)}">Partial</span>`;
+      } else if (through) {
+        badge = `<span class="partial" title="${escHtml(`Not collected after ${fmtDate(through)} yet`)}">Thru ${escHtml(fmtDate(through))}</span>`;
+      } else if (isAvailable && cov?.noActivity) {
+        badge = `<span class="partial" title="${escHtml(`No ${a.name} logs found in the last 180 days`)}">No activity</span>`;
+      } else if (notItemized) {
+        badge =
+          '<span class="partial" style="border-color:var(--border);color:var(--text-soft)" title="Parts don’t add up to the total">Not itemized</span>';
+      }
+
+      let valDisplay = `${compactTokens(v)}<small>${v / all < 0.01 && v > 0 ? '<1' : pct}%</small>`;
+      if (isLoading) {
+        valDisplay = `<span style="color:var(--text-soft)">Loading…</span>`;
+      } else if (isError) {
+        valDisplay = `<span class="delta na" style="font-size:11px">${escHtml(formatErrorCode(agentReport.errorCode, agentReport.errorReason))}</span>`;
+      }
+
+      return `<div class="rank-row" tabindex="0" data-id="${a.id}" aria-label="${escHtml(a.name)}: ${fullTokens(v)} tokens, ${pct} percent">
+        <div class="rank-name"><i class="sw" style="background:${a.color}"></i>${escHtml(a.name)}${badge}</div>
+        <div class="rank-track"><div class="rank-bar" style="width:${isError || isLoading ? 0 : (v / max) * 100}%;background:${a.color}"></div></div>
+        <div class="rank-val">${valDisplay}</div>
+      </div>`;
+    })
+    .join('');
+}
+
+function renderHeat() {
+  const el = document.getElementById('heat');
+  if (!el) return;
+  const rows = getCalendarDays();
+  const today = rows[rows.length - 1] ?? { date: new Date() };
+  const mondayAge = (today.date.getUTCDay() + 6) % 7;
+  const startAge = mondayAge + 7 * 12; // 13 weeks, Monday-aligned
+  const cells = rows.filter((r) => r.age <= startAge);
+  const vals = cells
+    .filter((r) => uncollectedAgents(r).length === 0)
+    .map(dayTotal)
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b);
+  const q = (p) =>
+    vals[Math.min(vals.length - 1, Math.floor(p * vals.length))] || 0;
+  const cuts = [q(0.25), q(0.5), q(0.75)];
+  const bin = (v) =>
+    v <= 0 ? 0 : v <= cuts[0] ? 1 : v <= cuts[1] ? 2 : v <= cuts[2] ? 3 : 4;
+
+  const weeks = 13;
+  const gap = 3;
+  const left = 30;
+  const top = 18;
+  const avail = el.parentElement?.clientWidth || 520;
+  const cs = Math.max(
+    11,
+    Math.min(34, Math.floor((avail - left) / weeks) - gap),
+  );
+  const W = left + weeks * (cs + gap);
+  const H = top + 7 * (cs + gap);
+
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="width:${W}px" aria-hidden="true">`;
+  ['Mon', '', 'Wed', '', 'Fri', '', ''].forEach((d, i) => {
+    if (d)
+      s += `<text class="tick" x="0" y="${top + i * (cs + gap) + cs - 3}">${d}</text>`;
+  });
+
+  let lastMonth = -1;
+  let lastLabelX = -99;
+  el._cells = [];
+
+  cells.forEach((r) => {
+    const idx = startAge - r.age;
+    const wk = Math.floor(idx / 7);
+    const dow = idx % 7;
+    const x = left + wk * (cs + gap);
+    const yy = top + dow * (cs + gap);
+    if (dow === 0 && r.date.getUTCMonth() !== lastMonth) {
+      lastMonth = r.date.getUTCMonth();
+      if (x - lastLabelX >= 30) {
+        s += `<text class="tick" x="${x}" y="10">${r.date.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })}</text>`;
+        lastLabelX = x;
+      }
+    }
+    const v = dayTotal(r);
+    const missing = uncollectedAgents(r);
+    // A day with no collected value is outlined, never filled as "no activity".
+    s +=
+      missing.length > 0 && v === 0
+        ? `<rect data-i="${el._cells.length}" x="${x + 0.5}" y="${yy + 0.5}" width="${cs - 1}" height="${cs - 1}" rx="2.5" fill="none" stroke="var(--axis)" stroke-dasharray="2 2"/>`
+        : `<rect data-i="${el._cells.length}" x="${x}" y="${yy}" width="${cs}" height="${cs}" rx="2.5" fill="${USAGE_HEAT[bin(v)]}"/>`;
+    el._cells.push({ r, v, x, y: yy });
+  });
+
+  s += `<rect class="heat-sel" width="${cs + 2}" height="${cs + 2}" rx="3" fill="none" stroke="var(--text)" stroke-width="1.5" visibility="hidden"/></svg>`;
+  el.innerHTML = s;
+}
+
+function heatTipAt(i, x, y) {
+  const el = document.getElementById('heat');
+  if (!el || !el._cells) return;
+  const c = el._cells[i];
+  if (!c) return;
+  const sel = el.querySelector('.heat-sel');
+  if (sel) {
+    sel.setAttribute('x', c.x - 1);
+    sel.setAttribute('y', c.y - 1);
+    sel.setAttribute('visibility', 'visible');
+  }
+  const pairs = shownUsageAgents()
+    .filter((a) => c.r[a.id] === null || (c.r[a.id] || 0) > 0)
+    .map((a) => [a, c.r[a.id]]);
+  let body = '<div class="r"><span>No agent activity</span></div>';
+  if (c.v) {
+    body = tipRowsHtml(pairs, 'Total', c.v);
+  } else if (uncollectedAgents(c.r).length > 0) {
+    body = '<div class="r"><span>Not collected yet</span></div>';
+  }
+  showUsageTip(`<h4>${dLong(c.r.date)}</h4>${body}`, x, y);
+}
+
+function quotaMeter(pctLeft, level) {
+  const fill = level === 'warn' ? 'var(--warning)' : 'var(--brand-lime)';
+  const track =
+    level === 'warn' ? 'rgb(230 186 98 / 18%)' : 'rgb(205 248 117 / 14%)';
+  return `<div class="meter" style="background:${track}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctLeft}"><div style="width:${pctLeft}%;background:${fill}"></div></div>`;
+}
+
+function renderQuota() {
+  const el = document.getElementById('quota');
+  if (!el) return;
+
+  const codexPlan = latestLivePlans.find((p) => p.id === 'codex');
+  const claudePlan = latestLivePlans.find((p) => p.id === 'claude');
+
+  // Codex writes its quota into its own session logs only while it runs, and
+  // Rirei never asks OpenAI directly. A reading is therefore live, an older
+  // reading of a window that is still running, or a window that has reset
+  // since the reading, whose old numbers no longer apply.
+  const codexCapturedAt = codexPlan?.capturedAt;
+  const codexWindow = (win) => {
+    if (!win) return null;
+    let left = win.remainingPercentage;
+    if (left == null && win.usedPercentage != null)
+      left = 100 - win.usedPercentage;
+    // Never a placeholder: a window Codex hasn't reported shows as not reported.
+    if (left == null) return null;
+    const resetMs = Date.parse(win.resetsAt ?? '');
+    let state = win.status === 'available' ? 'live' : 'asOf';
+    if (!Number.isNaN(resetMs) && resetMs <= Date.now()) state = 'reset';
+    return {
+      left: Math.max(0, Math.min(100, Math.round(left))),
+      resetsAt: win.resetsAt,
+      state,
+    };
+  };
+
+  const iconOk =
+    '<svg viewBox="0 0 24 24" style="stroke:var(--muted)"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+  const iconWarn =
+    '<svg viewBox="0 0 24 24"><path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4M12 17h.01"/></svg>';
+  const iconNa =
+    '<svg viewBox="0 0 24 24" style="stroke:var(--muted)"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>';
+
+  const isClaudeReported =
+    claudePlan &&
+    claudePlan.status !== 'error' &&
+    claudePlan.statusReason !== 'collector_error' &&
+    (claudePlan.fiveHour || claudePlan.week);
+
+  const codexRow = (label, w) => {
+    const name = `<span class="q-name"><i class="sw" style="background:${USAGE_BY_ID.codex.color}"></i>Codex <em>${label}</em></span>`;
+    if (!w) {
+      return `<div class="q-row">
+      <div class="q-top">${name}<span class="q-val na">Not reported</span></div>
+      <div class="meter" style="background:var(--heat-none)"></div>
+      <div class="q-foot">${iconNa}<span>Codex hasn’t reported this window yet.</span></div>
+    </div>`;
+    }
+    const lastReading = codexCapturedAt
+      ? formatExactTimestamp(codexCapturedAt)
+      : 'unknown';
+    if (w.state === 'reset') {
+      return `<div class="q-row">
+      <div class="q-top">${name}<span class="q-val na">Reset since last reading</span></div>
+      <div class="meter" style="background:var(--heat-none)"></div>
+      <div class="q-foot">${iconNa}<span>Last reading ${escHtml(lastReading)} (${w.left}% left). This window has reset since; Codex reports new numbers the next time you use it.</span></div>
+    </div>`;
+    }
+    const warn = w.left < 20;
+    const resets = w.resetsAt
+      ? `Resets ${formatExactTimestamp(w.resetsAt)}`
+      : 'Reset time not reported';
+    const foot =
+      w.state === 'live'
+        ? resets
+        : `As of ${escHtml(codexCapturedAt ? relTime(codexCapturedAt) : 'an earlier reading')} · ${resets}`;
+    return `<div class="q-row">
+      <div class="q-top">${name}<span class="q-val">${w.left}% left</span></div>
+      ${quotaMeter(w.left, warn ? 'warn' : 'ok')}
+      <div class="q-foot ${warn ? 'warn' : ''}">${warn ? iconWarn : iconOk}<span>${foot}</span></div>
+    </div>`;
+  };
+
+  el.innerHTML = `
+    ${codexRow('5-hour window', codexWindow(codexPlan?.fiveHour))}
+    ${codexRow('Weekly', codexWindow(codexPlan?.week))}
+    <div class="q-divider"></div>
+    <div class="q-row">
+      <div class="q-top"><span class="q-name"><i class="sw" style="background:${USAGE_BY_ID.claude.color}"></i>Claude <em>5-hour · weekly</em></span><span class="q-val na">${
+        isClaudeReported ? 'Reported' : 'Not reported'
+      }</span></div>
+      <div class="meter" style="background:var(--heat-none)"></div>
+      <div class="q-foot">${iconNa}<span>${
+        isClaudeReported
+          ? 'Live Claude rate limit telemetry available.'
+          : 'Claude Code isn’t sending quota data right now. Token history above still works.'
+      }</span></div>
+    </div>
+    <div class="q-row">
+      <div class="q-top"><span class="q-name"><i class="sw" style="background:${USAGE_BY_ID.opencode.color}"></i>OpenCode · Antigravity · Gemini</span><span class="q-val na">Unsupported</span></div>
+      <div class="q-foot">${iconNa}<span>These agents don’t publish quota. Rirei shows tokens, never a guessed percentage.</span></div>
+    </div>`;
+}
+
+function renderModels() {
+  const el = document.getElementById('models');
+  if (!el || !tokenUsageReport) return;
+
+  const modelMap = new Map();
+  for (const a of shownUsageAgents()) {
+    const rep = tokenUsageReport.agents.find((x) => x.id === a.id);
+    if (!rep) continue;
+    for (const m of rep.models) {
+      const key = `${a.id}:${m.model}`;
+      modelMap.set(key, {
+        agent: a,
+        modelName: m.model,
+        tokens: m.totalTokens,
+      });
+    }
+  }
+
+  const list = Array.from(modelMap.values())
+    .filter((x) => x.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens);
+  const all = list.reduce((s, x) => s + x.tokens, 0) || 1;
+  const max = Math.max(...list.map((x) => x.tokens), 1);
+
+  el.innerHTML = `<table><thead><tr><th>Model</th><th>Agent</th><th class="num">Tokens</th><th>Share</th></tr></thead><tbody>${
+    list.length === 0
+      ? '<tr><td colspan="4">No model data for this range</td></tr>'
+      : list
+          .map(
+            (x) =>
+              `<tr><td class="mono">${escHtml(x.modelName)}</td><td><span class="who"><i class="sw" style="background:${x.agent.color}"></i>${escHtml(x.agent.name)}</span></td><td class="num">${fullTokens(x.tokens)}</td><td><div class="share"><div class="share-track"><div class="share-bar" style="width:${(x.tokens / max) * 100}%;background:${x.agent.color}"></div></div><em>${x.tokens / all < 0.01 ? '<1' : Math.round((x.tokens / all) * 100)}%</em></div></td></tr>`,
+          )
+          .join('')
+  }</tbody></table>`;
+}
+
+function renderBreakdown() {
+  const el = document.getElementById('breakdown');
+  if (!el || !tokenUsageReport) return;
+
+  const rows = getDailyDays();
+  const total = rows.reduce((s, r) => s + dayTotal(r), 0);
+
+  const shownAgents = shownUsageAgents();
+
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let input = 0;
+  let output = 0;
+  // Parts + "Not broken down" always add up to the total.
+  let notBrokenDown = 0;
+  const remainderAgents = [];
+  const mismatchAgents = [];
+
+  for (const a of shownAgents) {
+    const rep = usageAgentReport(a.id);
+    if (rep?.status !== 'available') continue;
+    if (rep.components && rep.itemized !== false) {
+      input += rep.components.input ?? 0;
+      output += rep.components.output ?? 0;
+      cacheWrite += rep.components.cacheCreation ?? 0;
+      cacheRead += rep.components.cacheRead ?? 0;
+    }
+    const rest =
+      rep.unitemizedTokens ?? (rep.itemized === false ? rep.totalTokens : 0);
+    if (rest > 0) {
+      notBrokenDown += rest;
+      (rep.itemized === false ? mismatchAgents : remainderAgents).push(a.name);
+    }
+  }
+
+  const parts = [
+    ['Cache read', cacheRead],
+    ['Input', input],
+    ['Cache write', cacheWrite],
+    ['Output', output],
+  ];
+  const max = Math.max(...parts.map((p) => p[1]), notBrokenDown, 1);
+
+  // Section 2.4: Reasoning from reasoningOutputTokens where ccusage reports it (Codex)
+  let reasoning = 0;
+  let hasReasoning = false;
+  const shownIds = new Set(shownAgents.map((a) => a.id));
+  if (shownIds.has('codex')) {
+    const codexRep = tokenUsageReport.agents.find((x) => x.id === 'codex');
+    if (codexRep?.components?.reasoning != null) {
+      reasoning = codexRep.components.reasoning;
+      hasReasoning = true;
+    }
+  }
+
+  let html = parts
+    .map(
+      ([n, v]) =>
+        `<div class="bd-row"><div class="bd-name">${escHtml(n)}</div><div class="bd-track"><div class="bd-bar" style="width:${(v / max) * 100}%"></div></div><div class="bd-val">${compactTokens(v)}</div></div>`,
+    )
+    .join('');
+
+  html += `<div class="bd-row sub"><div class="bd-name">incl. reasoning</div><div class="bd-track"><div class="bd-bar" style="width:${hasReasoning && reasoning ? (reasoning / max) * 100 : 0}%"></div></div><div class="bd-val">${hasReasoning && reasoning ? compactTokens(reasoning) : '—'}</div></div>`;
+  if (notBrokenDown > 0) {
+    html += `<div class="bd-row"><div class="bd-name">Not broken down</div><div class="bd-track"><div class="bd-bar" style="width:${(notBrokenDown / max) * 100}%;background:var(--axis)"></div></div><div class="bd-val">${compactTokens(notBrokenDown)}</div></div>`;
+  }
+  html += `<div class="bd-total"><span>Total</span><b>${fullTokens(total)}</b></div>`;
+  const cachePct = total > 0 ? Math.round((cacheRead / total) * 100) : 0;
+  const notes = [];
+  if (remainderAgents.length > 0) {
+    const one = remainderAgents.length === 1;
+    notes.push(
+      `${joinNames(remainderAgents)} report${one ? 's a total' : ' totals'} slightly above ${one ? 'its' : 'their'} parts; the difference is shown as Not broken down.`,
+    );
+  }
+  if (mismatchAgents.length > 0) {
+    const one = mismatchAgents.length === 1;
+    notes.push(
+      `${joinNames(mismatchAgents)} parts don’t add up to ${one ? 'its' : 'their'} total, so ${one ? 'it is' : 'they are'} shown as Not broken down.`,
+    );
+  }
+  notes.push(
+    `Reasoning is already inside output (Codex reports it separately), so it isn’t added again. ${cachePct}% of tokens were served from cache.`,
+  );
+  html += `<div class="bd-note">${escHtml(notes.join(' '))}</div>`;
+  el.innerHTML = html;
+}
+
+function renderSessions() {
+  const el = document.getElementById('sessions');
+  if (!el || !tokenUsageReport) return;
+
+  const shownSet = new Set(shownUsageAgents().map((a) => a.id));
+  const list = tokenUsageReport.sessions.filter((s) => shownSet.has(s.agent));
+  const untimed = shownUsageAgents()
+    .filter((a) => (usageAgentReport(a.id)?.sessionsUntimed ?? 0) > 0)
+    .map((a) => a.name);
+  const unread = shownUsageAgents()
+    .filter((a) => {
+      const rep = usageAgentReport(a.id);
+      return rep?.status === 'available' && rep.sessions == null;
+    })
+    .map((a) => a.name);
+
+  el.innerHTML = `<table><thead><tr><th>Agent</th><th>Project</th><th>Models</th><th class="num">Tokens</th><th>Last activity</th></tr></thead><tbody>${
+    list.length === 0
+      ? '<tr><td colspan="5">No sessions in this range</td></tr>'
+      : list
+          .map((s) => {
+            const a = USAGE_BY_ID[s.agent] ?? { name: s.agent, color: '#888' };
+            const models = s.models.join(', ') || '—';
+            const when = s.live
+              ? '<span class="live">Active now</span>'
+              : s.lastActivity
+                ? relTime(s.lastActivity)
+                : '—';
+            return `<tr><td><span class="who"><i class="sw" style="background:${a.color}"></i>${escHtml(a.name)}</span></td><td class="mono">${escHtml(s.projectLabel)}</td><td>${escHtml(models)}</td><td class="num">${fullTokens(s.totalTokens)}</td><td>${when}</td></tr>`;
+          })
+          .join('')
+  }</tbody></table>${
+    untimed.length > 0
+      ? `<div class="bd-note">${escHtml(`${joinNames(untimed)} ${untimed.length === 1 ? 'doesn’t' : 'don’t'} record session times, so ${untimed.length === 1 ? 'its' : 'their'} sessions can’t be placed in this range.`)}</div>`
+      : ''
+  }${
+    unread.length > 0
+      ? `<div class="bd-note">${escHtml(`Couldn’t read ${joinNames(unread)} sessions in the last scan; they’re left out, not counted as zero.`)}</div>`
+      : ''
+  }`;
+}
+
+function renderUsageDashboard() {
+  hideUsageTip();
+  renderHero();
+  renderTiles();
+  renderDaily();
+  renderRank();
+  renderHeat();
+  renderQuota();
+  renderModels();
+  renderBreakdown();
+  renderSessions();
+}
+
+let usageLoadSeq = 0;
+const loadingAgentIds = new Set();
+
+// "Updated" is when the shown data was last scanned (the oldest capture among
+// shown agents), not when this report was built from the cache.
+function updateFreshnessTime() {
+  const upd = document.getElementById('updated');
+  if (!upd || !tokenUsageReport) return;
+  let oldest = null;
+  for (const a of shownUsageAgents()) {
+    const rep = usageAgentReport(a.id);
+    const at = rep?.status === 'available' ? Date.parse(rep.capturedAt) : NaN;
+    if (!Number.isNaN(at) && (oldest == null || at < oldest)) oldest = at;
+  }
+  upd.textContent =
+    oldest == null ? 'Not scanned yet' : `Updated ${relTime(new Date(oldest))}`;
+}
+
+async function loadUsageDashboard(forceRefresh = false) {
+  const seq = ++usageLoadSeq;
+
+  const optInRes = await window.relay.usageOptIn();
+  if (seq !== usageLoadSeq) return;
+  const isOptedIn = optInRes?.optedIn === true;
+
+  if (!isOptedIn) {
+    if (usageOptInCard) usageOptInCard.hidden = false;
+    if (usageDashWrapper) usageDashWrapper.hidden = true;
+    return;
+  }
+
+  if (usageOptInCard) usageOptInCard.hidden = true;
+  if (usageDashWrapper) usageDashWrapper.hidden = false;
+
+  // 1. Initial fast cache-only read (Section 3.8 & 3.9)
+  const res = await window.relay.usageTokens({
+    days: usageRangeDays,
+    refresh: false,
+  });
+  if (seq !== usageLoadSeq) return;
+
+  if (!res?.ok || !res.data) {
+    // Section 4.4: Failure branch
+    const errText = res?.output || 'Could not load token usage data.';
+    const heroValue = document.getElementById('heroValue');
+    const heroSub = document.getElementById('heroSub');
+    if (heroValue) heroValue.textContent = 'Unavailable';
+    if (heroSub) heroSub.textContent = errText;
+    const upd = document.getElementById('updated');
+    if (upd) upd.textContent = 'Failed to load';
+    return;
+  }
+
+  tokenUsageReport = res.data;
+  renderUsageDashboard();
+  updateFreshnessTime();
+
+  // 2. Progressive refresh (Section 3.9)
+  const staleAgents = tokenUsageReport.agents.filter(
+    (a) => forceRefresh || a.freshness !== 'fresh',
+  );
+
+  if (staleAgents.length > 0) {
+    for (const a of staleAgents) {
+      loadingAgentIds.add(a.id);
+    }
+    renderRank();
+
+    const g = document.getElementById('dash');
+    if (g) g.classList.add('refreshing');
+    const upd = document.getElementById('updated');
+    if (upd) upd.textContent = 'Scanning agent logs…';
+
+    await Promise.all(
+      staleAgents.map(async (a) => {
+        try {
+          const aRes = await window.relay.usageTokens({
+            days: usageRangeDays,
+            refresh: true,
+            agent: a.id,
+          });
+          if (seq !== usageLoadSeq) return;
+          if (aRes?.ok && aRes.data) {
+            tokenUsageReport = aRes.data;
+            renderUsageDashboard();
+            updateFreshnessTime();
+          }
+        } finally {
+          loadingAgentIds.delete(a.id);
+          renderRank();
+        }
+      }),
+    );
+
+    if (seq === usageLoadSeq) {
+      if (g) g.classList.remove('refreshing');
+      updateFreshnessTime();
+    }
+  }
+}
+
+function closeUsageView() {
+  const commandBand = document.querySelector('.command-band');
+  const mainContent = document.querySelector('#mainContent');
+  if (usageView) usageView.hidden = true;
+  if (commandBand) commandBand.hidden = false;
+  if (mainContent) mainContent.hidden = false;
+  usageBtn?.classList.remove('is-active');
+  usageBtn?.setAttribute('aria-pressed', 'false');
+  hideUsageTip();
+  // Section 4.5: Terminal re-fit
+  if (typeof syncSize === 'function') {
+    syncSize();
+  }
+}
+
+async function openUsageView() {
+  const commandBand = document.querySelector('.command-band');
+  const mainContent = document.querySelector('#mainContent');
+  if (commandBand) commandBand.hidden = true;
+  if (mainContent) mainContent.hidden = true;
+  if (usageView) usageView.hidden = false;
+
+  for (const item of railPanelItems) {
+    item.classList.remove('is-active');
+    item.setAttribute('aria-pressed', 'false');
+  }
+  usageBtn?.classList.add('is-active');
+  usageBtn?.setAttribute('aria-pressed', 'true');
+  setDrawerOpen(false);
+
+  // Plan windows are machine-wide: read them on every open, project or not.
+  window.relay.usage(project ? { project } : {}).then((res) => {
+    if (res?.ok && res.data?.plans) {
+      latestLivePlans = res.data.plans;
+      if (usageView && !usageView.hidden) renderQuota();
+    }
+  });
+
+  await loadUsageDashboard();
+}
+
+usageBtn?.addEventListener('click', openUsageView);
+
+enableUsageBtn?.addEventListener('click', async () => {
+  await window.relay.setUsageOptIn({ optIn: true });
+  await loadUsageDashboard(true);
 });
+
+// Setup filter row listeners once
+const agentChipsEl = document.getElementById('agentChips');
+if (agentChipsEl) {
+  agentChipsEl.innerHTML = USAGE_AGENTS.map(
+    (a) =>
+      `<button class="chip" data-id="${a.id}" aria-pressed="true"><i style="background:${a.color}"></i>${escHtml(a.name)}</button>`,
+  ).join('');
+  agentChipsEl.addEventListener('click', (e) => {
+    const b = e.target.closest('.chip');
+    if (!b) return;
+    const id = b.dataset.id;
+    if (usageHiddenAgents.has(id)) {
+      usageHiddenAgents.delete(id);
+    } else if (shownUsageAgents().length > 1) {
+      usageHiddenAgents.add(id);
+    }
+    b.setAttribute('aria-pressed', String(!usageHiddenAgents.has(id)));
+    renderUsageDashboard();
+    if (!document.getElementById('dash')?.classList.contains('refreshing'))
+      updateFreshnessTime();
+  });
+}
+
+document.getElementById('range')?.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || !b.dataset.days) return;
+  usageRangeDays = Number(b.dataset.days);
+  for (const x of document.querySelectorAll('#range button')) {
+    x.setAttribute('aria-pressed', String(x === b));
+  }
+  void loadUsageDashboard();
+});
+
+document.getElementById('refresh')?.addEventListener('click', () => {
+  void loadUsageDashboard(true);
+});
+
+document.getElementById('dailyToggle')?.addEventListener('click', (e) => {
+  const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+  e.currentTarget.setAttribute('aria-pressed', String(on));
+  e.currentTarget.textContent = on ? 'Chart' : 'Table';
+  const dailyChart = document.getElementById('daily');
+  const dailyLegend = document.getElementById('dailyLegend');
+  const dailyTable = document.getElementById('dailyTable');
+  if (dailyChart) dailyChart.hidden = on;
+  if (dailyLegend) dailyLegend.hidden = on;
+  if (dailyTable) dailyTable.hidden = !on;
+});
+
+// Daily chart hover & keyboard
+(() => {
+  const el = document.getElementById('daily');
+  if (!el) return;
+  el.addEventListener('mousemove', (e) => {
+    if (!el._geo) return;
+    const { m, band, rows } = el._geo;
+    const box = el.getBoundingClientRect();
+    const svg = el.querySelector('svg');
+    const scale = box.width / (svg?.viewBox.baseVal.width || box.width);
+    const x = (e.clientX - box.left) / scale - m.l;
+    const i = Math.floor(x / band);
+    if (i < 0 || i >= rows.length) return clearDailyHover();
+    dailyNavIndex = i;
+    dailyTipAt(i, e.clientX, e.clientY);
+  });
+  el.addEventListener('mouseleave', clearDailyHover);
+  el.addEventListener('blur', clearDailyHover);
+  el.addEventListener('keydown', (e) => {
+    if (!el._geo) return;
+    const n = el._geo.rows.length;
+    if (e.key === 'ArrowRight')
+      dailyNavIndex = Math.min(n - 1, dailyNavIndex + 1);
+    else if (e.key === 'ArrowLeft')
+      dailyNavIndex =
+        dailyNavIndex < 0 ? n - 1 : Math.max(0, dailyNavIndex - 1);
+    else if (e.key === 'Home') dailyNavIndex = 0;
+    else if (e.key === 'End') dailyNavIndex = n - 1;
+    else return;
+    e.preventDefault();
+    const box = el.getBoundingClientRect();
+    const { m, band } = el._geo;
+    const scale =
+      box.width / (el.querySelector('svg')?.viewBox.baseVal.width || box.width);
+    dailyTipAt(
+      dailyNavIndex,
+      box.left + (m.l + band * dailyNavIndex + band / 2) * scale,
+      box.top + 40,
+    );
+  });
+})();
+
+// Ranking focus & hover
+(() => {
+  const box = document.getElementById('rank');
+  if (!box) return;
+  const show = (row, x, y) => {
+    const a = USAGE_BY_ID[row.dataset.id];
+    if (!a) return;
+    const rows = getDailyDays();
+    const v = sumAgent(rows, a.id);
+    const sess =
+      tokenUsageReport?.agents.find((x) => x.id === a.id)?.sessions ?? 0;
+    const active = rows.filter((r) => (r[a.id] || 0) > 0).length;
+    showUsageTip(
+      `<h4>${escHtml(a.name)}</h4><div class="r"><span>Tokens</span><b>${fullTokens(v)}</b></div><div class="r"><span>Sessions</span><b>${fullTokens(sess)}</b></div><div class="r"><span>Active days</span><b>${active} of ${rows.length}</b></div>`,
+      x,
+      y,
+    );
+    box
+      .querySelectorAll('.rank-row')
+      .forEach((r) => r.classList.toggle('hot', r === row));
+  };
+  box.addEventListener('mousemove', (e) => {
+    const row = e.target.closest('.rank-row');
+    if (row) show(row, e.clientX, e.clientY);
+  });
+  box.addEventListener('mouseleave', () => {
+    hideUsageTip();
+    box.querySelectorAll('.rank-row').forEach((r) => r.classList.remove('hot'));
+  });
+  box.addEventListener('focusin', (e) => {
+    const row = e.target.closest('.rank-row');
+    if (row) {
+      const b = row.getBoundingClientRect();
+      show(row, b.right - 40, b.top);
+    }
+  });
+  box.addEventListener('focusout', () => {
+    hideUsageTip();
+    box.querySelectorAll('.rank-row').forEach((r) => r.classList.remove('hot'));
+  });
+})();
+
+// Heatmap hover & keyboard
+(() => {
+  const el = document.getElementById('heat');
+  if (!el) return;
+  const clear = () => {
+    const s = el.querySelector('.heat-sel');
+    if (s) s.setAttribute('visibility', 'hidden');
+    hideUsageTip();
+  };
+  el.addEventListener('mousemove', (e) => {
+    const t = e.target.closest('rect[data-i]');
+    if (!t) return clear();
+    heatNavIndex = Number(t.dataset.i);
+    heatTipAt(heatNavIndex, e.clientX, e.clientY);
+  });
+  el.addEventListener('mouseleave', clear);
+  el.addEventListener('blur', clear);
+  el.addEventListener('keydown', (e) => {
+    if (!el._cells) return;
+    const n = el._cells.length;
+    const step = {
+      ArrowUp: -1,
+      ArrowDown: 1,
+      ArrowLeft: -7,
+      ArrowRight: 7,
+    }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    heatNavIndex =
+      heatNavIndex < 0
+        ? n - 1
+        : Math.max(0, Math.min(n - 1, heatNavIndex + step));
+    const c = el._cells[heatNavIndex];
+    if (c) {
+      const svg = el.querySelector('svg')?.getBoundingClientRect();
+      if (svg) heatTipAt(heatNavIndex, svg.left + c.x + 8, svg.top + c.y);
+    }
+  });
+})();
+
+const dailyResizeObs = document.getElementById('daily');
+if (dailyResizeObs && typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => renderDaily()).observe(dailyResizeObs);
+}
+const heatResizeParent = document.getElementById('heat')?.parentElement;
+if (heatResizeParent && typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => renderHeat()).observe(heatResizeParent);
+}
 
 /* ---- launch and task-record drawer ---- */
 
@@ -2460,6 +3652,8 @@ function setDrawerOpen(open) {
 }
 
 function selectRailPanel(selected) {
+  // Every rail entry belongs to the task stage, so leave Usage first.
+  if (usageView && !usageView.hidden) closeUsageView();
   for (const item of railPanelItems) {
     const active = item === selected;
     item.classList.toggle('is-active', active);
@@ -2653,6 +3847,11 @@ profileSave.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && usageView && !usageView.hidden) {
+    closeUsageView();
+    event.preventDefault();
+    return;
+  }
   const modal = Array.from(document.querySelectorAll('.modal'))
     .filter((candidate) => !candidate.hidden)
     .at(-1);
@@ -2662,7 +3861,6 @@ window.addEventListener('keydown', (event) => {
       onboardingModal: closeOnboarding,
       launchDialogModal: closeLaunchDialog,
       timelineModal: closeTimeline,
-      usageModal: closeUsage,
       historyModal: closeHistory,
       checkpointModal: closeCheckpointViewer,
       profileModal: closeProfile,
@@ -2715,15 +3913,10 @@ const removeTerminalControlListener = window.relay.onTerminalControl?.(
   },
 );
 const removeUsageUpdateListener = window.relay.onUsageUpdate((data) => {
-  if (!usageModal.hidden) {
-    const incomingCapturedAt = Math.max(
-      0,
-      ...data.plans.map((plan) => Date.parse(plan.capturedAt ?? '') || 0),
-    );
-    if (incomingCapturedAt >= usageCapturedAt) {
-      usageModal.setAttribute('aria-busy', 'false');
-      usageSummary.classList.remove('loading-status');
-      renderUsage(data);
+  if (data?.plans) {
+    latestLivePlans = data.plans;
+    if (usageView && !usageView.hidden) {
+      renderQuota();
     }
   }
 });

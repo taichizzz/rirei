@@ -105,3 +105,32 @@ only path that executes it, and only when `command` is present.
 - All numeric limits must be positive integers; booleans must be real booleans.
 - After editing by hand, run any Relay command in the repo — a schema error means the edit
   was rejected and nothing was loaded.
+
+## Machine-wide settings (`rireiDataHome()`)
+
+In addition to repository-level `.relay/config.json`, Rirei stores machine-wide configuration and caches under the user's data directory (resolved via `rireiDataHome()`):
+
+- **macOS**: `~/Library/Application Support/Rirei/`
+- **Linux**: `~/.local/share/rirei/` (or `$XDG_DATA_HOME/rirei/`)
+- **Windows**: `%LOCALAPPDATA%\Rirei\`
+
+### Token usage opt-in (`token-usage-opt-in.json`)
+
+Stores the user's explicit consent state for machine-wide token analytics:
+
+```json
+{
+  "optIn": true,
+  "updatedAt": "2026-09-24T12:00:00.000Z"
+}
+```
+
+Manage via `relay usage tokens --opt-in` or `--opt-out`.
+
+### Token usage cache (`token-usage-cache.json`)
+
+Caches 180-day history per agent (`AgentCacheSnapshot`) so standard ranges (7D, 30D, 90D) and preceding equal-length comparison windows are derived dynamically and instantly without subprocess execution. Per-agent directory locks serialize concurrent scans and prevent duplicate executions. If a scan completes within 15 seconds, the cached snapshot is reused. Use `--refresh` on CLI commands or the desktop Refresh button to force a new log scan.
+
+- **Competing refreshes wait.** A refresh that finds another scan of the same agent running waits for it (up to two scan timeouts plus 15 seconds: 75 seconds for most agents, 255 for Antigravity) and then reuses its result. If the other scan still holds the lock after that, the last good snapshot is kept and the rest of the report is returned.
+- **One timezone per cache.** Daily totals are grouped in the timezone they were collected in, so the cache records it. A read in a different timezone treats the cache as empty, which makes the dashboard rescan, and a refresh in the new timezone drops snapshots from the old one instead of mixing them.
+- **Failed session scans stay unknown.** When ccusage's session listing fails but the daily report succeeds, `sessionCount` is `null` and the report's `sessions` for that agent is `null`, not zero.

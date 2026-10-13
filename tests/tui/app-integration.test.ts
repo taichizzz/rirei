@@ -4,6 +4,7 @@ import { createApp } from '../../src/tui/app.js';
 import type { DashboardData } from '../../src/tui/state.js';
 import { buildThreadsData } from '../../src/tui/threads.js';
 import type { ThreadsJournal } from '../../src/messages/schema.js';
+import type { TokenUsageReport } from '../../src/token-usage/schema.js';
 import * as ink from 'ink';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
@@ -174,6 +175,7 @@ function renderDashboard(
     branchLabel: string;
     status: string;
   }> = [],
+  refreshedReport?: TokenUsageReport,
 ) {
   const stdin = new PassThrough() as PassThrough & {
     isTTY: boolean;
@@ -209,6 +211,10 @@ function renderDashboard(
   const onReplyMessage = vi.fn(async () => data.threads);
   const onMarkMessageRead = vi.fn(async () => data.threads);
   const onAcknowledgeMessage = vi.fn(async () => data.threads);
+  const onToggleTokenOptIn = vi.fn<(optIn: boolean) => Promise<void>>(
+    async () => undefined,
+  );
+  const onRefreshTokens = vi.fn(async () => refreshedReport ?? null);
   const App = createApp(ink, React);
   const instance = ink.render(
     React.createElement(App, {
@@ -227,6 +233,8 @@ function renderDashboard(
       onReplyMessage,
       onMarkMessageRead,
       onAcknowledgeMessage,
+      onToggleTokenOptIn,
+      ...(refreshedReport ? { onRefreshTokens } : {}),
       onQuit: () => undefined,
     }),
     {
@@ -258,6 +266,8 @@ function renderDashboard(
     onSendMessage,
     onStop,
     onStopAll,
+    onToggleTokenOptIn,
+    onRefreshTokens,
     send,
   };
 }
@@ -474,5 +484,162 @@ describe('TUI rendered interactions', () => {
     expect(app.latestFrame()).toContain('Stop 2 active sessions');
     await app.send('\r');
     await vi.waitFor(() => expect(app.onStopAll).toHaveBeenCalledOnce());
+  });
+
+  test('renders machine-wide token analytics with agent bars and toggles opt-in', async () => {
+    const mockTokenReport: TokenUsageReport = {
+      schemaVersion: 1,
+      generatedAt: '2026-08-30T12:00:00.000Z',
+      timezone: 'UTC',
+      range: { since: '2026-08-01', until: '2026-08-30', days: 30 },
+      source: { kind: 'ccusage', version: '20.0.24' },
+      agents: [
+        {
+          id: 'claude',
+          name: 'Claude',
+          status: 'available',
+          totalTokens: 3500000,
+          daily: [],
+          models: [],
+          sessions: 12,
+          coverage: { complete: true },
+        },
+        {
+          id: 'codex',
+          name: 'Codex',
+          status: 'available',
+          totalTokens: 1500000,
+          daily: [],
+          models: [],
+          sessions: 8,
+          coverage: { complete: false, earliestDate: '2026-08-15' },
+        },
+        {
+          id: 'gemini',
+          name: 'Gemini',
+          status: 'unavailable',
+          totalTokens: null,
+          daily: [],
+          models: [],
+          sessions: null,
+          coverage: { complete: false },
+        },
+      ],
+      sessions: [],
+      totals: {
+        totalTokens: 5000000,
+        components: {
+          input: 3000000,
+          output: 500000,
+          cacheRead: 1500000,
+        },
+      },
+    };
+
+    const tokenDashboard: DashboardData = {
+      ...dashboard,
+      tokenOptIn: true,
+      tokenUsage: mockTokenReport,
+    };
+
+    const app = renderDashboard(tokenDashboard);
+
+    await app.send('u');
+    await app.send('t');
+
+    await vi.waitFor(() => {
+      const frame = app.frameContaining('TOKEN ANALYTICS');
+      expect(frame).toContain('5M TOTAL');
+      expect(frame).toContain('TOTAL: 5,000,000');
+      expect(frame).toContain('Claude');
+      expect(frame).toContain('█');
+      expect(frame).toContain('70%');
+      expect(frame).toContain('3.5M');
+      expect(frame).toContain('[COMPLETE]');
+      expect(frame).toContain('Codex');
+      expect(frame).toContain('30%');
+      expect(frame).toContain('1.5M');
+      expect(frame).toContain('[PARTIAL]');
+      expect(frame).toContain('Gemini');
+      expect(frame).toContain('[NO LOGS]');
+    });
+
+    await app.send('o');
+    await vi.waitFor(() =>
+      expect(app.onToggleTokenOptIn).toHaveBeenCalledOnce(),
+    );
+  });
+
+  function tokenReport(
+    total: number,
+    freshness: 'fresh' | 'stale',
+  ): TokenUsageReport {
+    return {
+      schemaVersion: 1,
+      generatedAt: '2026-09-30T12:00:00.000Z',
+      timezone: 'UTC',
+      range: { since: '2026-09-01', until: '2026-09-30', days: 30 },
+      source: { kind: 'ccusage', version: '20.0.24' },
+      agents: [
+        {
+          id: 'claude',
+          name: 'Claude',
+          status: 'available',
+          freshness,
+          totalTokens: total,
+          daily: [],
+          models: [],
+          sessions: 1,
+          coverage: { complete: true, dataThrough: '2026-09-30' },
+        },
+      ],
+      sessions: [],
+      totals: { totalTokens: total },
+    };
+  }
+
+  test('scans token usage in place when the tokens tab opens with old data', async () => {
+    const app = renderDashboard(
+      {
+        ...dashboard,
+        tokenOptIn: true,
+        tokenUsage: tokenReport(1000, 'stale'),
+      },
+      80,
+      24,
+      [],
+      tokenReport(9_000_000, 'fresh'),
+    );
+
+    await app.send('u');
+    await app.send('t');
+    await vi.waitFor(() => expect(app.onRefreshTokens).toHaveBeenCalledOnce());
+    // Updated in place: still on the token screen, now with the new total
+    await vi.waitFor(() => expect(app.latestFrame()).toContain('9M TOTAL'));
+
+    await app.send('r');
+    await vi.waitFor(() =>
+      expect(app.onRefreshTokens).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  test('turning token analytics on starts the first scan', async () => {
+    const app = renderDashboard(
+      { ...dashboard, tokenOptIn: false, tokenUsage: null },
+      80,
+      24,
+      [],
+      tokenReport(9_000_000, 'fresh'),
+    );
+
+    await app.send('u');
+    await app.send('t');
+    expect(app.onRefreshTokens).not.toHaveBeenCalled();
+    await app.send('o');
+    await vi.waitFor(() =>
+      expect(app.onToggleTokenOptIn).toHaveBeenCalledWith(true),
+    );
+    await vi.waitFor(() => expect(app.onRefreshTokens).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(app.latestFrame()).toContain('9M TOTAL'));
   });
 });

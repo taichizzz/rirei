@@ -6,6 +6,11 @@ branding changes.
 
 ## Unreleased
 
+### Dependency maintenance
+
+- Updated Electron to the 44.x release line, Vitest to 5.x, Zod to 4.6, and the development tooling group.
+- Updated transitive dependencies for the Undici, fast-uri, xmldom, js-yaml, brace-expansion, source-map-js, and http-cache-semantics fixes.
+
 ## 0.1.0-alpha.5.0 - 2026-10-13
 
 ### Machine-wide token usage dashboard and analytics

@@ -50,10 +50,15 @@ jobs:
         run: |
           mkdir release-package
           npm pack --ignore-scripts --pack-destination release-package
+      - name: Prepare Windows download and checksums
+        working-directory: release-package
+        run: |
+          cp ../scripts/install-windows.ps1 .
+          sha256sum *.tgz install-windows.ps1 > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: npm-alpha-package
-          path: release-package/*.tgz
+          path: release-package/*
           if-no-files-found: error
 
   install:
@@ -83,6 +88,12 @@ jobs:
       - name: Test Windows installer
         if: runner.os == 'Windows'
         run: npm run test:installer
+      - name: Smoke native Windows installer
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          .\scripts\smoke-windows-installer.ps1 -PackageFile ".\release-package\taichizzz-rirei-$version.tgz"
 
   publish:
     if: inputs.publish

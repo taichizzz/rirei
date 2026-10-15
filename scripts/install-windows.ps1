@@ -2,6 +2,7 @@
 param(
     [string]$Version = '0.1.0-alpha.5.1',
     [string]$InstallRoot,
+    [string]$PackageFile,
     [switch]$InstallPrerequisites,
     [switch]$NonInteractive,
     [switch]$Uninstall
@@ -88,6 +89,7 @@ function Install-Rirei {
     param(
         [string]$Version = '0.1.0-alpha.5.1',
         [string]$InstallRoot,
+        [string]$PackageFile,
         [switch]$InstallPrerequisites,
         [switch]$NonInteractive,
         [switch]$Uninstall
@@ -106,6 +108,13 @@ function Install-Rirei {
     }
     if (-not [IO.Path]::IsPathRooted($InstallRoot)) { throw 'InstallRoot must be an absolute user-writable directory.' }
     $prefix = [IO.Path]::GetFullPath($InstallRoot)
+    $packageSpec = "@taichizzz/rirei@$Version"
+    if ($PackageFile) {
+        if ($Uninstall) { throw 'PackageFile applies to installation, not uninstall.' }
+        $package = Get-Item -LiteralPath $PackageFile -ErrorAction Stop
+        if ($package.PSIsContainer -or $package.Extension -ne '.tgz') { throw 'PackageFile must be an existing npm .tgz file.' }
+        $packageSpec = $package.FullName
+    }
     $action = if ($Uninstall) { 'Uninstall the Rirei CLI; keep project and usage data' } else { "Install @taichizzz/rirei@$Version" }
     if (-not $PSCmdlet.ShouldProcess($prefix, $action)) { return }
 
@@ -145,7 +154,7 @@ function Install-Rirei {
     }
 
     $npm = Get-RireiCommand 'npm.cmd'
-    Invoke-RireiNative -File $npm -Arguments @('install', '--global', '--prefix', $prefix, "@taichizzz/rirei@$Version", '--no-fund', '--no-audit')
+    Invoke-RireiNative -File $npm -Arguments @('install', '--global', '--prefix', $prefix, $packageSpec, '--no-fund', '--no-audit')
     $relay = Join-Path $prefix 'relay.cmd'
     if (-not (Test-Path -LiteralPath $relay -PathType Leaf)) { throw 'npm did not create relay.cmd in the selected install directory.' }
     $actual = (Invoke-RireiNative -File $relay -Arguments @('--version') -Capture).Trim()

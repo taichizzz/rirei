@@ -12,9 +12,11 @@ branding changes.
 
 - Prepared alpha.5.1 as a public npm CLI package using the `alpha` dist-tag, a compiled entry point, and pinned Windows PTY prebuilds.
 - Added a per-user PowerShell installer with explicit prerequisite installation, exact version selection, idempotent PATH setup, diagnostics, and data-preserving uninstall.
+- Added GitHub release tarball installation through `-PackageFile`, with the installer and SHA-256 checksums prepared alongside the compiled package.
 - Added a manually dispatched release workflow that validates an existing tag on main, tests the same tarball across Windows/macOS/Linux on Node.js 22 and 24, and optionally publishes with npm provenance through trusted publishing.
 - Added first-task TUI guidance for project initialization, dirty-baseline acknowledgement, task creation, and official provider setup links; existing active tasks bypass setup.
 - Added `relay doctor --installation --json` for native package checks without log scans, and expanded packed-install coverage to global command discovery, reinstall/upgrade, preservation, and removal.
+- Closed Windows ConPTY handles after natural terminal exits so output workers do not keep the host process alive.
 
 ### Dependency maintenance
 

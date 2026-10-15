@@ -1,8 +1,9 @@
 # Install the Windows CLI alpha
 
-The alpha.5.1 installation path is prepared in source. The npm commands below become
-available when `@taichizzz/rirei@0.1.0-alpha.5.1` has been published. Alpha.5.0 is a source-only
-release and cannot be installed from npm.
+The alpha.5.1 GitHub release includes a compiled npm tarball and a PowerShell installer.
+Use the GitHub download steps below while npm registry publication is pending. Registry
+commands become available when `@taichizzz/rirei@0.1.0-alpha.5.1` has been published.
+Alpha.5.0 is a source-only release and cannot be installed from npm.
 
 ## Requirements
 
@@ -13,7 +14,7 @@ release and cannot be installed from npm.
 - Provider CLIs are installed and signed in separately. Rirei never installs providers or
   reads their credentials.
 
-## Install with Node.js and Git already installed
+## npm registry installation (after publication)
 
 In PowerShell or Command Prompt:
 
@@ -34,14 +35,22 @@ optional dependencies enabled and do not force `build-from-source`.
 
 ## Guided PowerShell installer
 
-Download `scripts/install-windows.ps1` from the exact release tag, review it, and run it:
+Download the installer and compiled tarball from the exact GitHub release, then run the
+installer with the local package:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/taichizzz/rirei/v0.1.0-alpha.5.1/scripts/install-windows.ps1 -OutFile install-windows.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1 -Version 0.1.0-alpha.5.1
+$release = "https://github.com/taichizzz/rirei/releases/download/v0.1.0-alpha.5.1"
+Invoke-WebRequest "$release/install-windows.ps1" -OutFile install-windows.ps1
+Invoke-WebRequest "$release/taichizzz-rirei-0.1.0-alpha.5.1.tgz" -OutFile rirei.tgz
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1 -Version 0.1.0-alpha.5.1 -PackageFile .\rirei.tgz
 ```
 
 The process-local execution-policy flag applies only to this script invocation.
+The release includes `SHA256SUMS.txt`; `Get-FileHash -Algorithm SHA256` can verify each
+download. Installation still downloads public runtime dependencies from npm. It does not
+require the Rirei package itself to be published to the registry.
+
+After npm publication, omit `-PackageFile` to install the same exact version from npm.
 
 The installer:
 
@@ -49,7 +58,8 @@ The installer:
 2. Offers to install missing prerequisites with WinGet. You can authorize this explicitly
    with `-InstallPrerequisites`. `-NonInteractive` never prompts and fails if prerequisites
    are missing without that option. Prerequisite installers may request elevation.
-3. Installs the exact alpha under `%LOCALAPPDATA%\Rirei\cli` using a per-command npm prefix.
+3. Installs the exact alpha from the local tarball or npm under `%LOCALAPPDATA%\Rirei\cli`
+   using a per-command npm prefix.
 4. Adds that prefix to the current user's PATH, preserving other entries and giving it
    precedence over older user-level Rirei installs. Re-running does not duplicate entries.
 5. Checks the installed version, command discovery, Git, PTY addon, and ccusage binary.
@@ -92,8 +102,9 @@ npm.cmd install --global @taichizzz/rirei@alpha
 npm.cmd uninstall --global @taichizzz/rirei
 ```
 
-For an installation made with the setup script, rerun that script with the new exact
-version. Uninstall with the same prefix:
+For an installation made with the setup script, download the new release's script and
+tarball and rerun with the new exact version and `-PackageFile`. For a registry installation,
+omit `-PackageFile`. Uninstall with the same prefix:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1 -Uninstall

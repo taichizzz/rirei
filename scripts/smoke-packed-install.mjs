@@ -58,9 +58,9 @@ async function stopSmokeDaemon() {
   if (!daemonPid) return;
   const pid = daemonPid;
   if (process.platform === 'win32') {
-    await execFileAsync('taskkill', ['/PID', String(pid), '/T', '/F']).catch(
-      () => undefined,
-    );
+    await execFileAsync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      timeout: 10_000,
+    }).catch(() => undefined);
   } else {
     try {
       process.kill(pid, 'SIGTERM');
@@ -117,10 +117,12 @@ async function smokeFirstTask(cli, workspace, env) {
     terminal.onData((data) => {
       output = (output + data).slice(-100_000);
       if (phase === 0 && output.includes('Initialize this project')) {
+        process.stdout.write('Packed TUI: initialize prompt ready.\n');
         phase = 1;
         output = '';
         send('\r');
       } else if (phase === 1 && output.includes('What are you working on?')) {
+        process.stdout.write('Packed TUI: task prompt ready.\n');
         phase = 2;
         output = '';
         send('Preserve a task through package upgrade');
@@ -132,15 +134,18 @@ async function smokeFirstTask(cli, workspace, env) {
         output = '';
         send('\r');
       } else if (phase === 3 && output.includes('Task ready:')) {
+        process.stdout.write('Packed TUI: task created.\n');
         phase = 4;
         output = '';
         send('\r');
       } else if (phase === 4 && output.includes('CONTROL ROOM')) {
+        process.stdout.write('Packed TUI: dashboard ready.\n');
         phase = 5;
         send('q');
       }
     });
     terminal.onExit(({ exitCode }) => {
+      process.stdout.write(`Packed TUI: exited with code ${exitCode}.\n`);
       clearTimeout(timer);
       for (const pending of inputs) clearTimeout(pending);
       if (exitCode === 0 && phase === 5) resolve();
@@ -176,6 +181,11 @@ function run(executable, args, options = {}) {
 function openDaemon(descriptor) {
   return new Promise((resolve, reject) => {
     const connection = net.createConnection(descriptor.socketPath);
+    connection.setTimeout(15_000, () =>
+      connection.destroy(
+        new Error('Packed smoke daemon connection timed out.'),
+      ),
+    );
     let buffer = '';
     let requestId = 0;
     const pending = new Map();
@@ -183,6 +193,7 @@ function openDaemon(descriptor) {
     const welcome = new Promise((resolveWelcome, rejectWelcome) => {
       welcomed = { resolve: resolveWelcome, reject: rejectWelcome };
     });
+    void welcome.catch(() => undefined);
     const fail = (error) => {
       welcomed.reject(error);
       for (const item of pending.values()) item.reject(error);
@@ -309,6 +320,7 @@ try {
       ],
       { cwd: temporaryRoot, env },
     );
+  process.stdout.write('Packed smoke: installing package.\n');
   await install(
     options['upgrade-from'] ? path.resolve(options['upgrade-from']) : tarball,
   );
@@ -334,6 +346,7 @@ try {
       env,
     });
   } else {
+    process.stdout.write('Packed smoke: exercising first-task TUI.\n');
     await smokeFirstTask(
       path.join(packageRoot, 'dist', 'index.cjs'),
       workspace,
@@ -353,6 +366,7 @@ try {
   const before = await Promise.all(
     preservePaths.map((file) => readFile(file, 'utf8')),
   );
+  process.stdout.write('Packed smoke: connecting to daemon.\n');
   const ensured = await run(relay, ['daemon', '--ensure'], {
     cwd: workspace,
     env,
@@ -394,9 +408,13 @@ try {
   }
   if (!output.includes('RIREI_PACKED_PTY_OK'))
     throw new Error('Packed daemon PTY did not return the smoke marker.');
+  process.stdout.write('Packed smoke: stopping daemon.\n');
   await stopSmokeDaemon();
 
   // Install over the old package (or reinstall for the first published alpha).
+  process.stdout.write(
+    'Packed smoke: reinstalling package and checking diagnostics.\n',
+  );
   await install(tarball);
   const version = await run('relay', ['--version'], { cwd: workspace, env });
   assert.equal(version.stdout.trim(), expectedVersion);
@@ -440,6 +458,7 @@ try {
       'Windows install must use shipped prebuilds instead of requiring a compiler',
     );
   }
+  process.stdout.write('Packed smoke: uninstalling package.\n');
   await run(
     npm,
     [

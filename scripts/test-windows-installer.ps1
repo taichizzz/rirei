@@ -90,6 +90,19 @@ try {
     Assert-Rirei ([IO.File]::ReadAllText($preferences) -eq '{"optIn":false}') 'Uninstall must preserve usage preferences'
 
     Reset-RireiMocks
+    $packageFile = Join-Path $root 'release package with spaces.tgz'
+    [IO.File]::WriteAllText($packageFile, 'fixture')
+    Install-Rirei -InstallRoot $prefix -PackageFile $packageFile -NonInteractive
+    $install = @($script:calls | Where-Object { $_.Arguments[0] -eq 'install' })[0]
+    Assert-Rirei ($install.Arguments -contains $packageFile) 'A local release package path must remain a single argument'
+    Assert-Rirei (-not ($install.Arguments -contains '@taichizzz/rirei@0.1.0-alpha.5.1')) 'A local package must not request the unpublished registry version'
+    Reset-RireiMocks
+    Assert-RireiThrows { Install-Rirei -InstallRoot $prefix -PackageFile (Join-Path $root 'missing.tgz') -NonInteractive } 'Missing release tarballs must be rejected'
+    Assert-RireiThrows { Install-Rirei -InstallRoot $prefix -PackageFile $state -NonInteractive } 'Non-tarball package files must be rejected'
+    Assert-RireiThrows { Install-Rirei -InstallRoot $prefix -PackageFile $packageFile -NonInteractive -Uninstall } 'Uninstall must not accept an installation tarball'
+    Assert-Rirei ($script:calls.Count -eq 0 -and $script:pathWrites -eq 0) 'Invalid package files must fail before native commands or PATH changes'
+
+    Reset-RireiMocks
     $script:hasNode = $false
     $script:hasGit = $false
     Assert-RireiThrows { Install-Rirei -InstallRoot $prefix -NonInteractive } 'Missing prerequisites must require permission'

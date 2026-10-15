@@ -2,6 +2,10 @@
 
 ## Overview
 
+For the current installation and first-run steps, see [Windows installation](windows-install.md).
+The incompatibility audit below describes the original migration; completed implementation
+phases are listed in section 4.
+
 This document provides a comprehensive platform audit of the Rirei codebase to prepare for adding a Windows-compatible terminal user interface (`relay tui`) while preserving the existing macOS Electron desktop application.
 
 The core architecture shares Relay state and agent adapters across both interfaces:

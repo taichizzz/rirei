@@ -6,6 +6,16 @@ branding changes.
 
 ## Unreleased
 
+## 0.1.0-alpha.5.1 - 2026-10-15
+
+### Windows CLI alpha installation
+
+- Prepared alpha.5.1 as a public npm CLI package using the `alpha` dist-tag, a compiled entry point, and pinned Windows PTY prebuilds.
+- Added a per-user PowerShell installer with explicit prerequisite installation, exact version selection, idempotent PATH setup, diagnostics, and data-preserving uninstall.
+- Added a manually dispatched release workflow that validates an existing tag on main, tests the same tarball across Windows/macOS/Linux on Node.js 22 and 24, and optionally publishes with npm provenance through trusted publishing.
+- Added first-task TUI guidance for project initialization, dirty-baseline acknowledgement, task creation, and official provider setup links; existing active tasks bypass setup.
+- Added `relay doctor --installation --json` for native package checks without log scans, and expanded packed-install coverage to global command discovery, reinstall/upgrade, preservation, and removal.
+
 ### Dependency maintenance
 
 - Updated Electron to the 44.x release line, Vitest to 5.x, Zod to 4.6, and the development tooling group.

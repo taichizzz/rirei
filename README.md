@@ -14,10 +14,18 @@ Rirei is pre-release software. Review [Security](docs/security.md) and [Publicat
 
 ## Quick Start (TUI Dashboard)
 
+The next installable CLI alpha is prepared as `0.1.0-alpha.5.1`. Once it is published to npm,
+Windows users with Node.js 22.12+ and Git can install without cloning or building:
+
 ```powershell
-# Open the interactive TUI in Windows Terminal, PowerShell, or bash:
-relay tui
+npm.cmd install --global @taichizzz/rirei@alpha
+relay.cmd tui "C:\Projects\my-app"
 ```
+
+First launch guides project initialization, task creation, and provider setup. Existing active
+tasks open directly. See [Windows installation](docs/windows-install.md) for the PowerShell
+installer, prerequisites, updates, and removal. Until npm publication, use the source development
+commands below. macOS/Linux terminals use the same `relay tui` command.
 
 ## What relaying means
 

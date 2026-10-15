@@ -25,11 +25,12 @@ import { sessionCommand } from './cli/session.js';
 import { messageCommand } from './cli/message.js';
 import { tuiCommand } from './cli/tui.js';
 import { attachCommand } from './cli/attach.js';
+import { RIREI_VERSION } from './version.js';
 
 const program = new Command()
   .name('relay')
   .description('Durable coding-task handoffs between official agent CLIs')
-  .version('0.1.0-alpha.5.0')
+  .version(RIREI_VERSION)
   .addCommand(initCommand())
   .addCommand(startCommand())
   .addCommand(statusCommand())

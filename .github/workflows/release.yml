@@ -1,0 +1,108 @@
+name: Publish CLI alpha
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag on main (for example v0.1.0-alpha.5.1)
+        required: true
+        type: string
+      publish:
+        description: Publish the validated tarball to npm under the alpha dist-tag
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-alpha-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run audit:production
+      - run: npm run package:check
+      - name: Validate release identity
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: node scripts/prepare-npm-release.mjs "$RELEASE_TAG"
+      - name: Require tagged workflow execution for publication provenance
+        if: inputs.publish
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
+      - name: Pack compiled CLI
+        run: |
+          mkdir release-package
+          npm pack --ignore-scripts --pack-destination release-package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-alpha-package
+          path: release-package/*.tgz
+          if-no-files-found: error
+
+  install:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        node: [22.x, 24.x]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-alpha-package
+          path: release-package
+      - name: Install and exercise the exact release tarball
+        shell: bash
+        run: node scripts/smoke-packed-install.mjs --tarball release-package/*.tgz
+      - name: Test Windows installer
+        if: runner.os == 'Windows'
+        run: npm run test:installer
+
+  publish:
+    if: inputs.publish
+    needs: [package, install]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-alpha-package
+          path: release-package
+      - name: Publish verified alpha with provenance
+        run: npm publish release-package/*.tgz --access public --tag alpha --provenance

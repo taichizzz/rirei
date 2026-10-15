@@ -7,6 +7,7 @@ import { readStoredClaudeSample } from '../agents/usage-collectors.js';
 import { discoverRepository } from '../git/repository.js';
 import { relayPath } from '../safety/path-policy.js';
 import { resolveCcusageBinary } from '../token-usage/resolve.js';
+import { inspectInstallation } from '../platform/installation.js';
 
 function toTildePath(fullPath: string): string {
   const home = homedir();
@@ -64,7 +65,37 @@ async function countCodexRollouts(dirPath: string): Promise<number> {
 export function doctorCommand(): Command {
   return new Command('doctor')
     .description('Inspect local Relay prerequisites')
-    .action(async () => {
+    .option(
+      '--installation',
+      'check the installed package without agent or project scans',
+    )
+    .option(
+      '--json',
+      'print installation diagnostics as JSON (requires --installation)',
+    )
+    .action(async (options: { installation?: boolean; json?: boolean }) => {
+      if (options.json && !options.installation)
+        throw new Error(
+          'Use relay doctor --installation --json for package diagnostics.',
+        );
+      if (options.installation) {
+        const result = await inspectInstallation();
+        process.stdout.write(
+          options.json
+            ? `${JSON.stringify(result)}\n`
+            : [
+                `Rirei ${result.version} (${result.platform}-${result.arch})`,
+                `Node.js ${result.node.version}: ${result.node.status}`,
+                `Git: ${result.git.status}`,
+                `${result.terminal.backend}: ${result.terminal.status}`,
+                `ccusage ${result.tokenCollector.version ?? 'missing'}: ${result.tokenCollector.status}`,
+                result.next,
+                '',
+              ].join('\n'),
+        );
+        if (!result.ok) process.exitCode = 1;
+        return;
+      }
       const projectRoot = await discoverRepository(process.cwd());
       const git = projectRoot ? 'ready' : 'error (not in a repository)';
       let relay = 'not initialized';

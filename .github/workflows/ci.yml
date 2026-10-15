@@ -58,6 +58,15 @@ jobs:
       - name: Smoke packed install, daemon, and PTY
         run: npm run smoke:packed
 
+      - name: Test Windows installer in PowerShell 7
+        if: matrix.os == 'windows-latest'
+        run: npm run test:installer
+
+      - name: Test Windows installer in Windows PowerShell
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: .\scripts\test-windows-installer.ps1
+
       - name: Smoke verification (Relay CLI)
         shell: bash
         run: |

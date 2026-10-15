@@ -430,6 +430,11 @@ messages.
 
 Inspect local prerequisites. Does not require a task.
 
+`relay doctor --installation [--json]` checks only the installed CLI version, Node.js,
+Git discovery, native PTY module, and pinned ccusage executable. It returns a nonzero exit
+status if a dependency is unavailable. It does not read project state, scan agent logs,
+or probe provider authentication. This is the installer diagnostic path.
+
 Reports:
 
 - **Git**: `ready` if in a repository, otherwise an error note.
@@ -450,7 +455,14 @@ Launch the cross-platform interactive terminal dashboard in Windows Terminal or 
 
 ```powershell
 relay tui
+relay tui "C:\Projects\my-app"
 ```
+
+`relay tui [project]` requires an interactive terminal. On a project without an active task,
+it guides explicit initialization and task start before the dashboard. It preserves existing
+settings and tasks and requires acknowledgement of a dirty starting tree. Provider setup
+links are shown; providers are installed and signed in separately. See
+[Windows installation](windows-install.md).
 
 Features:
 

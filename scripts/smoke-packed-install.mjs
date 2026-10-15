@@ -152,7 +152,7 @@ async function smokeFirstTask(cli, workspace, env) {
       else
         reject(
           new Error(
-            `First-task TUI exited at step ${phase} with code ${exitCode}.`,
+            `First-task TUI exited at step ${phase} with code ${exitCode}: ${stripVTControlCharacters(output).slice(-2400).replaceAll(workspace, '<project>')}`,
           ),
         );
     });

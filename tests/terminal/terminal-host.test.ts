@@ -1,7 +1,43 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { createTerminalHost } from '../../src/terminal/terminal-host.js';
 
 describe('terminal host', () => {
+  it
+    .skipIf(process.platform !== 'win32')
+    .each([
+      '../../src/terminal/terminal-host.ts',
+      '../../desktop/terminal-host.mjs',
+    ])(
+    'releases ConPTY workers after natural exit in %s',
+    async (modulePath) => {
+      const moduleUrl = new URL(modulePath, import.meta.url).href;
+      const { stdout, stderr } = await promisify(execFile)(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '--eval',
+          `
+          (async () => {
+            const { createTerminalHost } = await import(${JSON.stringify(moduleUrl)});
+            const host = await createTerminalHost(process.execPath, ['-e', 'console.log("NATURAL_EXIT")'], {
+              cwd: process.cwd(), cols: 80, rows: 24,
+            });
+            host.onData(data => process.stdout.write(data));
+            host.onExit(({ exitCode }) => console.log('HOST_EXIT_' + exitCode));
+          })();
+        `,
+        ],
+        { cwd: process.cwd(), timeout: 20_000 },
+      );
+      expect(stdout).toContain('NATURAL_EXIT');
+      expect(stdout).toContain('HOST_EXIT_0');
+      expect(stderr).not.toContain('AttachConsole failed');
+    },
+  );
+
   it('spawns a process, streams output, and reports exit', async () => {
     const marker = 'rirei_host_test_marker_12345';
     const host = createTerminalHost(

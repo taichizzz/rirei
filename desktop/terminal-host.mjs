@@ -247,6 +247,14 @@ export class NodePtyTerminalHost {
     this.ptyProcess.onExit((event) => {
       if (this.disposed) return;
       this.disposed = true;
+      if (process.platform === 'win32') {
+        // ConPTY's output worker remains referenced until its native PTY closes.
+        try {
+          nodePtyLoader.disposeExitedPty(this.ptyProcess);
+        } catch {
+          // The native PTY may already be closed.
+        }
+      }
       this.rejectReady?.(
         new Error('Terminal parent guard exited before ready.'),
       );

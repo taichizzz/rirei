@@ -24,8 +24,10 @@ const expected = [
   'docs/README.md',
   'docs/cli-reference.md',
   'docs/relay-threads.md',
+  'docs/windows-install.md',
   'dist/index.cjs',
   'package.json',
+  'scripts/install-windows.ps1',
 ].sort();
 
 if (JSON.stringify(files) !== JSON.stringify(expected)) {

@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { TerminalDaemonClient } from '../../desktop/terminal-daemon-client.mjs';
 import { agentCatalog } from '../agents/registry.js';
 import { reconcileProjectRuns } from '../application/reconciliation.js';
@@ -29,6 +30,12 @@ import {
   setTokenUsageOptIn,
 } from '../token-usage/opt-in.js';
 import { safeTokenUsageError } from './usage.js';
+import {
+  initializeProject,
+  inspectProjectSetup,
+  startTask,
+} from '../application/project-setup.js';
+import { createSetupApp } from '../tui/setup.js';
 
 const ENTER_DASHBOARD = '\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l';
 const RESET_DASHBOARD = '\x1b[2J\x1b[H';
@@ -70,11 +77,71 @@ export async function startTuiAgent(
 export function tuiCommand(): Command {
   return new Command('tui')
     .description('Open the interactive Relay terminal user interface')
-    .action(async () => {
+    .argument(
+      '[project]',
+      'Git project to open (defaults to the current directory)',
+    )
+    .action(async (project?: string) => {
+      if (!process.stdin.isTTY || !process.stdout.isTTY)
+        throw new Error(
+          'relay tui requires an interactive terminal. Use Windows Terminal, PowerShell, or another ANSI terminal.',
+        );
+      if (project) process.chdir(path.resolve(project));
       // Dynamically import ESM-only Ink and React
       const ink = await import('ink');
       const React = (await import('react')).default;
       const App = createApp(ink, React);
+
+      const initialSetup = await inspectProjectSetup(process.cwd());
+      if (initialSetup.stage !== 'ready') {
+        const Setup = createSetupApp(ink, React);
+        const providers = await agentCatalog({
+          includeAuthentication: true,
+        }).catch(() => []);
+        process.stdout.write(ENTER_DASHBOARD);
+        let setupInk: ReturnType<typeof ink.render> | undefined;
+        let continued = false;
+        try {
+          await new Promise<void>((resolve) => {
+            const finish = (proceed: boolean) => {
+              continued = proceed;
+              setupInk?.unmount();
+              resolve();
+            };
+            setupInk = ink.render(
+              React.createElement(Setup, {
+                initial: initialSetup,
+                providers,
+                onInitialize: async () => {
+                  const current = await inspectProjectSetup(process.cwd());
+                  await initializeProject(current.project);
+                  return inspectProjectSetup(process.cwd());
+                },
+                onStartTask: async (request: string, allowDirty: boolean) => {
+                  const current = await inspectProjectSetup(process.cwd());
+                  await startTask(current.project, request, {
+                    allowDirty,
+                  });
+                  return inspectProjectSetup(process.cwd());
+                },
+                onRefresh: async () => ({
+                  setup: await inspectProjectSetup(process.cwd()),
+                  providers: await agentCatalog({
+                    includeAuthentication: true,
+                  }).catch(() => []),
+                }),
+                onDone: () => finish(true),
+                onQuit: () => finish(false),
+              }),
+              { exitOnCtrlC: false },
+            );
+          });
+        } finally {
+          setupInk?.unmount();
+          process.stdout.write(LEAVE_DASHBOARD);
+        }
+        if (!continued) return;
+      }
 
       // 1. Ensure daemon is active
       const daemonInfo = await ensureDaemon();

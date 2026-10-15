@@ -58,6 +58,29 @@ jobs:
       - name: Smoke packed install, daemon, and PTY
         run: npm run smoke:packed
 
+      - name: Test Windows installer in PowerShell 7
+        if: matrix.os == 'windows-latest'
+        run: npm run test:installer
+
+      - name: Test Windows installer in Windows PowerShell
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: .\scripts\test-windows-installer.ps1
+
+      - name: Smoke native Windows installer in PowerShell 7
+        if: matrix.os == 'windows-latest'
+        run: |
+          $packed = npm pack --json --ignore-scripts --pack-destination "$env:RUNNER_TEMP" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
+          .\scripts\smoke-windows-installer.ps1 -PackageFile (Join-Path $env:RUNNER_TEMP $packed[0].filename)
+
+      - name: Smoke native Windows installer in Windows PowerShell
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          .\scripts\smoke-windows-installer.ps1 -PackageFile (Join-Path $env:RUNNER_TEMP "taichizzz-rirei-$version.tgz")
+
       - name: Smoke verification (Relay CLI)
         shell: bash
         run: |

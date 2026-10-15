@@ -1,7 +1,10 @@
 {
   "name": "@taichizzz/rirei",
-  "version": "0.1.0-alpha.5.0",
-  "private": true,
+  "version": "0.1.0-alpha.5.1",
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
   "description": "Local orchestration and durable handoffs for officially installed coding-agent CLIs.",
   "license": "MIT",
   "author": "taichizzz",
@@ -35,6 +38,8 @@
     "desktop/opencode-lifecycle-wrapper.mjs",
     "docs/cli-reference.md",
     "docs/relay-threads.md",
+    "docs/windows-install.md",
+    "scripts/install-windows.ps1",
     "LICENSE",
     "README.md",
     "THIRD_PARTY_NOTICES.md"
@@ -52,6 +57,7 @@
     "verify": "npm run check && npm run lint && npm run format && npm run build && npm test",
     "package:check": "node scripts/check-package.mjs",
     "smoke:packed": "node scripts/smoke-packed-install.mjs",
+    "test:installer": "pwsh -NoProfile -File scripts/test-windows-installer.ps1",
     "desktop:smoke": "node scripts/smoke-packaged-pty.mjs",
     "audit:production": "npm audit --omit=dev",
     "install:local": "npm run build && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/dist/index.cjs\" \"$HOME/.local/bin/relay\"",
@@ -64,7 +70,7 @@
     "commander": "^15.0.0",
     "cross-spawn": "^7.0.6",
     "ink": "^5.2.1",
-    "node-pty": "^1.1.0",
+    "node-pty": "1.1.0",
     "react": "^18.3.1",
     "zod": "^4.6.2"
   },

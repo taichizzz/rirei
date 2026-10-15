@@ -20,6 +20,7 @@ import type { DashboardData } from './state.js';
 import { compactTokens, fullTokens } from '../token-usage/normalize.js';
 import { setTokenUsageOptIn } from '../token-usage/opt-in.js';
 import type { TokenUsageReport } from '../token-usage/schema.js';
+import { PROVIDER_SETUP } from './provider-setup.js';
 import {
   canActOnReceipt,
   canonicalActorRef,
@@ -363,7 +364,7 @@ export function createApp(
             catalogEntry.installation.status === 'error'
               ? (catalogEntry.installation.detail ??
                   `${catalogEntry.displayName} CLI installation check failed.`)
-              : `${catalogEntry.displayName} CLI is not installed.`,
+              : `${catalogEntry.displayName} CLI is not installed. Setup: ${PROVIDER_SETUP[catalogEntry.id].documentation}`,
           );
           return;
         }
@@ -2078,8 +2079,8 @@ export function createApp(
           <Box flexDirection="column" paddingY={1}>
             <Text bold>No agents running</Text>
             <Text color="gray">
-              Pick a launcher above. Relay will open it here and attach
-              automatically.
+              Pick a launcher above. Sessions start in the background; select a
+              session and press Enter to attach.
             </Text>
           </Box>
         ) : (

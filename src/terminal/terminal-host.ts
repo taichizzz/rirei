@@ -1,4 +1,5 @@
 import { spawn as ptySpawn, type IPty } from 'node-pty';
+import nodePtyLoader from '../../desktop/node-pty-loader.cjs';
 import {
   killProcessTree,
   type TerminalInterruptIntent,
@@ -67,6 +68,14 @@ export class NodePtyTerminalHost implements TerminalHost {
     this.ptyProcess.onExit((event: { exitCode: number; signal?: number }) => {
       if (this.disposed) return;
       this.disposed = true;
+      if (process.platform === 'win32') {
+        // ConPTY's output worker remains referenced until its native PTY closes.
+        try {
+          nodePtyLoader.disposeExitedPty(this.ptyProcess);
+        } catch {
+          // The native PTY may already be closed.
+        }
+      }
       const result: TerminalExit = {
         exitCode: Number.isInteger(event.exitCode) ? event.exitCode : null,
         signal: event.signal ? String(event.signal) : null,

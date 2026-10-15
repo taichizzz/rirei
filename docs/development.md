@@ -45,6 +45,14 @@ npm run audit:production
 npm run package:check
 ```
 
+Windows installer tests run with `npm run test:installer` (PowerShell 7). CI also runs the
+same script under Windows PowerShell 5.1. Commands and environment changes are mocked; the
+native installer smoke additionally installs the compiled tarball and runs diagnostics and
+uninstall under both shells, with persistent user PATH writes kept in memory. The
+test never installs prerequisites or changes the host's persistent PATH. The packed-install
+smoke test separately exercises an actual user-prefix install, first-task setup through a
+real PTY, reinstall, and uninstall.
+
 ## Tests
 
 Vitest suites live under `tests/`, mirroring `src/`:
@@ -97,10 +105,11 @@ self-contained artifact.
 - `extraResources`: copies `dist/index.cjs` to `cli/index.cjs`, exactly matching `cliPath()`.
 - `mac.target`: `dmg` and `zip`.
 
-The npm source package is deliberately smaller than the desktop bundle. The top-level `files`
+The npm CLI package is deliberately smaller than the desktop bundle. The top-level `files`
 allowlist includes the bundled CLI, license/readme files, and the three lifecycle helpers needed
 by packed daemon launches (`provider-lifecycle-hook.cjs`, `codex-lifecycle-wrapper.mjs`, and
-`opencode-lifecycle-wrapper.mjs`). `npm run package:check` enforces that exact allowlist and fails
+`opencode-lifecycle-wrapper.mjs`), plus the Windows installer and installation guide.
+`npm run package:check` enforces that exact allowlist and fails
 if local state, source trees, tests, unrelated desktop assets, private keys, or local user paths
 enter the tarball.
 

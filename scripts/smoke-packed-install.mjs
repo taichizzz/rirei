@@ -27,7 +27,13 @@ const projectRoot = path.resolve(
   '..',
 );
 const temporaryRoot = await mkdtemp(
-  path.join(os.tmpdir(), 'rirei packed smoke '),
+  // node-gyp's Unix makefiles cannot quote header paths containing spaces.
+  path.join(
+    os.tmpdir(),
+    process.platform === 'win32'
+      ? 'rirei packed smoke '
+      : 'rirei-packed-smoke-',
+  ),
 );
 let daemonPid = null;
 let socket;
@@ -82,7 +88,8 @@ async function smokeFirstTask(cli, workspace, env) {
     [cli, 'tui', workspace],
     {
       cwd: workspace,
-      env,
+      // Ink buffers frames until exit in CI; this child exercises a live TTY.
+      env: { ...env, CI: 'false' },
       cols: 80,
       rows: 24,
     },
@@ -262,7 +269,7 @@ try {
     await readFile(path.join(projectRoot, 'package.json'), 'utf8'),
   ).version;
   const installRoot = path.join(temporaryRoot, 'install');
-  const workspace = path.join(temporaryRoot, 'workspace');
+  const workspace = path.join(temporaryRoot, 'workspace with spaces');
   dataRoot = path.join(temporaryRoot, 'data');
   const home = path.join(temporaryRoot, 'home');
   await mkdir(installRoot);

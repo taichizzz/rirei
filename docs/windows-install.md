@@ -7,7 +7,7 @@ Alpha.5.0 is a source-only release and cannot be installed from npm.
 
 ## Requirements
 
-- Windows 10 version 1809 or newer; Windows Terminal is recommended.
+- Windows 10 version 1903 or newer; Windows Terminal is recommended.
 - 64-bit Node.js 22.12+ and Git. Node.js 22 and 24 are exercised by the CLI publication workflow.
 - Windows x64 is covered by CI. Windows ARM64 has shipped native dependencies and resolver
   coverage; native ARM64 terminal acceptance still needs a Windows ARM64 machine.
@@ -40,8 +40,8 @@ installer with the local package:
 
 ```powershell
 $release = "https://github.com/taichizzz/rirei/releases/download/v0.1.0-alpha.5.1"
-Invoke-WebRequest "$release/install-windows.ps1" -OutFile install-windows.ps1
-Invoke-WebRequest "$release/taichizzz-rirei-0.1.0-alpha.5.1.tgz" -OutFile rirei.tgz
+Invoke-WebRequest "$release/install-windows.ps1" -UseBasicParsing -OutFile install-windows.ps1
+Invoke-WebRequest "$release/taichizzz-rirei-0.1.0-alpha.5.1.tgz" -UseBasicParsing -OutFile rirei.tgz
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1 -Version 0.1.0-alpha.5.1 -PackageFile .\rirei.tgz
 ```
 

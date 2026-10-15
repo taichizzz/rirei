@@ -96,8 +96,8 @@ function Install-Rirei {
     )
     $ErrorActionPreference = 'Stop'
     $hostInfo = Get-RireiHost
-    if (-not $hostInfo.Windows -or $hostInfo.Architecture -notin @('X64', 'Arm64') -or $hostInfo.Build -lt 17763) {
-        throw 'Rirei requires 64-bit Windows 10 version 1809 or later (x64 or ARM64). Windows Terminal is recommended.'
+    if (-not $hostInfo.Windows -or $hostInfo.Architecture -notin @('X64', 'Arm64') -or $hostInfo.Build -lt 18362) {
+        throw 'Rirei requires 64-bit Windows 10 version 1903 or later (x64 or ARM64). Windows Terminal is recommended.'
     }
     if ($Version -notmatch '^\d+\.\d+\.\d+-alpha\.\d+(?:\.\d+)?$') {
         throw 'Pass an exact alpha version, for example -Version 0.1.0-alpha.5.1. Tags and version ranges are not accepted.'

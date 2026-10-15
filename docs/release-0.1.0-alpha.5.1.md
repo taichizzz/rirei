@@ -36,7 +36,7 @@ Local verification of the release candidate passed:
   terminal execution, reinstall, and uninstall.
 - An upgrade from a tarball built at alpha.5.0 to alpha.5.1, preserving task state, settings,
   token preferences, and cache.
-- 29 PowerShell installer assertions using mocked native commands and environment changes.
+- 30 PowerShell installer assertions using mocked native commands and environment changes.
 - macOS desktop build and packaged CLI/PTY smoke checks.
 
 The Windows CI jobs also run mocked installer assertions and native installer/diagnostics/

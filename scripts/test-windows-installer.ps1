@@ -21,6 +21,7 @@ function Reset-RireiMocks {
     $script:hasGit = $true
     $script:hasWinget = $true
     $script:windows = $true
+    $script:windowsBuild = 22631
     $script:nodeVersion = '22.12.0'
     $script:installedVersion = '0.1.0-alpha.5.1'
     $script:failInstall = $false
@@ -38,7 +39,7 @@ function Assert-RireiThrows([scriptblock]$Operation, [string]$Message) {
     Assert-Rirei $caught $Message
 }
 
-function Get-RireiHost { return @{ Windows = $script:windows; Architecture = 'X64'; Build = 22631 } }
+function Get-RireiHost { return @{ Windows = $script:windows; Architecture = 'X64'; Build = $script:windowsBuild } }
 function Get-RireiUserPath { return $script:userPath }
 function Set-RireiUserPath([string]$Value) { $script:userPath = $Value; $script:pathWrites++ }
 function Get-RireiCommand([string]$Name) {
@@ -130,6 +131,9 @@ try {
     Reset-RireiMocks
     $script:windows = $false
     Assert-RireiThrows { Install-Rirei -InstallRoot $prefix -NonInteractive } 'Non-Windows hosts must be rejected'
+    Reset-RireiMocks
+    $script:windowsBuild = 17763
+    Assert-RireiThrows { Install-Rirei -InstallRoot $prefix -NonInteractive } 'Windows builds below the shipped ConPTY backend minimum must be rejected'
     Write-Host "Windows installer: $script:checks assertions passed (mocked commands; no system changes)."
 } finally {
     $env:Path = $originalPath

@@ -250,7 +250,7 @@ export class NodePtyTerminalHost {
       if (process.platform === 'win32') {
         // ConPTY's output worker remains referenced until its native PTY closes.
         try {
-          this.ptyProcess.kill();
+          nodePtyLoader.disposeExitedPty(this.ptyProcess);
         } catch {
           // The native PTY may already be closed.
         }

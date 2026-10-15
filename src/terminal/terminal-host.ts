@@ -1,4 +1,5 @@
 import { spawn as ptySpawn, type IPty } from 'node-pty';
+import nodePtyLoader from '../../desktop/node-pty-loader.cjs';
 import {
   killProcessTree,
   type TerminalInterruptIntent,
@@ -70,7 +71,7 @@ export class NodePtyTerminalHost implements TerminalHost {
       if (process.platform === 'win32') {
         // ConPTY's output worker remains referenced until its native PTY closes.
         try {
-          this.ptyProcess.kill();
+          nodePtyLoader.disposeExitedPty(this.ptyProcess);
         } catch {
           // The native PTY may already be closed.
         }

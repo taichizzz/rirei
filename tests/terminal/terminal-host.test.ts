@@ -13,7 +13,7 @@ describe('terminal host', () => {
     'releases ConPTY workers after natural exit in %s',
     async (modulePath) => {
       const moduleUrl = new URL(modulePath, import.meta.url).href;
-      const { stdout } = await promisify(execFile)(
+      const { stdout, stderr } = await promisify(execFile)(
         process.execPath,
         [
           '--import',
@@ -22,10 +22,10 @@ describe('terminal host', () => {
           `
           (async () => {
             const { createTerminalHost } = await import(${JSON.stringify(moduleUrl)});
-          const host = await createTerminalHost(process.execPath, ['-e', 'console.log("NATURAL_EXIT")'], {
-            cwd: process.cwd(), cols: 80, rows: 24,
-          });
-          host.onData(data => process.stdout.write(data));
+            const host = await createTerminalHost(process.execPath, ['-e', 'console.log("NATURAL_EXIT")'], {
+              cwd: process.cwd(), cols: 80, rows: 24,
+            });
+            host.onData(data => process.stdout.write(data));
             host.onExit(({ exitCode }) => console.log('HOST_EXIT_' + exitCode));
           })();
         `,
@@ -34,6 +34,7 @@ describe('terminal host', () => {
       );
       expect(stdout).toContain('NATURAL_EXIT');
       expect(stdout).toContain('HOST_EXIT_0');
+      expect(stderr).not.toContain('AttachConsole failed');
     },
   );
 

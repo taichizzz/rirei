@@ -18,15 +18,16 @@ describe('terminal host', () => {
         [
           '--import',
           'tsx',
-          '--input-type=module',
           '--eval',
           `
-          const { createTerminalHost } = await import(${JSON.stringify(moduleUrl)});
+          (async () => {
+            const { createTerminalHost } = await import(${JSON.stringify(moduleUrl)});
           const host = await createTerminalHost(process.execPath, ['-e', 'console.log("NATURAL_EXIT")'], {
             cwd: process.cwd(), cols: 80, rows: 24,
           });
           host.onData(data => process.stdout.write(data));
-          host.onExit(({ exitCode }) => console.log('HOST_EXIT_' + exitCode));
+            host.onExit(({ exitCode }) => console.log('HOST_EXIT_' + exitCode));
+          })();
         `,
         ],
         { cwd: process.cwd(), timeout: 20_000 },

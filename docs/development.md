@@ -47,6 +47,8 @@ npm run package:check
 
 Windows installer tests run with `npm run test:installer` (PowerShell 7). CI also runs the
 same script under Windows PowerShell 5.1. Commands and environment changes are mocked; the
+native installer smoke additionally installs the compiled tarball and runs diagnostics and
+uninstall under both shells, with persistent user PATH writes kept in memory. The
 test never installs prerequisites or changes the host's persistent PATH. The packed-install
 smoke test separately exercises an actual user-prefix install, first-task setup through a
 real PTY, reinstall, and uninstall.

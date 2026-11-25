@@ -1,6 +1,6 @@
 {
   "name": "@taichizzz/rirei",
-  "version": "0.1.0-alpha.5.1",
+  "version": "0.1.0-alpha.5.5",
   "publishConfig": {
     "access": "public",
     "tag": "alpha"
@@ -63,6 +63,9 @@
     "install:local": "npm run build && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/dist/index.cjs\" \"$HOME/.local/bin/relay\"",
     "launcher:build": "osacompile -o 'Relay Launcher.app' 'scripts/Relay Launcher.applescript'",
     "benchmark": "npm run build && node --test benchmarks/handoff/lib.test.mjs benchmarks/handoff/recover.test.mjs benchmarks/handoff/run.test.mjs && node benchmarks/handoff/run.mjs --dry-run",
+    "benchmark:continuity": "node benchmarks/continuity/check.mjs",
+    "benchmark:handoff": "npm run build && node --import tsx benchmarks/continuity/compare.mjs",
+    "benchmark:cross": "npm run build && node --import tsx benchmarks/continuity/bidirectional.mjs",
     "test": "vitest run"
   },
   "dependencies": {

@@ -40,6 +40,7 @@ interface RelayState {
   completedWork: WorkItem[];
   remainingWork: WorkItem[];
   tests: TestResult[];
+  verificationReceipts?: VerificationReceipt[]; // at most 64
   checkpoints: CheckpointRecord[];
   blockers: BlockerRecord[];
   notes: HandoffNote[];
@@ -62,6 +63,7 @@ type TestResult = {
   durationMs: number;
   summary?: string;
   createdAt: string;
+  verificationReceiptId?: string; // linked host-command observation
 };
 type CheckpointRecord = { id: string; createdAt: string; path: string };
 type BlockerRecord = { description: string; createdAt: string };
@@ -177,12 +179,33 @@ means a malformed timestamp is rejected.
 When an agent exits, Relay re-reads the newest state and updates only the matching run ID.
 This preserves checkpoints, tests, and task-status changes written while the agent was active.
 
+## Verification receipts (M2)
+
+`verificationReceipts` is an optional schema-v8 field. Each schema-v1 `VerificationReceipt`
+binds task/receipt IDs, a bounded redacted command, working directory, configured-test scope,
+pending/completed/interrupted status, observed exit/times/duration, start/end covered-input
+and partial environment identities, `output: not-captured`, and a canonical integrity hash.
+`src/context/verification-schema.ts` defines the exact validated shape.
+
+`finish --run-tests` persists the pending receipt before launch, then links the observed result
+from `tests[].verificationReceiptId`. At most 64 receipts are retained; older nonpending
+receipts are pruned first. Pending receipts are never silently discarded. Legacy migrations
+leave missing receipt metadata absent, so old results remain historical. Hashes detect
+content changes without authenticating authorship.
+
+Read current freshness with `relay context verification`, or include one complete retained
+receipt using `--receipt <id>`. Matching file boundaries do not qualify installed dependencies,
+external services, ignored/generated inputs, or the full environment. The current CLI never
+automatically skips tests. See [M2 milestone notes](handoff-efficiency-m2.md).
+
 ## Which fields are populated today
 
 - **Set automatically:** `revision`, `recentOperations`, `sessionId`, `projectRoot`,
   `task.title/originalRequest/status/createdAt/updatedAt`, the full `git` baseline, `runs`,
   compatibility mirrors, `agentHistory`, `tests`
   (via `finish --run-tests`), `checkpoints`, and notes submitted through `relay note`.
+  The CLI also populates optional `verificationReceipts` and links
+  each host-command observation from its `TestResult`.
 - **Present but not yet populated by any command:** `task.requirements`, `task.constraints`,
   `decisions`, `completedWork`, `remainingWork`, and `blockers`. They are initialized to
   empty arrays and are surfaced by `status` (as counts) and by the handoff. Populating them
@@ -191,7 +214,7 @@ This preserves checkpoints, tests, and task-status changes written while the age
 
 ## Atomic writes
 
-`writeState()` (`src/state/store.ts`) never writes `state.json` in place:
+`updateState()`/`replaceState()` (`src/state/store.ts`) are the locked application mutation paths:
 
 1. Acquire the repository-scoped writer lock.
 2. Validate the expected revision and optional idempotency operation ID.
@@ -200,8 +223,16 @@ This preserves checkpoints, tests, and task-status changes written while the age
 5. `rename()` the temp file over `state.json`.
 
 Because `rename` is atomic on the same filesystem, an interrupted process leaves either the
-old complete file or the new complete file — never a truncated one. This is the property the
-lifecycle test suite exercises.
+old complete file or the new complete file rather than intentionally publishing a half-written
+JSON body. This is atomic visibility, not a power-loss durability guarantee: this state writer
+does not explicitly fsync file/directory. The lower-level `writeState()` validates and publishes
+but does not itself acquire a lock, enforce an expected revision, or increment revision; callers
+that mutate authoritative state must use the locked services.
+
+Threads/context journal and benchmark writes have separate explicit fsync contracts. Checkpoint
+files, archive creation, current-state publication and global activity are not one multi-file
+transaction. A failure can leave an unreferenced artifact or a stale derived view. See
+[ADR-004–005](architecture-decisions.md) and the [audit](architecture-audit.md).
 
 `readState()` reads and Zod-parses the file; a corrupted or hand-broken `state.json` fails
 loudly rather than loading partial data.
@@ -229,10 +260,11 @@ optional `attentionKind` (`permission`, `input`, or `unknown`). Runtime comes di
 terminal daemon rather than being reconstructed from timestamps, so notch consumers do not
 guess whether an agent was working or waiting.
 
-The public snapshot never contains prompts, commands, responses, transcripts, terminal output,
-diffs, credentials, provider session IDs, models, effort settings, worktree paths, or project
-paths. Optional `activity.privacyMode` in `.relay/config.json` replaces project, task, and branch
-labels with generic values.
+The public schema excludes full prompt/command/response/transcript/terminal-output/diff payload
+fields, credentials, provider session IDs, models/effort and filesystem paths. It does permit
+bounded sanitized project/task/branch labels. The task label derives from the task title, so it
+can overlap the first line of a submitted task; this is not a guarantee of zero task-derived text.
+Optional `activity.privacyMode` replaces those labels with generic values.
 
 Publication uses a separate global writer lock, mode `0700` parent directory, mode `0600`
 files, and unique temporary-file replacement. It is a derivative projection: an activity I/O
@@ -269,10 +301,13 @@ When Electron supplies a complete daemon inventory, listed terminal leases are a
 daemon and absent terminal leases are conclusively orphaned, including when the inventory is
 empty. Otherwise, a lease is orphaned only when its recorded PID is conclusively gone;
 different-boot, remote, or otherwise unverifiable leases remain blocked as `needs_attention`. On graceful
-shutdown a controller calls `orphanOwned()` so its
+shutdown a controller can call `orphanOwned()` so its
 leases become `orphaned` (`reason: 'controller_disconnected'`) instead of silently `running`.
 This is what lets a different controller pick up a run whose owner crashed without a
-coordinator: a stale stamp is the proof the owner is gone.
+coordinator. A stale stamp is only a loss of recent heartbeat evidence; it is not proof of death.
+With complete inventory, same-host prior-boot evidence can also qualify terminal finalization.
+Without it, host/boot ambiguity remains `needs_attention`. The precise matrix is in
+[runtime recovery evidence](runtime-protocols.md#8-recovery-evidence).
 
 ## Terminal journal
 
@@ -305,5 +340,11 @@ oversized, symlinked, or mismatched journals are ignored.
 
 Events are `created | attached | status | resized | interrupted | stopped | closed | exit |
 recovered`. The journal keeps the 500 newest entries, is written atomically (0600, temp-file
-rename), and stores **no output, prompts, paths, or credentials** — it exists so a frontend
-that restarts can reconcile its terminal inventory without trusting renderer state.
+rename). It stores **private project/controller metadata including `projectRoot` paths**, but no
+terminal transcript, prompt payload, or provider credentials. It lets a restarted frontend find
+projects to reconcile without trusting renderer state; it is not the sanitized public activity file.
+
+Terminal-journal locking is a separate age-reclaimed mechanism; the authoritative state lock's
+dead-owner policy must not be generalized to it. `appendEvent()` is also separate: it ignores
+legacy event names/payloads and republishes activity from current validated state, rather than
+persisting an `events.jsonl` event-sourcing log.

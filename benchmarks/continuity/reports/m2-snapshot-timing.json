@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "mode": "offline-covered-snapshot-timing",
+  "providerSessions": 0,
+  "capturedAt": "2026-11-06T16:41:13.596Z",
+  "asTestedSnapshotSha256": "1d501631d8c3a4b1b44d92e33263c0d974e27bf3f62861f74a89e281d6968635",
+  "host": { "nodeVersion": "v22.14.0", "platform": "darwin", "arch": "arm64" },
+  "scope": "Snapshot phase only; 12 sequential samples per newly written local Git fixture, two complete scans per sample; filesystem cache warm, Node startup and full handoff preparation excluded.",
+  "percentile": "nearest-rank; descriptive only",
+  "fixtureRecipe": "Small: WORKFLOWS tenant-ledger initial files. Medium: same files plus generated-fixture/input-000.txt through input-255.txt; each contains the four-digit index, 2043 x characters and a newline (2048 bytes). Manifest SHA-256 hashes JSON.stringify of path/content entries sorted by path with localeCompare.",
+  "results": [
+    {
+      "id": "tenant-ledger-initial",
+      "files": 6,
+      "bytes": 1163,
+      "manifestSha256": "3b1ee266e18036c0e0aa65d15fb523683caefe89c58b03752943c7bd43debc5d",
+      "samplesMs": [
+        75.54, 68.373, 69.069, 68.415, 68.699, 68.268, 67.368, 66.689, 67.067,
+        66.406, 66.317, 66.007
+      ],
+      "p50Ms": 67.368,
+      "p95Ms": 75.54,
+      "maxMs": 75.54
+    },
+    {
+      "id": "ledger-plus-256-fixed-inputs",
+      "files": 262,
+      "bytes": 525451,
+      "manifestSha256": "128c3b9c84962b700642086db85aaa9bd10cf2c3ead62c2cdaebfae2f8fd6377",
+      "samplesMs": [
+        188.409, 181.344, 185.927, 199.069, 204.895, 204.16, 205.013, 187.682,
+        183.834, 181.903, 183.068, 182.943
+      ],
+      "p50Ms": 185.927,
+      "p95Ms": 205.013,
+      "maxMs": 205.013
+    }
+  ]
+}

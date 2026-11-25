@@ -4,7 +4,49 @@ This file records user-visible changes made to Relay and its Rirei desktop app. 
 CLI command and `.relay/` state directory retain their existing names when the desktop app
 branding changes.
 
-## Unreleased
+## 0.1.0-alpha.5.5
+
+[Update notes and installation](release-0.1.0-alpha.5.5.md).
+
+### Automatic continuity prototype
+
+- Added rendering-only handoff profiles for focused receiver output and stable runtime-metadata
+  layout, with explicit control fallback when existing budget headroom is insufficient.
+- Added offline four-case policy replay, common-byte-prefix diagnostics, balanced AB/BA experiment
+  planning, and provider-specific saved-observation analysis; live cache/output benefit is unmeasured.
+- Added exact bounded evidence/file windows, deterministic `context find`, and eight-query
+  `context batch` retrieval with per-item status and source-bound continuation cursors.
+- Preserve Unicode boundaries and file BOM/CRLF text; refuse stale sources, isolate workspace
+  lookups, and keep legacy full-record evidence available through `--full`.
+- Added `relay context inspect` with bounded text/JSON envelopes, whole-requirement priority,
+  snapshot-bound staged/worktree code excerpts, verification freshness, and explicit omissions.
+- Enabled handoffs share their covered identity with an on-demand inspection lookup within
+  the existing evidence budget. Derived packets are cached only after live identity revalidation.
+- Added versioned covered-input snapshots, durable configured-test receipts, and conservative
+  verification freshness in handoffs and `relay context verification`; tests are never auto-skipped.
+- Recheck an approved complete input identity immediately before a switch launches its provider.
+- Added frozen-control archival, host-observed benchmark timings, bounded incremental visible
+  traces, local I/O/storage preflight, and one aggregate ledger for explicit recovery.
+- Preserve complete submitted instructions ahead of tool output when they fit; require paged
+  source retrieval for messages not fully inline and distinguish capture loss from preview omission.
+- Include submitted-message pages and the current workspace in `relay context task`; suppress
+  historical path-bearing tool/assistant previews while keeping exact sources retrievable.
+- Added a zero-provider replay of the real two-way pilot's failed cases. The requirement-first
+  retest and later live smoke passed the held-out checks on the tested checkpoints.
+- Replaced raw-record postludes with compact, cited briefings: exact long-message excerpts,
+  grouped command results, pending-outcome and edit-after-result status, and source lookup.
+- Added a byte-frozen previous renderer and controlled before/after benchmark inputs, with
+  optional bounded Codex successor sessions and explicit missing lifecycle-cost fields.
+- Added task-local opt-in Claude hook capture, source IDs, hash-linked records, replay checks,
+  atomic publication, consent revocation, and current-task deletion.
+- Added read-only `relay context task`, `history`, and `evidence` commands and coverage
+  diagnostics for missing starts/ends, unfinished tools, failed captures, and truncated text.
+- Extended handoffs with a bounded cited-evidence postlude and source lookup, keeping agent
+  claims distinct from reported tool outcomes and checking context changes before launch.
+- Added six interrupted-task fixtures, an offline acceptance grader, and source/compiled CLI
+  tests using fake providers. A live lookup-dependent handoff confirmed evidence retrieval and
+  fresh verification. The matched T3 Code comparison found equal correctness on one task,
+  with a tradeoff between measured completion time and non-cached usage.
 
 ## 0.1.0-alpha.5.1 - 2026-10-15
 

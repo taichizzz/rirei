@@ -61,6 +61,23 @@ test('extracts only emitted Codex metrics', () => {
   );
 });
 
+test('retains current Codex reasoning counters without adding them twice to output usage', () => {
+  const metrics = parseProviderMetrics(
+    'codex',
+    JSON.stringify({
+      type: 'turn.completed',
+      usage: {
+        input_tokens: 100,
+        cached_input_tokens: 20,
+        output_tokens: 30,
+        reasoning_output_tokens: 7,
+      },
+    }),
+  );
+  assert.equal(metrics.reasoningTokens, 7);
+  assert.equal(metrics.outputTokens, 30);
+});
+
 test('uses authoritative Antigravity result usage without double-counting steps', () => {
   const metrics = parseProviderMetrics(
     'antigravity',

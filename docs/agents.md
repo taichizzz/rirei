@@ -14,25 +14,58 @@ interface AgentAdapter {
   readonly id: AgentId;
   readonly displayName: string;
   readonly executable: string;
+  readonly capabilities: AgentCapabilities;
+  readonly resumeCapabilities?: ResumeCapabilities;
 
   detectInstallation(): Promise<InstallationResult>; // ready | not_installed | error
-  detectAuthentication(): Promise<AuthResult>; // ready | not_authenticated |
-  //   unknown | unsupported | error
+  detectAuthentication(): Promise<AuthenticationSnapshot>;
   getVersion(): Promise<string | null>;
-  getModels(): Promise<ModelOption[]>;
+  getModels(): Promise<DiscoveryResult<ModelOption>>;
   getEffortLevels(model?: string): Promise<string[]>;
 
   buildInteractiveCommand(ctx: AgentRunContext): Promise<CommandSpec>;
   buildResumeCommand?(ctx: AgentResumeContext): Promise<CommandSpec>;
   buildNonInteractiveCommand?(ctx: AgentRunContext): Promise<CommandSpec>; // optional
 
-  classifyExit(
-    result: ProcessResult,
-    observations?: ProviderObservation[],
-  ): Promise<{
-    reason: AgentExitReason;
-    confidence: 'low' | 'medium' | 'high';
-  }>;
+  prepareUsageCollection?(
+    ctx: UsageCollectionContext,
+  ): Promise<UsagePreparation>;
+  readUsage?(ctx: UsageCollectionContext): Promise<ProviderUsageSnapshot[]>;
+  classifyExit(result: ProcessResult): Promise<ExitClassification>;
+}
+
+interface AuthenticationSnapshot {
+  status:
+    | 'authenticated'
+    | 'not_authenticated'
+    | 'configured'
+    | 'unknown'
+    | 'unsupported'
+    | 'error';
+  checkedAt: string;
+  source: AuthenticationSource;
+  confidence: 'low' | 'medium' | 'high';
+  detail?: string;
+  scopes?: AuthenticationScope[];
+}
+interface DiscoveryResult<T> {
+  status: 'available' | 'unavailable' | 'unsupported' | 'error';
+  values: T[];
+  source: string;
+  detail?: string;
+}
+interface ExitClassification {
+  reason: AgentExitReason;
+  confidence: 'low' | 'medium' | 'high';
+  source:
+    | 'user_intent'
+    | 'spawn'
+    | 'provider_event'
+    | 'provider_exit_code'
+    | 'signal'
+    | 'fallback';
+  providerCode?: string;
+  retryAt?: string;
 }
 
 interface CommandSpec {
@@ -55,6 +88,15 @@ interface ModelOption {
 interface ProcessResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
+  spawnErrorCode?: string;
+  terminationIntent:
+    | 'none'
+    | 'user_interrupt'
+    | 'user_stop'
+    | 'renderer_failure'
+    | 'controller_loss'
+    | 'bridge_failure';
+  observations: ProviderObservation[];
   stdout: string;
   stderr: string;
 }
@@ -138,9 +180,10 @@ fallback behavior and advertise no structured event capability.
 
 ### Installation detection
 
-`detectExecutable(name)` scans each `PATH` entry for a file with the executable bit
-(`constants.X_OK`) and returns `ready` or `not_installed`. This is what `relay doctor`'s
-`Installed` column reports.
+`detectExecutable(name)` delegates to `src/platform/executable.ts`. POSIX search checks
+executability; Windows search supports case-insensitive filenames and `PATHEXT` wrappers.
+`cross-spawn` handles provider wrapper invocation. Installation is distinct from authentication,
+native lifecycle delivery, or model availability. This feeds `relay doctor`'s Installed column.
 
 ### Authentication detection
 
@@ -182,8 +225,19 @@ fall back to the conservative exit-code table.
 ### Non-interactive mode
 
 `buildNonInteractiveCommand` is optional and **not implemented** by `OfficialCliAdapter`.
-That is why `relay doctor` prints `Unknown` for the `Interactive` and `Headless` columns:
-capabilities are not probed, and headless execution has no code path yet.
+`relay doctor` prints advertised Interactive/Headless **Yes/No** capability values, not a live
+execution probe. A native provider's separate headless command does not mean this adapter
+implements it. Benchmark-specific `exec`/print launch paths have separate qualification.
+
+### Rationale and boundaries
+
+Adapter capabilities keep provider-specific launch/model/resume behavior out of generic callers.
+The daemon still has a small structured-provider status boundary, and the prototype capture
+launcher deliberately targets Claude; the implementation is not perfectly provider-name-free.
+Fresh quota evidence can refine a nonzero run result at medium confidence outside the bare exit
+adapter, without overriding a clean exit or explicit cancellation. See
+[ADR-003 and ADR-013](architecture-decisions.md), [runtime protocols](runtime-protocols.md), and
+[continuity architecture](continuity-architecture.md) for those separate data paths.
 
 ## Detection priority (design guideline)
 

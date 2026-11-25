@@ -45,6 +45,9 @@ import {
 import { ORPHAN_BID_LIMIT } from '../state/schema.js';
 import { readState, updateState } from '../state/store.js';
 import type { WorkspaceRole } from '../worktrees/schema.js';
+import { prepareContextLaunch } from '../context/capture.js';
+import { contextFingerprint } from '../context/store.js';
+import { inspectCoveredSnapshot } from '../context/snapshot.js';
 
 export interface RunSelection {
   model?: string;
@@ -63,6 +66,10 @@ export interface RunSelection {
   operationId?: string;
   /** Semantic state approved in a handoff preview, checked with the lease lock. */
   expectedHandoffStateFingerprint?: string;
+  expectedContextFingerprint?: string;
+  /** Complete covered-input identity displayed in the approved verification preview. */
+  expectedCoveredSnapshotId?: string;
+  promptIsHandoff?: boolean;
   failOnExhausted?: boolean;
   interactive?: boolean;
   confirmExhausted?: (message: string) => Promise<boolean> | boolean;
@@ -381,11 +388,47 @@ export class SessionManager {
         runId,
         selection.terminalId,
       );
+      const captured = await prepareContextLaunch({
+        root: request.projectRoot,
+        state: request.state,
+        runId,
+        provider: request.adapter.id,
+        workspace: prepared.lease.worktreePath,
+        providerSessionId: prepared.run.providerSessionId,
+        handoffPrompt: selection.promptIsHandoff ? request.prompt : undefined,
+        command: prepared.command,
+      });
+      const env = { ...process.env, ...capability.env };
+      for (const key of Object.keys(env))
+        if (key.startsWith('RIREI_CONTEXT_')) delete env[key];
+      Object.assign(env, captured.env);
+      if (
+        selection.expectedContextFingerprint &&
+        (await contextFingerprint(
+          request.projectRoot,
+          request.state.sessionId,
+        )) !== selection.expectedContextFingerprint
+      )
+        throw new Error(
+          'Captured context changed before launch. Review a fresh handoff.',
+        );
+      if (selection.expectedCoveredSnapshotId) {
+        const current = await inspectCoveredSnapshot(
+          prepared.lease.worktreePath,
+        );
+        if (
+          current.identity.coverage.status !== 'complete' ||
+          current.identity.id !== selection.expectedCoveredSnapshotId
+        )
+          throw new Error(
+            'Covered inputs changed or became unavailable before launch. Review a fresh handoff.',
+          );
+      }
       handleId = (
         await this.host.start({
-          command: prepared.command,
+          command: captured.command,
           cwd: prepared.lease.worktreePath,
-          env: { ...process.env, ...capability.env },
+          env,
         })
       ).id;
     } catch (error) {
@@ -659,7 +702,7 @@ export class SessionManager {
     let inserted = false;
     const persisted = await updateState(
       request.projectRoot,
-      (current) => {
+      async (current) => {
         if (current.sessionId !== request.state.sessionId)
           throw new Error(
             'The Relay task changed while the provider launch was being prepared. Run the command again.',
@@ -678,6 +721,14 @@ export class SessionManager {
         )
           throw new Error(
             'Handoff-relevant state changed before the provider could be launched. Review a fresh handoff.',
+          );
+        if (
+          selection.expectedContextFingerprint &&
+          (await contextFingerprint(request.projectRoot, current.sessionId)) !==
+            selection.expectedContextFingerprint
+        )
+          throw new Error(
+            'Captured context changed before launch. Review a fresh handoff.',
           );
         inserted = true;
         return acquireLease(

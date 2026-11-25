@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "controlId": "requirement-first-receiver-retest",
+  "status": "independently-archived-and-verified",
+  "sourceReportHash": "1e0bde884fdfb04f879e61d6708c2c189733b7bc458de9de90f4aa9fa2222862",
+  "predecessorReportHash": "933ec7cefc796d5f380589f89291c157d9f5628a2b9df3da9fabde4324e8f735",
+  "rendererSha256": "98716069c907a0ab1b3399188228da4b322e726558fc9c5eca9d033e91ea4b15",
+  "compiledCliSha256": "e40e24545519db26ed6e8c88eedde8683bf98e006c23e1760f3a6ebcffde7c16",
+  "fixtureHashes": {
+    "tenant-ledger": "ab1b6f8cf39c8d7c52f2aed6be3b57c8617920f8e6c27be5356fb75604d8e4d5",
+    "cursor-feed": "b8499ae3fb549b50fb7f3d55a00dc5154622306bba756f88e3b6e37a0e979a9d"
+  },
+  "versions": {
+    "claude": "2.1.258 (Claude Code)",
+    "codex": "codex-cli 0.166.0"
+  },
+  "requestedModels": {
+    "claude": { "model": "sonnet", "effort": "low" },
+    "codex": { "model": "gpt-5.6-sol", "effort": "low" }
+  },
+  "recordedLaunches": 8,
+  "reusedCheckpoints": 4,
+  "acceptance": { "rirei": "4/4", "full-history": "4/4" },
+  "strictSuccess": { "rirei": "3/4", "full-history": "4/4" },
+  "infrastructureIncidents": 1,
+  "verifiedRetainedFiles": 71,
+  "privateArchiveLocation": "Persistent local benchmark control directory returned by freeze-control.mjs; absolute host paths remain private.",
+  "environmentQualifiedForTestReuse": false,
+  "newModelSessionsUsedForFreezing": 0
+}

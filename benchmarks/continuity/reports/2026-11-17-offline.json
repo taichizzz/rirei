@@ -1,0 +1,1839 @@
+{
+  "schemaVersion": 1,
+  "mode": "offline-current-implementation-benchmark",
+  "startedAt": "2026-11-16T19:35:36.646Z",
+  "completedAt": "2026-11-16T19:36:02.184Z",
+  "host": {
+    "nodeVersion": "v22.14.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "providerSessions": 0,
+  "stagesPassed": [
+    "interruptionFixtures",
+    "workflowFixtures",
+    "inspection",
+    "retrieval",
+    "policies",
+    "promptComparison"
+  ],
+  "sourceInputsUnchanged": true,
+  "controlManifestSha256": "2746bec73f694e6e1587cbb1cf5c36911c9f1fadf87517087af1a751abc822d1",
+  "sourceHashes": {
+    "package.json": "4b85b6078d32915b158b250906be59a6bdc103628c7ab5d54cac8272f3fa2254",
+    "package-lock.json": "98020cef5566cd02a9809395cf17ecc86590947f730cef458e04e4a8912a3e85",
+    "benchmarks/continuity/fixtures.json": "7183bb2f9a80ac59d24f2a569eb64f65981102c5b7f7af67bf49f28c0235546f",
+    "benchmarks/continuity/protocol.json": "294f12ca017c446b55e9cf30e26bf2b658484bd573f0c095c3e523d9ad2f8d4c",
+    "benchmarks/continuity/baselines/rirei-v1.ts": "a8940baa3245f3e5cd22ac7352658e5dbf6be52dab890fd3b4aafe01fb7be056",
+    "dist/index.cjs": "557380fb885fcc91ea6c1dc78f66772636e719b047976d4afd004384558122b2",
+    "src/context/inspection.ts": "07aa313aca9f6901206ac9c3e7951d509a38e74ef4619ca0c9caf72e26c9f7ab",
+    "src/context/inspection-code.ts": "2665a3929f4a3a8635f8f5594f4565e73880dbfd792081204d1ffbb8e9d9142f",
+    "src/context/inspection-schema.ts": "0aef48f5e941552cc8f97cf294d0a88043dfc6e21877fa2e1778db6627389e65",
+    "src/context/snapshot.ts": "d8aba172269b2af82bacbed64deef7a1c890750d65ac24261bbc071e02fc284d",
+    "src/context/render.ts": "e5c490d2db4046b24aae3ca4fcd1ceafb0c2ffc286e4b1fac0f2356b1949a971",
+    "src/context/briefing.ts": "808fcf057f9e450c042a65dfc8365c94b0cb6d97a48104aba924e0bff9fcd8f3",
+    "src/context/verification.ts": "3137231eb673c2ffbee2bcb2312132db7ca40b53b0abee7ea1b2a26867ae41cc",
+    "src/lifecycle.ts": "53be92e58babaa53b04b84be036f5f5d1552b33c95a4b604d712b89c5513be5f",
+    "src/cli/context.ts": "849cb13638b3fd7dde7ac8925c0df0b3811169d5b29a13d8b0296e3b53c0ad36",
+    "benchmarks/continuity/inspect.mjs": "d2baa843afa64787e6bae5125610e1eb62d2e07248b74c4698a65c268cd5880c",
+    "src/context/retrieval.ts": "df7813b8c65dffbc4fc4fe83541e43adc50a56d911255145988ba7a888b5465f",
+    "src/context/retrieval-schema.ts": "6764b535246d18eebb075714b4815391067449bd4d5592bed59e6c9a9e15e47c",
+    "src/context/retrieval-cursor.ts": "78e72f69f08eec15a4daea0c15959c34d81466b2c6580f81f9c9a0dfd258f08c",
+    "src/context/retrieval-index.ts": "f309d8e544560f4ab3c3d02d98be94b21762dedc68268aa8bec0c753c82323c1",
+    "src/context/retrieval-file.ts": "ebcb90f439f1359cefd53c757a2e48579b91c020310cdb309de272ffc9f2fae7",
+    "src/context/retrieval-output.ts": "15be8883f07d5d4b1aa86589517b237cd8b9f3533de2fb00590228cf70ac5006",
+    "benchmarks/continuity/retrieve.mjs": "55aa019e63b17a97d74063706048dacbaeb6c2ce5f96823accf382f4d4d3a6c1",
+    "src/context/prompt-policy.ts": "e1bb76db014701d936a7b24d4963e16b32ec3925be31004baa38a7753eeabdb8",
+    "src/context/schema.ts": "310efe3efe027d0f64f4f93a3147695bcd19f48da02bf960c76a9fc4fcd84faa",
+    "src/handoff.ts": "dbeacf9414ffcd8226c287ad2b41f2b3b69fe793109a364d7acba22775fa50dc",
+    "src/cli/handoff.ts": "b6a216f646f97a1ff3e0f056872d9fdab54e1374238512b29b099a49a9432fbb",
+    "benchmarks/continuity/policies.mjs": "db27529f3d1b252bda83e56edffbbfd9d9f6e4d8512b707d8a5d0ce5554113cb",
+    "benchmarks/continuity/policy-experiment.mjs": "69f5beb9bd0cca9e59e24dc9e522d0369cee1b8325d026ffdb0fca8f3f3c6abf",
+    "benchmarks/continuity/measurement.mjs": "49cd92d19dcc80fdc6c621ddde08c0eceb61fbdf6947966f0a3c8e6d6716908c",
+    "benchmarks/continuity/workflows.mjs": "1c5b727ebde6592cae9440ac89256efdd44aaf41d90e2fe7789ffdcc21122411",
+    "benchmarks/continuity/bidirectional.mjs": "67d0b1be3c31dfa9de6b28201a134d8a9cb7cd3c062967a9920f5f66f6966f3c",
+    "benchmarks/handoff/lib.mjs": "1813eddee0940c82a91de278f6fccf8017461195888aa36dccf1443df77e0571"
+  },
+  "stageDurationsMs": {
+    "interruptionFixtures": 369.017,
+    "workflowFixtures": 257.861,
+    "inspection": 8780.437,
+    "retrieval": 10109.693,
+    "policies": 4372.395,
+    "promptComparison": 1423.992
+  },
+  "stages": {
+    "interruptionFixtures": {
+      "mode": "offline-fixture-validation",
+      "providerCalls": 0,
+      "results": [
+        {
+          "id": "repository-sufficient",
+          "inputHash": "e04af3a5ec13671f0899b26896b2b9b710964033b3b94666fa953b640669f259",
+          "referencePassed": true,
+          "interruptedRejected": true
+        },
+        {
+          "id": "late-requirement",
+          "inputHash": "38d97a6d4044cbca3b24fb2dce796caacbf21f9665444e3d157558e4873301a6",
+          "referencePassed": true,
+          "interruptedRejected": true
+        },
+        {
+          "id": "rejected-approach",
+          "inputHash": "8ee29140c2f678792a8097ffe41883df683633858e55b65e3b8b4423ef64b381",
+          "referencePassed": true,
+          "interruptedRejected": true
+        },
+        {
+          "id": "unverified-edit",
+          "inputHash": "5d1c8ee8cbc323b2bbea51c0498cb598dfabefbed3795668a6d61edebe17108c",
+          "referencePassed": true,
+          "interruptedRejected": true
+        },
+        {
+          "id": "superseded-instruction",
+          "inputHash": "bbb98576d6647ff6fd667d87588d57023446e95b8e5f9a82d413b6158d6c7ee9",
+          "referencePassed": true,
+          "interruptedRejected": true
+        },
+        {
+          "id": "abrupt-interruption",
+          "inputHash": "de7aa61ce7a7dfa5736ab0e22ce448aa4b288a985ada8b7eba167da139932447",
+          "referencePassed": true,
+          "interruptedRejected": true
+        }
+      ]
+    },
+    "workflowFixtures": {
+      "providerSessions": 0,
+      "fixtures": [
+        {
+          "id": "tenant-ledger",
+          "hash": "ab1b6f8cf39c8d7c52f2aed6be3b57c8617920f8e6c27be5356fb75604d8e4d5",
+          "initialRejected": true,
+          "referencePassed": true,
+          "groups": 7
+        },
+        {
+          "id": "cursor-feed",
+          "hash": "b8499ae3fb549b50fb7f3d55a00dc5154622306bba756f88e3b6e37a0e979a9d",
+          "initialRejected": true,
+          "referencePassed": true,
+          "groups": 7
+        }
+      ]
+    },
+    "inspection": {
+      "schemaVersion": 1,
+      "mode": "offline-inspection-qualification",
+      "providerSessions": 0,
+      "capturedAt": "2026-11-16T19:35:37.489Z",
+      "host": {
+        "nodeVersion": "v22.14.0",
+        "platform": "darwin",
+        "arch": "arm64"
+      },
+      "sourceHashes": {
+        "src/context/inspection.ts": "07aa313aca9f6901206ac9c3e7951d509a38e74ef4619ca0c9caf72e26c9f7ab",
+        "src/context/inspection-code.ts": "2665a3929f4a3a8635f8f5594f4565e73880dbfd792081204d1ffbb8e9d9142f",
+        "src/context/inspection-schema.ts": "0aef48f5e941552cc8f97cf294d0a88043dfc6e21877fa2e1778db6627389e65",
+        "src/context/snapshot.ts": "d8aba172269b2af82bacbed64deef7a1c890750d65ac24261bbc071e02fc284d",
+        "src/context/render.ts": "e5c490d2db4046b24aae3ca4fcd1ceafb0c2ffc286e4b1fac0f2356b1949a971",
+        "src/context/briefing.ts": "808fcf057f9e450c042a65dfc8365c94b0cb6d97a48104aba924e0bff9fcd8f3",
+        "src/context/verification.ts": "3137231eb673c2ffbee2bcb2312132db7ca40b53b0abee7ea1b2a26867ae41cc",
+        "src/lifecycle.ts": "53be92e58babaa53b04b84be036f5f5d1552b33c95a4b604d712b89c5513be5f",
+        "src/cli/context.ts": "849cb13638b3fd7dde7ac8925c0df0b3811169d5b29a13d8b0296e3b53c0ad36",
+        "benchmarks/continuity/inspect.mjs": "d2baa843afa64787e6bae5125610e1eb62d2e07248b74c4698a65c268cd5880c"
+      },
+      "savedControl": {
+        "manifestSha256": "2746bec73f694e6e1587cbb1cf5c36911c9f1fadf87517087af1a751abc822d1",
+        "sourceReportHash": "1e0bde884fdfb04f879e61d6708c2c189733b7bc458de9de90f4aa9fa2222862",
+        "rows": [
+          {
+            "index": 0,
+            "task": "tenant-ledger",
+            "receiver": "codex",
+            "checkpointHash": "dc1d5df7ee0aad70b12196f115774cad2afc34e5af0ccd1dd3c9b681c57893e1",
+            "historyHash": "631a93f7d36a9ea5fac69ec0cc1a8da52f371f519ab20a9f029584319993583a",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 4349,
+            "briefingCharacters": 4031,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4210,
+                "bytes": 4210,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4636,
+                "bytes": 4636,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "task": "cursor-feed",
+            "receiver": "claude",
+            "checkpointHash": "a7c1c235e2d5c7df4023ede7759e9cd8d9c61199423b5fb50db43bdceb181043",
+            "historyHash": "fbd2776152102d366a608766a1b4674327bb54188ca07bdd45fc2bacdfa19c26",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 4888,
+            "briefingCharacters": 4553,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4150,
+                "bytes": 4150,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4576,
+                "bytes": 4576,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "task": "cursor-feed",
+            "receiver": "codex",
+            "checkpointHash": "555254dbdaa7fde6721efbceec45b1cfdfa6c15f2b1b66b38131b41818266c84",
+            "historyHash": "7e4bcf633d978ad55fbcaee0af3450abc1898d7979311d6110fdf6a623008ac6",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 5404,
+            "briefingCharacters": 5069,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4275,
+                "bytes": 4275,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4701,
+                "bytes": 4701,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "task": "tenant-ledger",
+            "receiver": "claude",
+            "checkpointHash": "5730d654d35446fdfe35e5ea4bd60124ea99cf08a20e2635e77ea3a677f65bff",
+            "historyHash": "0b3256673be6f33a17be56d513857b600abe31b1f2fd3a2178881cbbcc563c41",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 5502,
+            "briefingCharacters": 5184,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 2990,
+                "bytes": 2990,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 3422,
+                "bytes": 3422,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          }
+        ]
+      },
+      "timings": [
+        {
+          "id": "tenant-ledger",
+          "files": 6,
+          "fixtureBytes": 1163,
+          "initialFilesSha256": "c36c095dec9a227fafbb2c639df90a79295101746d92b0f4c99cf97d8d57ffd3",
+          "handoffMs": [
+            91.209, 91.011, 89.081, 87.891, 89.518, 85.935, 88.484, 87.412,
+            88.029, 85.924, 88.628, 85.81
+          ],
+          "inspectionMs": [
+            76.518, 71.444, 72.302, 72.327, 69.431, 71.991, 70.866, 71.899,
+            68.963, 72.999, 68.995, 69.479
+          ],
+          "handoffP50Ms": 88.029,
+          "handoffP95Ms": 91.209,
+          "inspectionP50Ms": 71.444,
+          "inspectionP95Ms": 76.518,
+          "inspectionCharacters": 3004
+        },
+        {
+          "id": "ledger-plus-256-fixed-inputs",
+          "files": 262,
+          "fixtureBytes": 525451,
+          "initialFilesSha256": "0692bd81aff1c180009582944d00806b7e8007065463dc0011d32bb906166aaa",
+          "handoffMs": [
+            230.977, 228.244, 216.323, 212.937, 206.801, 207.992, 209.073,
+            203.326, 204.276, 211.735, 214.368, 205.303
+          ],
+          "inspectionMs": [
+            203.685, 206.307, 197.953, 194.473, 189.793, 193.275, 196.816,
+            192.549, 192.111, 209.987, 196.311, 190.832
+          ],
+          "handoffP50Ms": 209.073,
+          "handoffP95Ms": 230.977,
+          "inspectionP50Ms": 194.473,
+          "inspectionP95Ms": 209.987,
+          "inspectionCharacters": 3006
+        }
+      ],
+      "limitations": [
+        "12 sequential samples per local fixture; nearest-rank descriptive percentiles, warm filesystem cache. Node/CLI startup excluded.",
+        "Handoff preparation includes legacy Git inspection and covered scans. Inspection includes live rescans and task/journal validation; eligible derived packets may be cached after the first call in the same process.",
+        "No new model-quality, token, or continuation-time result. Saved histories are rebound only in disposable fixture repositories; source control archive is read-only."
+      ]
+    },
+    "retrieval": {
+      "schemaVersion": 1,
+      "mode": "offline-targeted-retrieval",
+      "providerSessions": 0,
+      "capturedAt": "2026-11-16T19:35:46.270Z",
+      "host": {
+        "nodeVersion": "v22.14.0",
+        "platform": "darwin",
+        "arch": "arm64"
+      },
+      "sourceHashes": {
+        "src/cli/context.ts": "849cb13638b3fd7dde7ac8925c0df0b3811169d5b29a13d8b0296e3b53c0ad36",
+        "src/context/briefing.ts": "808fcf057f9e450c042a65dfc8365c94b0cb6d97a48104aba924e0bff9fcd8f3",
+        "src/context/snapshot.ts": "d8aba172269b2af82bacbed64deef7a1c890750d65ac24261bbc071e02fc284d",
+        "src/context/retrieval.ts": "df7813b8c65dffbc4fc4fe83541e43adc50a56d911255145988ba7a888b5465f",
+        "src/context/retrieval-schema.ts": "6764b535246d18eebb075714b4815391067449bd4d5592bed59e6c9a9e15e47c",
+        "src/context/retrieval-cursor.ts": "78e72f69f08eec15a4daea0c15959c34d81466b2c6580f81f9c9a0dfd258f08c",
+        "src/context/retrieval-index.ts": "f309d8e544560f4ab3c3d02d98be94b21762dedc68268aa8bec0c753c82323c1",
+        "src/context/retrieval-file.ts": "ebcb90f439f1359cefd53c757a2e48579b91c020310cdb309de272ffc9f2fae7",
+        "src/context/retrieval-output.ts": "15be8883f07d5d4b1aa86589517b237cd8b9f3533de2fb00590228cf70ac5006",
+        "benchmarks/continuity/retrieve.mjs": "55aa019e63b17a97d74063706048dacbaeb6c2ce5f96823accf382f4d4d3a6c1",
+        "benchmarks/continuity/inspect.mjs": "d2baa843afa64787e6bae5125610e1eb62d2e07248b74c4698a65c268cd5880c"
+      },
+      "bundleSha256": "557380fb885fcc91ea6c1dc78f66772636e719b047976d4afd004384558122b2",
+      "workload": {
+        "fixture": {
+          "events": 43,
+          "fileCount": 2,
+          "linesPerFile": 1200,
+          "filesSha256": "89a21dc5e3314117d0794d5838b67a5caffec9b8772c775d6361d273ed7f2634",
+          "requestedEvidenceCharacters": 200,
+          "requestedStartLine": 601,
+          "requestedLineCount": 2
+        },
+        "baseline": {
+          "calls": 5,
+          "returnedBytes": 279936,
+          "returnedCharacters": 279936,
+          "responses": [
+            {
+              "kind": "full-history-page",
+              "characters": 93909,
+              "bytes": 93909
+            },
+            {
+              "kind": "full-history-page",
+              "characters": 99274,
+              "bytes": 99274
+            },
+            {
+              "kind": "full-history-page",
+              "characters": 14393,
+              "bytes": 14393
+            },
+            {
+              "kind": "full-file-read",
+              "characters": 34980,
+              "bytes": 34980
+            },
+            {
+              "kind": "full-file-read",
+              "characters": 37380,
+              "bytes": 37380
+            }
+          ]
+        },
+        "targeted": {
+          "calls": 2,
+          "returnedBytes": 4782,
+          "returnedCharacters": 4782,
+          "responses": [
+            {
+              "kind": "exact-field-find",
+              "characters": 1354,
+              "bytes": 1354
+            },
+            {
+              "kind": "bounded-batch",
+              "characters": 3428,
+              "bytes": 3428
+            }
+          ]
+        },
+        "returnedByteReductionPercent": 98.29,
+        "exactSourceWindows": true,
+        "queryStatusesComplete": true,
+        "sourceStateAndJournalUnchanged": true
+      },
+      "savedControl": {
+        "manifestSha256": "2746bec73f694e6e1587cbb1cf5c36911c9f1fadf87517087af1a751abc822d1",
+        "sourceReportHash": "1e0bde884fdfb04f879e61d6708c2c189733b7bc458de9de90f4aa9fa2222862",
+        "rows": [
+          {
+            "index": 0,
+            "task": "tenant-ledger",
+            "receiver": "codex",
+            "checkpointHash": "dc1d5df7ee0aad70b12196f115774cad2afc34e5af0ccd1dd3c9b681c57893e1",
+            "historyHash": "631a93f7d36a9ea5fac69ec0cc1a8da52f371f519ab20a9f029584319993583a",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 4348,
+            "briefingCharacters": 4030,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4209,
+                "bytes": 4209,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4635,
+                "bytes": 4635,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "task": "cursor-feed",
+            "receiver": "claude",
+            "checkpointHash": "a7c1c235e2d5c7df4023ede7759e9cd8d9c61199423b5fb50db43bdceb181043",
+            "historyHash": "fbd2776152102d366a608766a1b4674327bb54188ca07bdd45fc2bacdfa19c26",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 4887,
+            "briefingCharacters": 4552,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4149,
+                "bytes": 4149,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4575,
+                "bytes": 4575,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "task": "cursor-feed",
+            "receiver": "codex",
+            "checkpointHash": "555254dbdaa7fde6721efbceec45b1cfdfa6c15f2b1b66b38131b41818266c84",
+            "historyHash": "7e4bcf633d978ad55fbcaee0af3450abc1898d7979311d6110fdf6a623008ac6",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 5403,
+            "briefingCharacters": 5068,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4274,
+                "bytes": 4274,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4700,
+                "bytes": 4700,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "task": "tenant-ledger",
+            "receiver": "claude",
+            "checkpointHash": "5730d654d35446fdfe35e5ea4bd60124ea99cf08a20e2635e77ea3a677f65bff",
+            "historyHash": "0b3256673be6f33a17be56d513857b600abe31b1f2fd3a2178881cbbcc563c41",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 5501,
+            "briefingCharacters": 5183,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 2989,
+                "bytes": 2989,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 3421,
+                "bytes": 3421,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          }
+        ]
+      },
+      "limitations": [
+        "Authored, preselected retrieval workload; query fields and desired source ranges are known to both comparisons. This is not a best-possible shell baseline or a model behavior experiment.",
+        "Calls count executed read commands, not model turns or provider tokens. Bytes are returned UTF-8 output, not tokenization or subscription usage.",
+        "The targeted caller stops after the requested windows; non-null cursors truthfully expose remaining source content. No provider was launched."
+      ]
+    },
+    "policies": {
+      "schemaVersion": 1,
+      "mode": "offline-output-layout-qualification",
+      "providerSessions": 0,
+      "capturedAt": "2026-11-16T19:36:00.742Z",
+      "sourceHashes": {
+        "src/context/prompt-policy.ts": "e1bb76db014701d936a7b24d4963e16b32ec3925be31004baa38a7753eeabdb8",
+        "src/context/briefing.ts": "808fcf057f9e450c042a65dfc8365c94b0cb6d97a48104aba924e0bff9fcd8f3",
+        "src/context/render.ts": "e5c490d2db4046b24aae3ca4fcd1ceafb0c2ffc286e4b1fac0f2356b1949a971",
+        "src/context/schema.ts": "310efe3efe027d0f64f4f93a3147695bcd19f48da02bf960c76a9fc4fcd84faa",
+        "src/handoff.ts": "dbeacf9414ffcd8226c287ad2b41f2b3b69fe793109a364d7acba22775fa50dc",
+        "src/lifecycle.ts": "53be92e58babaa53b04b84be036f5f5d1552b33c95a4b604d712b89c5513be5f",
+        "src/cli/handoff.ts": "b6a216f646f97a1ff3e0f056872d9fdab54e1374238512b29b099a49a9432fbb",
+        "benchmarks/continuity/policies.mjs": "db27529f3d1b252bda83e56edffbbfd9d9f6e4d8512b707d8a5d0ce5554113cb",
+        "benchmarks/continuity/policy-experiment.mjs": "69f5beb9bd0cca9e59e24dc9e522d0369cee1b8325d026ffdb0fca8f3f3c6abf",
+        "benchmarks/continuity/measurement.mjs": "49cd92d19dcc80fdc6c621ddde08c0eceb61fbdf6947966f0a3c8e6d6716908c",
+        "benchmarks/continuity/workflows.mjs": "1c5b727ebde6592cae9440ac89256efdd44aaf41d90e2fe7789ffdcc21122411",
+        "benchmarks/continuity/bidirectional.mjs": "67d0b1be3c31dfa9de6b28201a134d8a9cb7cd3c062967a9920f5f66f6966f3c",
+        "benchmarks/handoff/lib.mjs": "1813eddee0940c82a91de278f6fccf8017461195888aa36dccf1443df77e0571"
+      },
+      "inputKind": "verified-saved-control-copies",
+      "savedControl": {
+        "manifestSha256": "2746bec73f694e6e1587cbb1cf5c36911c9f1fadf87517087af1a751abc822d1",
+        "sourceReportHash": "1e0bde884fdfb04f879e61d6708c2c189733b7bc458de9de90f4aa9fa2222862",
+        "rows": [
+          {
+            "index": 0,
+            "task": "tenant-ledger",
+            "receiver": "codex",
+            "checkpointHash": "dc1d5df7ee0aad70b12196f115774cad2afc34e5af0ccd1dd3c9b681c57893e1",
+            "historyHash": "631a93f7d36a9ea5fac69ec0cc1a8da52f371f519ab20a9f029584319993583a",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 4345,
+            "briefingCharacters": 4027,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4206,
+                "bytes": 4206,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4632,
+                "bytes": 4632,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "task": "cursor-feed",
+            "receiver": "claude",
+            "checkpointHash": "a7c1c235e2d5c7df4023ede7759e9cd8d9c61199423b5fb50db43bdceb181043",
+            "historyHash": "fbd2776152102d366a608766a1b4674327bb54188ca07bdd45fc2bacdfa19c26",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 4884,
+            "briefingCharacters": 4549,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4146,
+                "bytes": 4146,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4572,
+                "bytes": 4572,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "task": "cursor-feed",
+            "receiver": "codex",
+            "checkpointHash": "555254dbdaa7fde6721efbceec45b1cfdfa6c15f2b1b66b38131b41818266c84",
+            "historyHash": "7e4bcf633d978ad55fbcaee0af3450abc1898d7979311d6110fdf6a623008ac6",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 5400,
+            "briefingCharacters": 5065,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 4271,
+                "bytes": 4271,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 4697,
+                "bytes": 4697,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "task": "tenant-ledger",
+            "receiver": "claude",
+            "checkpointHash": "5730d654d35446fdfe35e5ea4bd60124ea99cf08a20e2635e77ea3a677f65bff",
+            "historyHash": "0b3256673be6f33a17be56d513857b600abe31b1f2fd3a2178881cbbcc563c41",
+            "snapshotCoverage": "complete",
+            "handoffCharacters": 5498,
+            "briefingCharacters": 5180,
+            "exactRequirementsInline": 6,
+            "submittedMessagesFullyInline": 1,
+            "inspections": [
+              {
+                "format": "text",
+                "characters": 2986,
+                "bytes": 2986,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              },
+              {
+                "format": "json",
+                "characters": 3418,
+                "bytes": 3418,
+                "exactRequirementsInline": 6,
+                "excerpts": 1
+              }
+            ]
+          }
+        ]
+      },
+      "profiles": [
+        {
+          "index": 0,
+          "task": "tenant-ledger",
+          "receiver": "codex",
+          "fixtureHash": "ab1b6f8cf39c8d7c52f2aed6be3b57c8617920f8e6c27be5356fb75604d8e4d5",
+          "source": "same checkpoint and retained history for every profile",
+          "profiles": [
+            {
+              "profile": "control",
+              "applied": true,
+              "effectiveProfile": "control",
+              "fallbackReason": null,
+              "promptSha256": "9e53931aab1b2fbf9e4fc6a45799c13c7d6025e96d1d85fe6803598dc7094499",
+              "characters": 4345,
+              "utf8Bytes": 4347,
+              "addedCharacters": 0,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": null,
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "focused-output",
+              "applied": true,
+              "effectiveProfile": "focused-output",
+              "fallbackReason": null,
+              "promptSha256": "38006c530e8f1c70302279e75a187406d9c5672b0168b57eb3e75d6df5ab6578",
+              "characters": 4731,
+              "utf8Bytes": 4733,
+              "addedCharacters": 386,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 386,
+                "utf8Bytes": 386,
+                "sha256": "500f2201f5c86e0958d7c1871c226c4d68e71f1155fc0144797b8277138ce20c"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "stable-layout",
+              "applied": true,
+              "effectiveProfile": "stable-layout",
+              "fallbackReason": null,
+              "promptSha256": "82554b9b9d27c6c5f4a4979d2e597929f2065e46e6bc794da6cee2ff314b3a64",
+              "characters": 4418,
+              "utf8Bytes": 4422,
+              "addedCharacters": 73,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 488,
+                "utf8Bytes": 492,
+                "sha256": "7c6a1c4ef51986c52e2479ea7e0aab5e42026c03c63c5be7d7d27c17c4d4347d"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "stable-focused",
+              "applied": true,
+              "effectiveProfile": "stable-focused",
+              "fallbackReason": null,
+              "promptSha256": "55d2ebb7111e1cbdae687ea2c1274441a25ea6748ccf4933931ccac70a748630",
+              "characters": 4804,
+              "utf8Bytes": 4808,
+              "addedCharacters": 459,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 874,
+                "utf8Bytes": 878,
+                "sha256": "8f1c52507fd35bdb0e364264a6881f70d673773a9c86ed9bc0a118b3a46fa839"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            }
+          ],
+          "runtimeMetadataProbe": [
+            {
+              "profile": "control",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 832,
+                "sha256": "700980c67f34fd7464eabcebbeaed1b28af717700cf44cb847634467c8c95c79",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "focused-output",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 1218,
+                "sha256": "fe191f77acd3fcfd212d7ae3acd5ebc450ab970e1bc9fbf9a2d23555c5c18590",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "stable-layout",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 4049,
+                "sha256": "0ee73965a7308a236def293aa53e73fb8a4805dd15588430471043fff5fcfb15",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "stable-focused",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 4435,
+                "sha256": "83d853b09b162a05058cb4f88d31ddf072abca1961731b8035df1db9b2be48d1",
+                "providerCacheReuse": null
+              }
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "task": "cursor-feed",
+          "receiver": "claude",
+          "fixtureHash": "b8499ae3fb549b50fb7f3d55a00dc5154622306bba756f88e3b6e37a0e979a9d",
+          "source": "same checkpoint and retained history for every profile",
+          "profiles": [
+            {
+              "profile": "control",
+              "applied": true,
+              "effectiveProfile": "control",
+              "fallbackReason": null,
+              "promptSha256": "a9e3ef049391c5449b817d9ed1b59f43c42d2a3aa530ea40dd99d46ac3f60028",
+              "characters": 4884,
+              "utf8Bytes": 4890,
+              "addedCharacters": 0,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": null,
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "focused-output",
+              "applied": true,
+              "effectiveProfile": "focused-output",
+              "fallbackReason": null,
+              "promptSha256": "158b2272c3bb913fcddc0c3521e9e8c7b0dbec85c6d71febf99ada0e6828d534",
+              "characters": 5270,
+              "utf8Bytes": 5276,
+              "addedCharacters": 386,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 386,
+                "utf8Bytes": 386,
+                "sha256": "500f2201f5c86e0958d7c1871c226c4d68e71f1155fc0144797b8277138ce20c"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "stable-layout",
+              "applied": true,
+              "effectiveProfile": "stable-layout",
+              "fallbackReason": null,
+              "promptSha256": "50d6ba33a60bc12f40d579c56bb84cdbe7872ef848eede7cc1d0220202292cad",
+              "characters": 4957,
+              "utf8Bytes": 4965,
+              "addedCharacters": 73,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 488,
+                "utf8Bytes": 492,
+                "sha256": "7c6a1c4ef51986c52e2479ea7e0aab5e42026c03c63c5be7d7d27c17c4d4347d"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "stable-focused",
+              "applied": true,
+              "effectiveProfile": "stable-focused",
+              "fallbackReason": null,
+              "promptSha256": "bedc45eb9ae78ddf9c1db891c66250fff891ebd9d9bad78a30aa42e39cba6780",
+              "characters": 5343,
+              "utf8Bytes": 5351,
+              "addedCharacters": 459,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 874,
+                "utf8Bytes": 878,
+                "sha256": "8f1c52507fd35bdb0e364264a6881f70d673773a9c86ed9bc0a118b3a46fa839"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            }
+          ],
+          "runtimeMetadataProbe": [
+            {
+              "profile": "control",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 850,
+                "sha256": "d09fdd885e72e0063fd56273b47760b0a803c650de35a3db8db05a22a6330564",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "focused-output",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 1236,
+                "sha256": "c02bf98d0155c14912269663961d21c05552e52dfe23ef629187385dd005d909",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "stable-layout",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 4592,
+                "sha256": "f537b023ec1db53b0ae52ef58eaf42be86535e0d99703dd68a178e431da14e7e",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "stable-focused",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 4978,
+                "sha256": "bb8da775d49d8009a048659ca9618f7f0d48f83ac6517405921b3c1919ef69bd",
+                "providerCacheReuse": null
+              }
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "task": "cursor-feed",
+          "receiver": "codex",
+          "fixtureHash": "b8499ae3fb549b50fb7f3d55a00dc5154622306bba756f88e3b6e37a0e979a9d",
+          "source": "same checkpoint and retained history for every profile",
+          "profiles": [
+            {
+              "profile": "control",
+              "applied": true,
+              "effectiveProfile": "control",
+              "fallbackReason": null,
+              "promptSha256": "dcbcf777a70c3a2627ebc2e3e5c5652d24546911f015f589ca5053bcafb99e7a",
+              "characters": 5400,
+              "utf8Bytes": 5402,
+              "addedCharacters": 0,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": null,
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "focused-output",
+              "applied": true,
+              "effectiveProfile": "focused-output",
+              "fallbackReason": null,
+              "promptSha256": "ec1e38d985f5e318e743273cf990a324bd59c002cce3c8946577a5738e28bfb6",
+              "characters": 5786,
+              "utf8Bytes": 5788,
+              "addedCharacters": 386,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 386,
+                "utf8Bytes": 386,
+                "sha256": "500f2201f5c86e0958d7c1871c226c4d68e71f1155fc0144797b8277138ce20c"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "stable-layout",
+              "applied": true,
+              "effectiveProfile": "stable-layout",
+              "fallbackReason": null,
+              "promptSha256": "a2391fe9b06ea6285e09239a0a7451c11bea39f45f069e0aa738eee7ae26aa48",
+              "characters": 5473,
+              "utf8Bytes": 5477,
+              "addedCharacters": 73,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 488,
+                "utf8Bytes": 492,
+                "sha256": "7c6a1c4ef51986c52e2479ea7e0aab5e42026c03c63c5be7d7d27c17c4d4347d"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "stable-focused",
+              "applied": true,
+              "effectiveProfile": "stable-focused",
+              "fallbackReason": null,
+              "promptSha256": "67fe85980938f71d175160559f8dd77c22445afa2eaf32eec02399cdc66f303a",
+              "characters": 5859,
+              "utf8Bytes": 5863,
+              "addedCharacters": 459,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 874,
+                "utf8Bytes": 878,
+                "sha256": "8f1c52507fd35bdb0e364264a6881f70d673773a9c86ed9bc0a118b3a46fa839"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            }
+          ],
+          "runtimeMetadataProbe": [
+            {
+              "profile": "control",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 850,
+                "sha256": "4383514c377fc6a5ea503f19ec048ee5850fbef7222516875a71a856537e9728",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "focused-output",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 1236,
+                "sha256": "defa40d290725a272c401a6f6c7955487ad52f9ef39158cb31902a94dd32db86",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "stable-layout",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 5104,
+                "sha256": "7b00a75c1ba52fd6e4653d1c25acfb72030c0b1305e067356ba6ea167bfad470",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "stable-focused",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 5490,
+                "sha256": "60bd82753f18e31a749fb7b57751d303a675116211e0db0bce0bc67ec968feec",
+                "providerCacheReuse": null
+              }
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "task": "tenant-ledger",
+          "receiver": "claude",
+          "fixtureHash": "ab1b6f8cf39c8d7c52f2aed6be3b57c8617920f8e6c27be5356fb75604d8e4d5",
+          "source": "same checkpoint and retained history for every profile",
+          "profiles": [
+            {
+              "profile": "control",
+              "applied": true,
+              "effectiveProfile": "control",
+              "fallbackReason": null,
+              "promptSha256": "92c0e2bf0291c8f3bc7c4a88811c71984c27f141533c3c70cb88a4750f7a7cc8",
+              "characters": 5498,
+              "utf8Bytes": 5504,
+              "addedCharacters": 0,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": null,
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "focused-output",
+              "applied": true,
+              "effectiveProfile": "focused-output",
+              "fallbackReason": null,
+              "promptSha256": "022e3f417f003acc715e5aed6460f189a8f3969aca1467df2f85a5fe45b7dcf6",
+              "characters": 5884,
+              "utf8Bytes": 5890,
+              "addedCharacters": 386,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 386,
+                "utf8Bytes": 386,
+                "sha256": "500f2201f5c86e0958d7c1871c226c4d68e71f1155fc0144797b8277138ce20c"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "stable-layout",
+              "applied": true,
+              "effectiveProfile": "stable-layout",
+              "fallbackReason": null,
+              "promptSha256": "3d804f0c8c9bd7e880378542a96f2b42808a0f1e25024dce4494b26a6ec85f10",
+              "characters": 5571,
+              "utf8Bytes": 5579,
+              "addedCharacters": 73,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 488,
+                "utf8Bytes": 492,
+                "sha256": "7c6a1c4ef51986c52e2479ea7e0aab5e42026c03c63c5be7d7d27c17c4d4347d"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            },
+            {
+              "profile": "stable-focused",
+              "applied": true,
+              "effectiveProfile": "stable-focused",
+              "fallbackReason": null,
+              "promptSha256": "ad94fb20d04b82271e1f85dc32a0e575290d97be7361a152483e2e4429cb7b6f",
+              "characters": 5957,
+              "utf8Bytes": 5965,
+              "addedCharacters": 459,
+              "exactRequirementsInline": 6,
+              "selectedEvidenceUnchanged": true,
+              "coverageWarningsUnchanged": true,
+              "staticPrefix": {
+                "characters": 874,
+                "utf8Bytes": 878,
+                "sha256": "8f1c52507fd35bdb0e364264a6881f70d673773a9c86ed9bc0a118b3a46fa839"
+              },
+              "cacheReadTokens": null,
+              "cacheCreationTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "receiverWallTimeMs": null
+            }
+          ],
+          "runtimeMetadataProbe": [
+            {
+              "profile": "control",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 833,
+                "sha256": "83f1cea6c5b69123d462e97a2a4d3ce1fb01bdbc569f9cb26937eead77107db4",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "focused-output",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 1219,
+                "sha256": "a17e3077948c5abc2fa23195682a227e778c3d15f5e83b5aef62e370f0326c79",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "stable-layout",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 5206,
+                "sha256": "9ddfbf2e20de903d550e4090b5f14b176e7179990e2b76b5369ec8b3fbc0b02b",
+                "providerCacheReuse": null
+              }
+            },
+            {
+              "profile": "stable-focused",
+              "sameSelectedEvidence": true,
+              "captureMetadataChanged": true,
+              "sharedPromptPrefix": {
+                "utf8Bytes": 5592,
+                "sha256": "2008ad30583a0830bb5655ddab067b780b13048628a8b6f0707f0c00d911ee14",
+                "providerCacheReuse": null
+              }
+            }
+          ]
+        }
+      ],
+      "proposedExperiment": {
+        "schemaVersion": 1,
+        "mode": "policy-cache-experiment-plan",
+        "contrast": "output",
+        "profiles": ["control", "focused-output"],
+        "repetitions": 1,
+        "plannedLaunches": 8,
+        "authorizedLaunches": 0,
+        "automaticReruns": 0,
+        "orderPolicy": "AB/BA across the two tasks within each receiver; invert order on each repetition",
+        "cacheCondition": "uncontrolled",
+        "mutateProviderCaches": false,
+        "mutateCredentials": false,
+        "currentRuntimeVersions": {
+          "claude": null,
+          "codex": null
+        },
+        "runtimeRequirement": "Record CLI version, requested/resolved model where exposed, effort, start/end times, and actual elapsed spacing for every fresh session.",
+        "usageRequirement": "Keep total input, cache read, cache creation, output, and reasoning separate; absent counters stay null and output-inclusive reasoning is not added twice.",
+        "outputPolicySha256": "f31ed4039d21d14a1c6126b595911543f6d414e0c16a2de463174f8ea9969df5",
+        "sourceHashes": {
+          "benchmarks/continuity/bidirectional.mjs": "67d0b1be3c31dfa9de6b28201a134d8a9cb7cd3c062967a9920f5f66f6966f3c",
+          "benchmarks/continuity/measurement.mjs": "49cd92d19dcc80fdc6c621ddde08c0eceb61fbdf6947966f0a3c8e6d6716908c",
+          "benchmarks/continuity/policies.mjs": "db27529f3d1b252bda83e56edffbbfd9d9f6e4d8512b707d8a5d0ce5554113cb",
+          "benchmarks/continuity/policy-experiment.mjs": "69f5beb9bd0cca9e59e24dc9e522d0369cee1b8325d026ffdb0fca8f3f3c6abf",
+          "benchmarks/continuity/workflows.mjs": "1c5b727ebde6592cae9440ac89256efdd44aaf41d90e2fe7789ffdcc21122411",
+          "benchmarks/handoff/lib.mjs": "1813eddee0940c82a91de278f6fccf8017461195888aa36dccf1443df77e0571",
+          "src/cli/handoff.ts": "b6a216f646f97a1ff3e0f056872d9fdab54e1374238512b29b099a49a9432fbb",
+          "src/context/briefing.ts": "808fcf057f9e450c042a65dfc8365c94b0cb6d97a48104aba924e0bff9fcd8f3",
+          "src/context/prompt-policy.ts": "e1bb76db014701d936a7b24d4963e16b32ec3925be31004baa38a7753eeabdb8",
+          "src/context/render.ts": "e5c490d2db4046b24aae3ca4fcd1ceafb0c2ffc286e4b1fac0f2356b1949a971",
+          "src/context/schema.ts": "310efe3efe027d0f64f4f93a3147695bcd19f48da02bf960c76a9fc4fcd84faa",
+          "src/handoff.ts": "dbeacf9414ffcd8226c287ad2b41f2b3b69fe793109a364d7acba22775fa50dc",
+          "src/lifecycle.ts": "53be92e58babaa53b04b84be036f5f5d1552b33c95a4b604d712b89c5513be5f"
+        },
+        "schedule": [
+          {
+            "key": "output/r0/c0/control",
+            "pairId": "r0/c0",
+            "repetition": 0,
+            "caseIndex": 0,
+            "task": "tenant-ledger",
+            "receiver": "codex",
+            "position": 0,
+            "profile": "control"
+          },
+          {
+            "key": "output/r0/c0/focused-output",
+            "pairId": "r0/c0",
+            "repetition": 0,
+            "caseIndex": 0,
+            "task": "tenant-ledger",
+            "receiver": "codex",
+            "position": 1,
+            "profile": "focused-output"
+          },
+          {
+            "key": "output/r0/c1/control",
+            "pairId": "r0/c1",
+            "repetition": 0,
+            "caseIndex": 1,
+            "task": "cursor-feed",
+            "receiver": "claude",
+            "position": 0,
+            "profile": "control"
+          },
+          {
+            "key": "output/r0/c1/focused-output",
+            "pairId": "r0/c1",
+            "repetition": 0,
+            "caseIndex": 1,
+            "task": "cursor-feed",
+            "receiver": "claude",
+            "position": 1,
+            "profile": "focused-output"
+          },
+          {
+            "key": "output/r0/c2/focused-output",
+            "pairId": "r0/c2",
+            "repetition": 0,
+            "caseIndex": 2,
+            "task": "cursor-feed",
+            "receiver": "codex",
+            "position": 0,
+            "profile": "focused-output"
+          },
+          {
+            "key": "output/r0/c2/control",
+            "pairId": "r0/c2",
+            "repetition": 0,
+            "caseIndex": 2,
+            "task": "cursor-feed",
+            "receiver": "codex",
+            "position": 1,
+            "profile": "control"
+          },
+          {
+            "key": "output/r0/c3/focused-output",
+            "pairId": "r0/c3",
+            "repetition": 0,
+            "caseIndex": 3,
+            "task": "tenant-ledger",
+            "receiver": "claude",
+            "position": 0,
+            "profile": "focused-output"
+          },
+          {
+            "key": "output/r0/c3/control",
+            "pairId": "r0/c3",
+            "repetition": 0,
+            "caseIndex": 3,
+            "task": "tenant-ledger",
+            "receiver": "claude",
+            "position": 1,
+            "profile": "control"
+          }
+        ],
+        "hash": "653cd1aa896dfccd7fdd5f7ac362d7059944ab8f3782c1937d64871da893754f"
+      },
+      "analysis": {
+        "schemaVersion": 1,
+        "mode": "saved-policy-observation-analysis",
+        "protocolHash": "653cd1aa896dfccd7fdd5f7ac362d7059944ab8f3782c1937d64871da893754f",
+        "recordedObservations": 0,
+        "providerSessionsLaunched": 0,
+        "pairs": [
+          {
+            "pairId": "r0/c0",
+            "caseIndex": 0,
+            "receiver": "codex",
+            "repetition": 0,
+            "plannedOrder": ["control", "focused-output"],
+            "qualified": false,
+            "reasons": [
+              "control-missing",
+              "candidate-missing",
+              "observed-spacing-unknown"
+            ],
+            "elapsedSpacingMs": null,
+            "modelQualification": "unqualified",
+            "control": null,
+            "candidate": null,
+            "differences": {
+              "inputTokens": null,
+              "cachedInputTokens": null,
+              "cacheCreationInputTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "toolCalls": null,
+              "modelTurns": null,
+              "wallTimeMs": null
+            },
+            "cacheReadFractionDelta": null,
+            "cachePositiveWithoutMeasuredRegressions": false
+          },
+          {
+            "pairId": "r0/c1",
+            "caseIndex": 1,
+            "receiver": "claude",
+            "repetition": 0,
+            "plannedOrder": ["control", "focused-output"],
+            "qualified": false,
+            "reasons": [
+              "control-missing",
+              "candidate-missing",
+              "observed-spacing-unknown"
+            ],
+            "elapsedSpacingMs": null,
+            "modelQualification": "unqualified",
+            "control": null,
+            "candidate": null,
+            "differences": {
+              "inputTokens": null,
+              "cachedInputTokens": null,
+              "cacheCreationInputTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "toolCalls": null,
+              "modelTurns": null,
+              "wallTimeMs": null
+            },
+            "cacheReadFractionDelta": null,
+            "cachePositiveWithoutMeasuredRegressions": false
+          },
+          {
+            "pairId": "r0/c2",
+            "caseIndex": 2,
+            "receiver": "codex",
+            "repetition": 0,
+            "plannedOrder": ["focused-output", "control"],
+            "qualified": false,
+            "reasons": [
+              "control-missing",
+              "candidate-missing",
+              "observed-spacing-unknown"
+            ],
+            "elapsedSpacingMs": null,
+            "modelQualification": "unqualified",
+            "control": null,
+            "candidate": null,
+            "differences": {
+              "inputTokens": null,
+              "cachedInputTokens": null,
+              "cacheCreationInputTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "toolCalls": null,
+              "modelTurns": null,
+              "wallTimeMs": null
+            },
+            "cacheReadFractionDelta": null,
+            "cachePositiveWithoutMeasuredRegressions": false
+          },
+          {
+            "pairId": "r0/c3",
+            "caseIndex": 3,
+            "receiver": "claude",
+            "repetition": 0,
+            "plannedOrder": ["focused-output", "control"],
+            "qualified": false,
+            "reasons": [
+              "control-missing",
+              "candidate-missing",
+              "observed-spacing-unknown"
+            ],
+            "elapsedSpacingMs": null,
+            "modelQualification": "unqualified",
+            "control": null,
+            "candidate": null,
+            "differences": {
+              "inputTokens": null,
+              "cachedInputTokens": null,
+              "cacheCreationInputTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "toolCalls": null,
+              "modelTurns": null,
+              "wallTimeMs": null
+            },
+            "cacheReadFractionDelta": null,
+            "cachePositiveWithoutMeasuredRegressions": false
+          }
+        ],
+        "receivers": [
+          {
+            "provider": "claude",
+            "recordedObservations": 0,
+            "plannedPairs": 2,
+            "qualifiedPairs": 0,
+            "excludedPairs": 2,
+            "stableRuntime": false,
+            "allPairsQualified": false,
+            "balancedObservedOrder": false,
+            "replicatedCases": false,
+            "replicatedCachePattern": false,
+            "cacheBenefit": "unmeasured",
+            "medianPairedDifferences": {
+              "inputTokens": null,
+              "cachedInputTokens": null,
+              "cacheCreationInputTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "toolCalls": null,
+              "modelTurns": null,
+              "wallTimeMs": null
+            },
+            "metricPairs": {
+              "inputTokens": 0,
+              "cachedInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "nonCachedTokens": 0,
+              "toolCalls": 0,
+              "modelTurns": 0,
+              "wallTimeMs": 0
+            }
+          },
+          {
+            "provider": "codex",
+            "recordedObservations": 0,
+            "plannedPairs": 2,
+            "qualifiedPairs": 0,
+            "excludedPairs": 2,
+            "stableRuntime": false,
+            "allPairsQualified": false,
+            "balancedObservedOrder": false,
+            "replicatedCases": false,
+            "replicatedCachePattern": false,
+            "cacheBenefit": "unmeasured",
+            "medianPairedDifferences": {
+              "inputTokens": null,
+              "cachedInputTokens": null,
+              "cacheCreationInputTokens": null,
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "nonCachedTokens": null,
+              "toolCalls": null,
+              "modelTurns": null,
+              "wallTimeMs": null
+            },
+            "metricPairs": {
+              "inputTokens": 0,
+              "cachedInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "nonCachedTokens": 0,
+              "toolCalls": 0,
+              "modelTurns": 0,
+              "wallTimeMs": 0
+            }
+          }
+        ],
+        "recommendation": "No automatic promotion. Review correctness, all-attempt validity, counter coverage, output/tools/latency, and provider-specific replication.",
+        "limitations": [
+          "Exact prompt-prefix equality is not a provider cache measurement. Provider-managed cache state remains uncontrolled.",
+          "Reasoning exposed as part of output is reported separately and is not added again to output or non-cached usage.",
+          "Descriptive replication does not establish significance or a controlled cold-cache comparison."
+        ]
+      },
+      "limitations": [
+        "No provider process is launched by this command. The proposed schedule is not a session authorization.",
+        "The runtime-metadata probe appends one synthetic session-end event only in a disposable copy; original control inputs are read-only.",
+        "Common UTF-8 prefix bytes are a layout diagnostic, not tokenization, provider cache counters, or measured cache reuse.",
+        "Policy profiles preserve control selection and can fall back to control when existing budget headroom is insufficient.",
+        "The layout/output ablation remains separate from the M2–M4 inspection/retrieval candidate and its live quality gate."
+      ]
+    },
+    "promptComparison": {
+      "schemaVersion": 1,
+      "mode": "offline-context-comparison",
+      "scope": "Three synthetic interruptions, one trial per arm; no real Claude predecessor or Orca runtime comparison.",
+      "predecessorCaptureCost": null,
+      "humanPreparationCost": null,
+      "modelAssistedPreparationCalls": 0,
+      "providerSessions": 0,
+      "provider": null,
+      "baselineBlob": "134e19a55f469d791d7e27dce4741987806950b4",
+      "summary": [
+        {
+          "arm": "request-repository",
+          "cases": 3,
+          "executed": 0,
+          "correct": 0,
+          "failures": 0,
+          "promptCharacters": 1801,
+          "nonCachedTokens": null,
+          "successorWallTimeMs": null,
+          "preparationWallTimeMs": 0.192
+        },
+        {
+          "arm": "full-history",
+          "cases": 3,
+          "executed": 0,
+          "correct": 0,
+          "failures": 0,
+          "promptCharacters": 16490,
+          "nonCachedTokens": null,
+          "successorWallTimeMs": null,
+          "preparationWallTimeMs": 0.038
+        },
+        {
+          "arm": "rirei-v1",
+          "cases": 3,
+          "executed": 0,
+          "correct": 0,
+          "failures": 0,
+          "promptCharacters": 5149,
+          "nonCachedTokens": null,
+          "successorWallTimeMs": null,
+          "preparationWallTimeMs": 2.575
+        },
+        {
+          "arm": "rirei-v2",
+          "cases": 3,
+          "executed": 0,
+          "correct": 0,
+          "failures": 0,
+          "promptCharacters": 5584,
+          "nonCachedTokens": null,
+          "successorWallTimeMs": null,
+          "preparationWallTimeMs": 2.718
+        }
+      ],
+      "rows": [
+        {
+          "task": "repository-sufficient",
+          "baseFixture": "repository-sufficient",
+          "arm": "request-repository",
+          "codeInputHash": "2798dd19115d526c0d287162b10e36d70c0ec789ab56b6d806a4afa17a1e9150",
+          "historyHash": "912e9082ab45e6d9239661b975a272ee72d983884185412c8b380acad33668c7",
+          "promptHash": "18c34ffbd33a4d38d89733dd20df1c1b436197730d99e9e1e4f9c6f6444e9ed9",
+          "promptCharacters": 633,
+          "estimatedPromptTokens": 159,
+          "preparationMs": 0.052,
+          "inlineTargetCount": 0,
+          "inlineTargetTotal": 1,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "repository-sufficient",
+          "baseFixture": "repository-sufficient",
+          "arm": "full-history",
+          "codeInputHash": "2798dd19115d526c0d287162b10e36d70c0ec789ab56b6d806a4afa17a1e9150",
+          "historyHash": "912e9082ab45e6d9239661b975a272ee72d983884185412c8b380acad33668c7",
+          "promptHash": "08b11d1211020db7bbbd474111a2f531a0a735cfcd31a8a2a6b6e31b6174ce37",
+          "promptCharacters": 1649,
+          "estimatedPromptTokens": 413,
+          "preparationMs": 0.004,
+          "inlineTargetCount": 1,
+          "inlineTargetTotal": 1,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "repository-sufficient",
+          "baseFixture": "repository-sufficient",
+          "arm": "rirei-v1",
+          "codeInputHash": "2798dd19115d526c0d287162b10e36d70c0ec789ab56b6d806a4afa17a1e9150",
+          "historyHash": "912e9082ab45e6d9239661b975a272ee72d983884185412c8b380acad33668c7",
+          "promptHash": "f9b2317fbddf37e4d1f6c970b757934aabe2903176989beaadabd7ba457872e0",
+          "promptCharacters": 1628,
+          "estimatedPromptTokens": 407,
+          "preparationMs": 0.983,
+          "inlineTargetCount": 1,
+          "inlineTargetTotal": 1,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "repository-sufficient",
+          "baseFixture": "repository-sufficient",
+          "arm": "rirei-v2",
+          "codeInputHash": "2798dd19115d526c0d287162b10e36d70c0ec789ab56b6d806a4afa17a1e9150",
+          "historyHash": "912e9082ab45e6d9239661b975a272ee72d983884185412c8b380acad33668c7",
+          "promptHash": "16553d8fd6c9634f62e8569f784304a07549f27c954ef995dc014e39204daf5c",
+          "promptCharacters": 1588,
+          "estimatedPromptTokens": 397,
+          "preparationMs": 1.096,
+          "inlineTargetCount": 1,
+          "inlineTargetTotal": 1,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "budget-pressure",
+          "baseFixture": "late-requirement",
+          "arm": "full-history",
+          "codeInputHash": "fc42bbd7d6b6dd4738dca57acd7d708de1eec134519e68093a863f36f7852293",
+          "historyHash": "a99f835c0c47c8a3513716325e5834b73e93cff428c33e8c85ca7389f1247c86",
+          "promptHash": "e540c1c0f285796ad2b0b1d79cf0c0e55ed316e676eaddc8f83cd701e2e2795f",
+          "promptCharacters": 12199,
+          "estimatedPromptTokens": 3050,
+          "preparationMs": 0.028,
+          "inlineTargetCount": 1,
+          "inlineTargetTotal": 1,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "budget-pressure",
+          "baseFixture": "late-requirement",
+          "arm": "rirei-v1",
+          "codeInputHash": "fc42bbd7d6b6dd4738dca57acd7d708de1eec134519e68093a863f36f7852293",
+          "historyHash": "a99f835c0c47c8a3513716325e5834b73e93cff428c33e8c85ca7389f1247c86",
+          "promptHash": "f75306ec06c7d59478f32661b4f01d95fa6bd2ac12dbd6b2e892cada6f9ed1c7",
+          "promptCharacters": 1685,
+          "estimatedPromptTokens": 422,
+          "preparationMs": 0.61,
+          "inlineTargetCount": 0,
+          "inlineTargetTotal": 1,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "budget-pressure",
+          "baseFixture": "late-requirement",
+          "arm": "rirei-v2",
+          "codeInputHash": "fc42bbd7d6b6dd4738dca57acd7d708de1eec134519e68093a863f36f7852293",
+          "historyHash": "a99f835c0c47c8a3513716325e5834b73e93cff428c33e8c85ca7389f1247c86",
+          "promptHash": "2221faccb80c22198ffc318912bc70081205224b3ee8bc04120d0b6fa5a50713",
+          "promptCharacters": 2163,
+          "estimatedPromptTokens": 541,
+          "preparationMs": 0.964,
+          "inlineTargetCount": 1,
+          "inlineTargetTotal": 1,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "budget-pressure",
+          "baseFixture": "late-requirement",
+          "arm": "request-repository",
+          "codeInputHash": "fc42bbd7d6b6dd4738dca57acd7d708de1eec134519e68093a863f36f7852293",
+          "historyHash": "a99f835c0c47c8a3513716325e5834b73e93cff428c33e8c85ca7389f1247c86",
+          "promptHash": "5b129ecdb26beacc62ff35053fb3addb6562ffd1855d5767126c53bbe518145e",
+          "promptCharacters": 563,
+          "estimatedPromptTokens": 141,
+          "preparationMs": 0.067,
+          "inlineTargetCount": 0,
+          "inlineTargetTotal": 1,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "unverified-edit",
+          "baseFixture": "unverified-edit",
+          "arm": "rirei-v1",
+          "codeInputHash": "782ebdd4ce5ce8b128036f1f5725569ad09b2f63df71c0b358b464d0220fc202",
+          "historyHash": "e908c5f3df397f5cf5798d09369f04c87b6ec6694853a70bc5d1e7cbf30558ac",
+          "promptHash": "c10aefacab2928da21974b2f1e7c8bedf56d81b28abb1e590e24b66e30ce8574",
+          "promptCharacters": 1836,
+          "estimatedPromptTokens": 459,
+          "preparationMs": 0.982,
+          "inlineTargetCount": 2,
+          "inlineTargetTotal": 2,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "unverified-edit",
+          "baseFixture": "unverified-edit",
+          "arm": "rirei-v2",
+          "codeInputHash": "782ebdd4ce5ce8b128036f1f5725569ad09b2f63df71c0b358b464d0220fc202",
+          "historyHash": "e908c5f3df397f5cf5798d09369f04c87b6ec6694853a70bc5d1e7cbf30558ac",
+          "promptHash": "6c4bd1f4a2dd27d24e2d9440dc479e779055aa0a852e57551c98c8810abcb3db",
+          "promptCharacters": 1833,
+          "estimatedPromptTokens": 459,
+          "preparationMs": 0.658,
+          "inlineTargetCount": 2,
+          "inlineTargetTotal": 2,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "unverified-edit",
+          "baseFixture": "unverified-edit",
+          "arm": "request-repository",
+          "codeInputHash": "782ebdd4ce5ce8b128036f1f5725569ad09b2f63df71c0b358b464d0220fc202",
+          "historyHash": "e908c5f3df397f5cf5798d09369f04c87b6ec6694853a70bc5d1e7cbf30558ac",
+          "promptHash": "5ee589d648d58839ca9ab071437629a7a94eff726d3842b251be2f92fe3d6408",
+          "promptCharacters": 605,
+          "estimatedPromptTokens": 152,
+          "preparationMs": 0.073,
+          "inlineTargetCount": 0,
+          "inlineTargetTotal": 2,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        },
+        {
+          "task": "unverified-edit",
+          "baseFixture": "unverified-edit",
+          "arm": "full-history",
+          "codeInputHash": "782ebdd4ce5ce8b128036f1f5725569ad09b2f63df71c0b358b464d0220fc202",
+          "historyHash": "e908c5f3df397f5cf5798d09369f04c87b6ec6694853a70bc5d1e7cbf30558ac",
+          "promptHash": "b94a87aa0f6b28dadcb288f4c1e2dcdd93ba79784524e7b2d6cdf91ac892d85e",
+          "promptCharacters": 2642,
+          "estimatedPromptTokens": 661,
+          "preparationMs": 0.006,
+          "inlineTargetCount": 2,
+          "inlineTargetTotal": 2,
+          "execution": null,
+          "grading": null,
+          "evidenceIntact": true
+        }
+      ],
+      "limitations": [
+        "Prompt character/token estimates are not provider billing.",
+        "Inline target presence is not downstream instruction compliance.",
+        "Source capture and human costs are unmeasured, not zero; these are synthetic histories.",
+        "No statistical or cross-provider superiority claim follows from this small pilot.",
+        "Necessary clarifications, repeated approaches, and useful-action latency require trace review."
+      ]
+    }
+  },
+  "limitations": [
+    "Fixture validators exercise authored gold implementations, not a new model completion.",
+    "Inspection percentiles use 12 sequential warm local samples; model execution and CLI startup are excluded.",
+    "Targeted retrieval uses preselected fields and ranges; command counts and returned bytes are not tokens, model turns, or an optimal-shell comparison.",
+    "Profile preservation and common-prefix measurements do not establish provider cache reuse, output savings, or receiver latency.",
+    "The prompt comparison uses three synthetic interruptions and one preparation per arm; no new live correctness or usage result is produced.",
+    "Stage wall times include setup and control replay and must not be interpreted as isolated product-operation timings."
+  ]
+}

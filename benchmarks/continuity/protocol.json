@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "status": "offline-prototype",
+  "providerCalls": 0,
+  "plannedDirections": ["claude-to-codex", "codex-to-claude"],
+  "captureAdapters": {
+    "claude": "offline qualified; native event delivery pending",
+    "codex": "not implemented"
+  },
+  "fixtureInputHashes": {
+    "repository-sufficient": "e04af3a5ec13671f0899b26896b2b9b710964033b3b94666fa953b640669f259",
+    "late-requirement": "38d97a6d4044cbca3b24fb2dce796caacbf21f9665444e3d157558e4873301a6",
+    "rejected-approach": "8ee29140c2f678792a8097ffe41883df683633858e55b65e3b8b4423ef64b381",
+    "unverified-edit": "5d1c8ee8cbc323b2bbea51c0498cb598dfabefbed3795668a6d61edebe17108c",
+    "superseded-instruction": "bbb98576d6647ff6fd667d87588d57023446e95b8e5f9a82d413b6158d6c7ee9",
+    "abrupt-interruption": "de7aa61ce7a7dfa5736ab0e22ce448aa4b288a985ada8b7eba167da139932447"
+  },
+  "arms": [
+    { "id": "request-repository", "preparation": "exact original request" },
+    {
+      "id": "handoff-file",
+      "preparation": "agent-generated before interruption, with timing and cost recorded"
+    },
+    {
+      "id": "orca-focused",
+      "preparation": "exact released prompt builder with authorized source history"
+    },
+    {
+      "id": "full-history",
+      "preparation": "same authorized predecessor history"
+    },
+    {
+      "id": "rirei-capture",
+      "preparation": "captured events, cited preview, and read-only retrieval"
+    }
+  ],
+  "orca": {
+    "repository": "https://github.com/stablyai/orca",
+    "release": "v1.4.237",
+    "promptBuilder": "src/renderer/src/lib/agent-session-continuation.ts",
+    "gitBlobSha": "41c5c72bd30fb8ec3ce41bbbb4ca62324182c060",
+    "qualification": "source reviewed; no Orca runtime comparison executed"
+  },
+  "primaryOutcome": "correct completion without human repair of task understanding",
+  "requiredAccounting": [
+    "capture",
+    "context preparation",
+    "retrieval",
+    "successor continuation",
+    "failures and retries",
+    "human preparation and repair"
+  ],
+  "requiredRunMetadata": [
+    "fixture input hash",
+    "exact prompt hash",
+    "source history hash",
+    "provider CLI version",
+    "model identifier",
+    "effort",
+    "environment",
+    "run order",
+    "permissions",
+    "preparation costs",
+    "timeouts",
+    "missing metrics"
+  ],
+  "liveExecution": "requires a separately agreed provider/model/call budget"
+}

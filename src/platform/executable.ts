@@ -16,6 +16,14 @@ export const DEFAULT_WINDOWS_PATHEXT = [
   '.CPL',
 ];
 
+/** The inherited provider host sends line breaks as spaces through Windows launchers. */
+export function inheritedLaunchArgument(
+  argument: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === 'win32' ? argument.replace(/\r\n?|\n/g, ' ') : argument;
+}
+
 export interface ResolveExecutableOptions {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;

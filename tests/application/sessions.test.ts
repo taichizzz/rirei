@@ -1,4 +1,4 @@
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, ProcessResult } from '../../src/agents/adapter.js';
 import { handoffStateFingerprint } from '../../src/handoff.js';
@@ -26,6 +26,11 @@ import {
 } from '../../src/state/schema.js';
 import { readState, updateState, writeState } from '../../src/state/store.js';
 import { createRepository, removeRepository } from '../helpers.js';
+import {
+  contextFingerprint,
+  setContextConsent,
+} from '../../src/context/store.js';
+import { inspectCoveredSnapshot } from '../../src/context/snapshot.js';
 
 const roots: string[] = [];
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -215,9 +220,57 @@ const success: ProcessResult = {
 };
 
 describe('SessionManager', () => {
+  it('rechecks approved covered inputs after provider command preparation without launching stale verification', async () => {
+    const { root, state } = await project();
+    const before = await inspectCoveredSnapshot(root);
+    expect(before.identity.coverage.status).toBe('complete');
+    const host = new FakeProcessHost();
+    const changedAdapter: AgentAdapter = {
+      ...adapter,
+      async buildInteractiveCommand() {
+        await writeFile(`${root}/untracked-input.mjs`, 'changed after preview');
+        return { executable: 'codex', args: ['fixture'] };
+      },
+    };
+    await expect(
+      new SessionManager(host).startRun({
+        projectRoot: root,
+        state,
+        adapter: changedAdapter,
+        prompt: 'Approved verification',
+        selection: { expectedCoveredSnapshotId: before.identity.id },
+      }),
+    ).rejects.toThrow('Covered inputs changed');
+    expect(host.starts).toHaveLength(0);
+    expect((await readState(root)).runs).toEqual([]);
+  });
+
+  it('rejects capture-policy changes between approval and lease acquisition', async () => {
+    const { root, state } = await project();
+    const expectedContextFingerprint = await contextFingerprint(
+      root,
+      state.sessionId,
+    );
+    await setContextConsent(root, state.sessionId, true);
+    const host = new FakeProcessHost();
+    await expect(
+      new SessionManager(host).startRun({
+        projectRoot: root,
+        state,
+        adapter,
+        prompt: 'Approved context',
+        selection: { expectedContextFingerprint },
+      }),
+    ).rejects.toThrow('Captured context changed');
+    expect(host.starts).toHaveLength(0);
+    expect((await readState(root)).runs).toEqual([]);
+  });
+
   it('allows storage-only revisions before a guarded handoff launch', async () => {
     const { root, state } = await project();
     const expectedHandoffStateFingerprint = handoffStateFingerprint(state);
+    const expectedCoveredSnapshotId = (await inspectCoveredSnapshot(root))
+      .identity.id;
     const current = await updateState(root, (value) => value);
     const host = new FakeProcessHost();
     const manager = new SessionManager(host);
@@ -230,6 +283,7 @@ describe('SessionManager', () => {
       selection: {
         operationId: 'guarded-heartbeat',
         expectedHandoffStateFingerprint,
+        expectedCoveredSnapshotId,
       },
     });
 

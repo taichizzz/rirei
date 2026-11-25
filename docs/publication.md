@@ -35,9 +35,10 @@ Do not assume a normal deletion commit removes previously published personal dat
 
 ## Release boundaries
 
-- Alpha.5.1 prepares a public CLI package with `publishConfig.access=public` and the `alpha`
-  dist-tag. Package metadata is ready for publication; it does not mean npm publication has
-  already happened. The existing alpha.5.0 GitHub release remains source-only.
+- Alpha.5.5's GitHub prerelease provides a compiled CLI tarball, installer, and checksums; see
+  [its update notes](release-0.1.0-alpha.5.5.md). `publishConfig.access=public` and the `alpha`
+  dist-tag prepare the separate npm path. GitHub downloads or package metadata do not prove
+  npm registry publication/trusted-publisher setup has completed.
 - Source publication does not imply that unsigned desktop binaries are production-ready.
 - Developer ID signing, hardened runtime review, notarization, stapling, checksums, and a clean
   macOS installation test remain required for a desktop binary release.
@@ -47,7 +48,7 @@ Do not assume a normal deletion commit removes previously published personal dat
 ## Publishing the CLI alpha
 
 The `Publish CLI alpha` workflow in `.github/workflows/release.yml` is manually dispatched.
-Its default is validation only. Supply an existing alpha tag such as `v0.1.0-alpha.5.1`.
+Its default is validation only. Supply an existing alpha tag such as `v0.1.0-alpha.5.5`.
 The workflow verifies that the tag matches all package/version metadata and belongs to
 `main`, runs local checks, and packs the compiled CLI once. Windows/macOS/Linux jobs on
 Node.js 22 and 24 install that exact uploaded tarball into an isolated global prefix and
@@ -74,7 +75,7 @@ Enable npm publication only after these steps:
    configure the trusted publisher for subsequent versions and do not republish the same version.
 4. For an unpublished version with its trusted publisher configured, dispatch the workflow on
    the matching **tag ref** with `publish=true`, for example
-   `gh workflow run release.yml --ref v0.1.0-alpha.5.1 -f tag=v0.1.0-alpha.5.1 -F publish=true`.
+   `gh workflow run release.yml --ref v0.1.0-alpha.5.5 -f tag=v0.1.0-alpha.5.5 -F publish=true`.
    Publishing from a different workflow ref is rejected so provenance identifies the source tag.
    It publishes the already-tested tarball with provenance under `alpha`, never `latest`.
    A local manual first publication does not receive GitHub Actions provenance. Published
@@ -88,3 +89,17 @@ a previous published artifact, run `node scripts/smoke-packed-install.mjs --tarb
 --upgrade-from <old.tgz>`. Project state, config, usage preferences, and cache must survive.
 Native Windows Terminal acceptance (input, paste, resize, permission prompts, attach/detach,
 and provider handoff) still needs a hands-on test before advertising broader Windows support.
+
+## Working-copy architecture and artifact identity
+
+Alpha.5.5 includes experimental CLI continuity. Historical M0–M5 benchmarks used working copies
+that still reported alpha.5.1 even though the alpha.5.1 tarball did not contain those features.
+Reproduce an experiment with the recorded source, bundle, fixture, and protocol hashes.
+Persistent state, activity, and wire schema versions are separate from package versioning.
+Reading older state compatibly does not promise that an older binary can rewrite all newer
+optional fields losslessly.
+
+Full architecture/decision/audit guides are repository documentation. The npm tarball deliberately
+retains a small operational-document allowlist and external runtime dependencies; a documentation
+link is not evidence that every repository document is physically installed. See
+[development](development.md#building-the-cli) and [architecture decisions](architecture-decisions.md).

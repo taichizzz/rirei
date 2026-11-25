@@ -8,5 +8,5 @@ desktop/__pycache__/
 .pytest_cache/
 .claude/
 .furou/
-ARCHITECTURE*.md
+/ARCHITECTURE*.md
 atlas.html

@@ -16,6 +16,7 @@ import {
 } from './git/repository.js';
 import {
   buildHandoffCapsule,
+  handoffContentChecks,
   renderCompactHandoff,
   type RenderedHandoff,
 } from './handoff.js';
@@ -26,6 +27,20 @@ import { readState, updateState } from './state/store.js';
 import type { AgentAdapter, ProcessResult } from './agents/adapter.js';
 import type { PreflightLimitWarning } from './agents/limit-detection.js';
 import { InheritedProcessHost } from './process/inherited-process-host.js';
+import {
+  loadContinuitySources,
+  renderContinuityContext,
+} from './context/render.js';
+import { CONTEXT_PROMPT_LIMIT } from './context/schema.js';
+import { inspectVerificationState } from './context/verification.js';
+import { inspectCoveredSnapshot } from './context/snapshot.js';
+import { inspectionAnchor, inspectionBriefing } from './context/inspection.js';
+import {
+  applyHandoffPolicy,
+  parseHandoffProfile,
+  stableLayoutProfile,
+  type HandoffProfile,
+} from './context/prompt-policy.js';
 
 export async function taskContext(
   options: {
@@ -142,15 +157,86 @@ export async function renderHandoffDocument(
   state: RelayState,
   worktreeRoot = root,
   capturedSnapshot?: GitSnapshot,
+  options: { profile?: HandoffProfile } = {},
 ): Promise<RenderedHandoff> {
+  const profile = parseHandoffProfile(options.profile);
   const config = await readConfig(root);
   const snapshot =
     capturedSnapshot ??
     (await inspectGitSnapshot(worktreeRoot, config.checkpoint.maxPatchBytes));
-  return renderCompactHandoff(
-    buildHandoffCapsule(state, snapshot, config.handoff.maxChangedFiles),
-    config.handoff,
+  const sources = await loadContinuitySources(
+    root,
+    state.sessionId,
+    worktreeRoot,
+    snapshot.fingerprint,
   );
+  const covered = sources
+    ? await inspectCoveredSnapshot(
+        worktreeRoot,
+        {},
+        { inspection: { includeText: false } },
+      )
+    : undefined;
+  const verification =
+    state.tests.length || state.verificationReceipts?.length
+      ? await inspectVerificationState(
+          state,
+          worktreeRoot,
+          config.tests.command ?? null,
+          undefined,
+          covered?.identity,
+        )
+      : undefined;
+  const capsule = buildHandoffCapsule(
+    state,
+    snapshot,
+    config.handoff.maxChangedFiles,
+  );
+  if (verification) capsule.verification = verification.summaries;
+  const rendered = renderCompactHandoff(capsule, config.handoff);
+  if (covered || verification?.snapshot)
+    rendered.coveredSnapshot = covered?.identity ?? verification!.snapshot;
+  const anchor = covered ? inspectionAnchor(covered) : undefined;
+  if (anchor) rendered.inspection = anchor;
+  const continuity = sources
+    ? renderContinuityContext(
+        sources,
+        anchor ? inspectionBriefing(anchor) : [],
+        { includePresentation: stableLayoutProfile(profile) },
+      )
+    : undefined;
+  const presentation = continuity?.presentation;
+  if (continuity) delete continuity.presentation;
+  const compose = async (base: RenderedHandoff) =>
+    profile === 'control'
+      ? base
+      : applyHandoffPolicy(base, {
+          profile,
+          workspace: sources?.workspace ?? (await realpath(worktreeRoot)),
+          legacyText: rendered.text,
+          legacyMaxCharacters: rendered.budget.maxCharacters,
+          presentation,
+        });
+  if (!continuity) return compose(rendered);
+  const text = `${rendered.text.trimEnd()}\n\n${continuity.text}\n`;
+  return compose({
+    ...rendered,
+    continuity,
+    text,
+    contentChecks: handoffContentChecks(text, state.task.originalRequest),
+    budget: {
+      ...rendered.budget,
+      maxCharacters: rendered.budget.maxCharacters + CONTEXT_PROMPT_LIMIT + 3,
+      maxTokens:
+        rendered.budget.maxTokens + Math.ceil((CONTEXT_PROMPT_LIMIT + 3) / 4),
+      usedCharacters: text.length,
+      estimatedTokens: Math.ceil(text.length / 4),
+      omittedItems:
+        rendered.budget.omittedItems +
+        continuity.omittedEvents +
+        (continuity.omittedStateItems ?? 0),
+    },
+  });
 }
 
 export async function renderHandoff(

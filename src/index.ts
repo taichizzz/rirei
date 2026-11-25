@@ -26,6 +26,7 @@ import { messageCommand } from './cli/message.js';
 import { tuiCommand } from './cli/tui.js';
 import { attachCommand } from './cli/attach.js';
 import { RIREI_VERSION } from './version.js';
+import { contextCommand } from './cli/context.js';
 
 const program = new Command()
   .name('relay')
@@ -43,6 +44,7 @@ const program = new Command()
   .addCommand(checkpointDiffCommand())
   .addCommand(noteCommand())
   .addCommand(handoffCommand())
+  .addCommand(contextCommand())
   .addCommand(runCommand())
   .addCommand(resumeCommand())
   .addCommand(switchCommand())

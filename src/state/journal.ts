@@ -94,8 +94,8 @@ export type TerminalJournal = z.infer<typeof journalSchema>;
  * A bounded, durable terminal lifecycle journal under Rirei app support. It records
  * terminal identity events (created/attached/status/resize/interrupt/stop/
  * close/exit/recovered) so a frontend that restarts can reconcile its terminal
- * inventory without trusting renderer state. No terminal output, prompts,
- * paths, or provider credentials are ever stored here.
+ * inventory without trusting renderer state. Canonical project paths are private
+ * discovery metadata; terminal output, prompt payloads, and credentials are excluded.
  */
 export function journalFilePath(projectRoot: string): string {
   const key = createHash('sha256')

@@ -1,6 +1,6 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$Version = '0.1.0-alpha.5.1',
+    [string]$Version = '0.1.0-alpha.5.5',
     [string]$InstallRoot,
     [string]$PackageFile,
     [switch]$InstallPrerequisites,
@@ -87,7 +87,7 @@ function Test-RireiNode {
 function Install-Rirei {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [string]$Version = '0.1.0-alpha.5.1',
+        [string]$Version = '0.1.0-alpha.5.5',
         [string]$InstallRoot,
         [string]$PackageFile,
         [switch]$InstallPrerequisites,
@@ -100,7 +100,7 @@ function Install-Rirei {
         throw 'Rirei requires 64-bit Windows 10 version 1903 or later (x64 or ARM64). Windows Terminal is recommended.'
     }
     if ($Version -notmatch '^\d+\.\d+\.\d+-alpha\.\d+(?:\.\d+)?$') {
-        throw 'Pass an exact alpha version, for example -Version 0.1.0-alpha.5.1. Tags and version ranges are not accepted.'
+        throw 'Pass an exact alpha version, for example -Version 0.1.0-alpha.5.5. Tags and version ranges are not accepted.'
     }
     if (-not $InstallRoot) {
         $localData = [Environment]::GetFolderPath('LocalApplicationData')

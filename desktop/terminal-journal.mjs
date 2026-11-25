@@ -230,7 +230,7 @@ async function sweepTemporaryFiles(project) {
   }
 }
 
-/** Append a terminal lifecycle entry; never stores output, paths, or secrets. */
+/** Append private project-path/lifecycle metadata; exclude output, prompts, and credentials. */
 export async function appendTerminalJournal(project, entry) {
   const expectedStatus =
     entry.expectedStatus ??

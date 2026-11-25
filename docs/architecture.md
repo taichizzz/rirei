@@ -1,142 +1,237 @@
 # Architecture
 
-Relay is a TypeScript CLI (bundled with esbuild, run on Node.js 22.12+) plus an optional
-Electron desktop shell that wraps the same CLI. This document explains the module layout
-and how a command flows from invocation to state on disk.
+Rirei is a local control plane around installed coding-agent CLIs. `relay` is its Commander/
+TypeScript command engine; Ink supplies a terminal dashboard and Electron supplies the desktop
+shell. Provider CLIs own model execution, authentication, billing, conversation storage, and
+permissions. Rirei owns task records, cooperative run ownership, local coordination, and handoff
+preparation.
 
-## Source tree
+**Scope:** this page includes the experimental continuity implementation in the alpha.5.5 CLI.
+Alpha.5.1 did not include that feature. Provider and platform acceptance, and measured efficiency,
+are qualified separately.
 
-```
-src/
-├── index.ts              # Commander entrypoint; registers every command
-├── lifecycle.ts          # Task context, checkpoints, handoffs, CLI launch wrapper
-├── handoff.ts            # Portable capsule and token-budgeted text renderer
-├── application/
-│   └── sessions.ts       # Shared SessionManager: leases, process ownership, finalization
-├── process/
-│   ├── process-host.ts   # Frontend-independent ProcessHost contract
-│   └── inherited-process-host.ts # Scriptable CLI implementation
-├── cli/                  # One file per command; thin wrappers over lifecycle + state
-│   ├── init.ts  start.ts  status.ts  note.ts  checkpoint.ts  handoff.ts
-│   └── run.ts   switch.ts finish.ts   doctor.ts
-├── agents/
-│   ├── adapter.ts        # AgentAdapter interface and result types
-│   └── registry.ts       # OfficialCliAdapter + the claude/codex/gemini registry
-├── config/
-│   ├── schema.ts         # Zod config schema + defaultConfig
-│   └── loader.ts         # readConfig / writeConfig
-├── state/
-│   ├── schema.ts         # Zod RelayState and RunLease schemas
-│   ├── store.ts          # locked/revisioned atomic state mutations
-│   ├── lock.ts           # repository writer lock
-│   ├── leases.ts         # one-writer-per-worktree invariants
-│   ├── migrations.ts     # ordered persistent state migrations
-│   ├── notes.ts          # note capture, resolution, and Git freshness
-│   ├── activity.ts       # global sanitized activity snapshot
-│   ├── journal.ts        # durable terminal lifecycle evidence
-│   └── events.ts         # compatibility projection hook
-├── git/
-│   └── repository.ts     # discoverRepository, inspectGitBaseline, inspectGitSnapshot
-└── safety/
-    └── path-policy.ts    # relayPath: confines all writes to .relay/
+## Architecture reading map
 
-desktop/                  # Electron shell (see desktop.md)
-tests/                    # Vitest suites mirroring src/
-```
+| Document                                              | Question it answers                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [Architecture decisions](architecture-decisions.md)   | What was chosen, why, what it costs, and which implementation/tests support it                    |
+| [Runtime protocols](runtime-protocols.md)             | How processes, terminal control, IPC, lifecycle signals, and frontends interact                   |
+| [Continuity architecture](continuity-architecture.md) | How capture becomes requirements, snapshots, receipts, inspection, retrieval, and policy previews |
+| [Documentation audit](architecture-audit.md)          | What was missing/stale, what is now covered, and what remains unqualified or outside scope        |
+| [State and events](state-and-events.md)               | Persistent schemas, mutation, migrations, activity, and terminal journals                         |
+| [Security](security.md)                               | Authority, credentials, local capabilities, path checks, and their limits                         |
 
-## Layers
+The decision records are retrospective unless a linked plan already records the rationale.
+They explain the engineering tradeoff without claiming to recover an author's undocumented intent.
 
-1. **Command layer (`src/cli/*`)** — each command is a `commander` `Command`. It parses
-   arguments, resolves the repository, and calls into `lifecycle.ts` or the state/store
-   helpers. Commands avoid business logic beyond argument handling and output formatting.
+## System boundary
 
-2. **Application layer (`desktop/terminal-daemon*.mjs` & `src/application/sessions.ts`)** —
-   the detached desktop daemon owns live PTYs, limits concurrency to 4 active terminals, and
-   retains bounded output independently of renderer and Electron-window lifetimes.
-   `SessionManager` owns provider command preparation, durable run identity, worktree leases,
-   process-host handles, controls, and one-time finalization. It depends on the typed
-   `ProcessHost` contract rather than CLI, Electron, or a particular PTY implementation.
-   The daemon is also the authority for normalized lifecycle state and active runtime. It
-   synchronizes those observations to the run lease on a five-second cadence.
-
-3. **Lifecycle layer (`src/lifecycle.ts`)** — the shared operations that multiple commands
-   need:
-   - `taskContext()` — discover the repo, load state, and assert the task is `active` or
-     `blocked`. Used by `checkpoint`, `handoff`, `run`, `switch`, and `finish`.
-   - `createCheckpoint()` — snapshot Git and write a bounded checkpoint directory.
-   - `renderHandoffDocument()` — inspect Git and build the portable capsule plus compact text.
-   - `launchAgent()` — compatibility wrapper that runs `SessionManager` with
-     `InheritedProcessHost` and waits for completion.
-
-4. **Process-host layer (`src/process/*`)** — owns process handles and implements typed
-   start/write/resize/interrupt/stop/subscribe operations. The current CLI host inherits stdio;
-   deterministic fake hosts exercise session behavior without real providers.
-
-5. **Domain layer** — `state/`, `config/`, `git/`, and `agents/` are the primitives:
-   validated persistence, Git inspection, and the provider adapters.
-
-6. **Safety layer (`src/safety/path-policy.ts`)** — every path that Relay writes is passed
-   through `relayPath()`, which resolves it and throws if it would escape `.relay/`.
-
-## Data flow: `relay switch codex`
-
-```
-switch.ts
-  └─ taskContext()                     # load + validate active task
-  └─ createCheckpoint(root, state, "Switch to codex")
-        ├─ readConfig()                # size limits
-        ├─ inspectGitSnapshot()        # status, diff --stat, bounded diff --binary
-        ├─ write .relay/checkpoints/<id>/{metadata,status,diff-stat,changes.patch}
-        ├─ prune checkpoints beyond maxCount
-        ├─ writeState()                # atomic temp-file + rename
-        └─ appendEvent("checkpoint_created")
-  └─ renderHandoffDocument(...)        # capsule/text from the checkpoint's Git snapshot
-  └─ confirm launch in an interactive terminal
-  └─ launchAgent(root, state, codexAdapter, handoff)
-        └─ SessionManager.startRun(...)
-         ├─ adapter.detectInstallation()  # must be "ready"
-         ├─ updateState() + appendEvent("agent_started") # operation ID + run lease
-         ├─ InheritedProcessHost.start(...) # provider with inherited stdio
-         ├─ adapter.classifyExit(result)
-         └─ updateState() + appendEvent("agent_ended") # one-time lease release
+```mermaid
+flowchart TD
+  Operator[Operator]
+  CLI[relay CLI]
+  TUI[Ink terminal dashboard]
+  Desktop[Electron main and renderer]
+  Application[SessionManager and lifecycle operations]
+  Daemon[Detached terminal daemon]
+  Providers[Installed provider CLIs]
+  Project[Project files and Git worktrees]
+  Task[Primary worktree .relay state]
+  Continuity[Opt-in continuity and read-only retrieval]
+  Global[Machine-local projections and caches]
+  Operator --> CLI
+  Operator --> TUI
+  Operator --> Desktop
+  CLI --> Application
+  TUI --> Daemon
+  Desktop --> Daemon
+  Daemon -->|PTY containing a relay controller| CLI
+  Application -->|official arguments and inherited I/O| Providers
+  Providers --> Project
+  Application --> Task
+  Application --> Continuity
+  Continuity --> Task
+  Application -->|best-effort projections| Global
 ```
 
-`SessionManager` stores explicit model and effort selections on the run record before spawning
-the CLI. On exit it re-reads the latest state and updates the matching stable run ID with the
-end time, exit code, and classified reason. `relay status --json` returns this chronological
-history, and Rirei renders it newest-first without maintaining a second desktop-only store.
+A daemon PTY normally contains a `relay run`, `switch`, or `resume` controller, which then starts
+the provider. This gives the provider a real terminal while retaining CLI-based task/lease
+semantics. An ordinary shell tab uses the daemon without requiring an initialized task.
 
-Callers may supply an operation ID. Relay derives a stable run ID from the task session and
-operation ID, so retrying a launch cannot spawn a second provider even after the bounded
-operation ledger rotates. A completed retry returns the durable result; an uncertain active
-retry returns `RunAlreadyStartedError`.
+The TypeScript `ProcessHost` contract and native `TerminalHost` contract have different roles:
+the former hosts a provider process for `SessionManager`; the latter supplies PTY byte I/O,
+resize, interrupt, and tree termination for the daemon. They are not interchangeable stores.
 
-The same `createCheckpoint` / `renderHandoff` / `launchAgent` primitives back `run`,
-`checkpoint`, `handoff`, and `finish`, which keeps behavior consistent across commands.
+## Source map
 
-## Persistence model
+| Area                      | Main implementation                                                                                        | Responsibility                                                                                                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Entry and commands        | `src/index.ts`, `src/cli/`                                                                                 | Parse command arguments, resolve actors/projects, invoke services, serialize output                                                              |
+| Task application services | `src/application/project-setup.ts`, `sessions.ts`, `controller.ts`, `heartbeat.ts`, `reconciliation.ts`    | Task setup, stable run IDs, cooperative leases, lifecycle/finalization, ownership recovery                                                       |
+| Shared lifecycle          | `src/lifecycle.ts`, `src/handoff.ts`                                                                       | Checkpoint creation, capsule composition, continuity composition, inherited-process launch wrapper                                               |
+| Provider boundary         | `src/agents/adapter.ts`, `registry.ts`, `usage-collectors.ts`, `limit-detection.ts`                        | Capabilities, official arguments/discovery, resume, sanitized quota evidence and conservative classification                                     |
+| Task persistence          | `src/state/`                                                                                               | Schema-v8 state, locks, revisions, task archives, notes, metadata history, activity and lifecycle journals                                       |
+| Git and workspaces        | `src/git/repository.ts`, `src/worktrees/`                                                                  | Authority discovery, legacy Git inspection, local exclusion, previewed worktree creation, registry, cleanup inspection                           |
+| Process and platform      | `src/process/`, `src/terminal/`, `src/platform/`                                                           | Inherited stdio, native PTY interface, executable/shell discovery, endpoints, daemon discovery, process-tree control                             |
+| Coordination              | `src/messages/`, `desktop/threads-ipc.mjs`                                                                 | Task/run capabilities, strict message envelopes, manual inbox/acknowledgement, metadata-only notifications                                       |
+| Quota and analytics       | `src/plan-usage.ts`, `src/usage.ts`, `src/token-usage/`                                                    | Separate provider quota observations and opt-in local numeric token analytics                                                                    |
+| Continuity prototype      | `src/context/`, `src/cli/context.ts`                                                                       | Consent, capture, source journal, requirement selection, covered snapshots, receipts, inspection, exact retrieval, experimental policy rendering |
+| Desktop runtime           | `desktop/main.mjs`, `preload.cjs`, `terminal-daemon*.mjs`, `daemon-bridge-worker.mjs`, `terminal-host.mjs` | Validated Electron bridge, detached PTYs, reconnect/control/output flow, synchronization back to the CLI                                         |
+| Desktop rendering         | `desktop/renderer/`                                                                                        | xterm.js, task/session/usage views, local preferences, stale-request suppression, terminal rendering acknowledgements                            |
+| Terminal dashboard        | `src/tui/`, `src/cli/tui.ts`, `attach.ts`                                                                  | First-task flow, provider selection, raw terminal attach/detach, inbox and usage views                                                           |
+| Build/release             | `scripts/build.mjs`, package metadata, `.github/workflows/`                                                | CLI bundle, external native dependencies, desktop packaging, exact-tarball validation and optional publication                                   |
+| Evaluation                | `benchmarks/handoff/`, `benchmarks/continuity/`                                                            | Separate historical harnesses, frozen controls, visible-event measurement, explicit launch budgets, offline qualification                        |
 
-- **`.relay/state.json`** — the single source of structured task state and handoff notes. Written atomically
-  (write to a temp file, then `rename` over the target) so an interrupted process never
-  leaves a half-written file. See [state-and-events.md](state-and-events.md).
-- **`~/Library/Application Support/Rirei/activity.json`** — bounded, sanitized, cross-project session snapshot for read-only companion surfaces.
-- **`~/Library/Application Support/Rirei/terminal-journal-*.json`** — bounded terminal evidence
-  used to discover and reconcile known projects after a desktop or daemon restart.
-- **`.relay/config.json`** — validated configuration. See [configuration.md](configuration.md).
-- **`.relay/checkpoints/<id>/`** — per-checkpoint snapshots. See
-  [checkpoints-and-handoff.md](checkpoints-and-handoff.md).
+TypeScript uses `.js` import specifiers for NodeNext resolution. The production build bundles
+the CLI as CommonJS, with native/ESM runtime dependencies deliberately external. The desktop
+daemon is ESM and is also imported by the CLI daemon command; it is not an Electron-only service.
 
-All of these live under `.relay/`, created with restrictive permissions (`0700` for
-directories, `0600` for files).
+## Authorities, storage, and derived views
 
-## Design principles reflected in the code
+| Data                            | Authority / location                                       | Important distinction                                                                       |
+| ------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Project implementation          | Actual selected worktree and Git                           | Rirei does not replace Git, isolate filesystem permissions, or automatically merge work     |
+| Current task and run ownership  | Primary authority root `.relay/state.json`                 | Validated state; `runs` owns leases, scalar current-run fields are compatibility mirrors    |
+| Workspace registry              | Primary root `.relay/workspaces.json`                      | Managed worktrees contain code; their task/coordination authority remains primary           |
+| Task configuration              | `.relay/config.json`                                       | Honored and reserved fields are distinguished in [configuration](configuration.md)          |
+| Checkpoint artifacts            | `.relay/checkpoints/<id>/`                                 | Bounded status/stat/patch records; no untracked-content backup and no automatic restore     |
+| Archived task metadata          | `.relay/tasks/<session-id>/state.json`                     | Closed tasks retained before replacement; a corrupt archive does not hide all other history |
+| Threads and run-token digests   | `.relay/threads/`, `.relay/runtime/message-capabilities/`  | Manual local coordination, not provider-context delivery                                    |
+| Opt-in continuation evidence    | `.relay/context/<task-hash>/`                              | Bounded visible-source journal; not a complete conversation or hidden reasoning             |
+| Verification receipts           | Optional task-state records                                | Observed command boundaries and partial environment; no automatic test reuse                |
+| Terminal state/output           | Live detached daemon memory                                | A bounded output ring survives renderer reconnect, not daemon death                         |
+| Activity feed                   | Platform data home `activity.json`                         | Sanitized derivative for companion UIs; not task authority or an event-sourced database     |
+| Restart-discovery journal       | Platform data home `terminal-journal-*.json`               | Private project/controller metadata, including project paths; not terminal output           |
+| Provider plan samples           | Legacy home `.relay/provider-usage/` under the user's home | Sanitized quota telemetry; separate from repository `.relay/`                               |
+| Token analytics                 | Platform data home `token-usage-*.json`                    | Independent opt-in and numeric report cache; not continuity capture consent                 |
+| Private benchmark runs/controls | Platform data home `benchmarks/` by default                | Input/code/settings/trace hashes and attempt ledger; public exports are separately reviewed |
 
-- **Deterministic over inferred.** Repository facts come from `git` invoked with argument
-  arrays (never shell string interpolation), not from an LLM.
-- **Conservative reporting.** When Relay cannot determine something safely (authentication
-  status, exit reason), it reports `unknown` rather than guessing. See [agents.md](agents.md).
-- **Read-only on your repo.** Relay inspects Git and never mutates history or the working
-  tree. The one local metadata mutation is adding `/.relay/` to the repository-local
-  `info/exclude` file so Relay state stays hidden from ordinary `git status`; it never edits
-  tracked files, the index, or remotes. See [security.md](security.md) and
-  [checkpoints-and-handoff.md](checkpoints-and-handoff.md).
+There is **not one universal storage resolver today**. `src/platform/runtime-paths.ts` uses
+macOS Application Support, Windows LocalAppData, and Linux XDG conventions; relative overrides
+resolve against home. `src/worktrees/data-dir.ts` retains the older XDG/`~/.local/share/rirei`
+policy on every platform and resolves overrides against the current directory. Electron's
+daemon descriptor uses `app.getPath('userData')`. An absolute `RIREI_DATA_HOME` helps align some
+consumers, but does not make all entrypoints' runtime roots identical. This is documented
+compatibility debt, not an already-completed storage migration.
+
+Normal managed setup starts in the primary worktree. Bootstrap helpers `initializeProject` and
+`startTask` discover the selected worktree root, while later task/coordination commands can resolve
+Git's primary common-directory authority. Do not infer that initializing a new task inside an
+arbitrary linked worktree is a separately qualified shared-authority workflow. Launch workspace
+selection is explicit (`run --workspace`); it is not universally inferred from shell cwd.
+
+## Flow 1: starting and completing a task
+
+1. `init` discovers Git, installs the root-local `/.relay/` exclusion, creates private task
+   directories, and refuses to overwrite an existing initialization.
+2. `start` inspects the branch/baseline. Dirty input requires `--allow-dirty`; a closed prior
+   task is archived under the same repository writer lock before task replacement.
+3. Task instructions, notes, tests, and provider history remain structured task state. A run
+   does not own a private copy that can overwrite another controller's newer updates.
+4. `finish` first refuses active provider leases. Without `--run-tests`, it checkpoints and
+   closes the task. With that flag, only the explicitly configured shell command runs.
+5. In the prototype, pending verification is recorded before that child starts; completion
+   records exit and start/end covered-input/environment identities. Failed or unknown exits
+   block task completion. Output capture and a configured test timeout remain unwired.
+
+Archival, checkpoint artifacts, state replacement, and global projections are separate file
+operations. They do not form a single multi-file transaction or a power-loss-proof database.
+
+## Flow 2: approved cross-provider switch
+
+```mermaid
+sequenceDiagram
+  participant U as Operator
+  participant C as switch command
+  participant S as Task store
+  participant H as Handoff composition
+  participant M as SessionManager
+  participant P as Provider CLI
+  U->>C: switch provider
+  C->>S: checkpoint under repository writer lock
+  C->>H: render task, Git, notes, verification, consented evidence
+  H-->>C: text, budgets, source and covered-input identities
+  C-->>U: preview and continuation-context gate
+  U->>C: approval or explicit noninteractive flag
+  C->>H: re-render and compare approved preview
+  C->>M: prepare explicit launch
+  M->>S: locked task/state/context checks and lease acquisition
+  M->>M: issue run capability and optional capture settings
+  M->>M: final context and approved complete-input recheck
+  M->>P: spawn with inherited terminal I/O
+  P-->>M: process exit and observed signals
+  M->>S: merge final result by stable run ID and release lease
+```
+
+The preview gate and permission-request approval are different mechanisms. Switch approval
+authorizes a new provider launch; it does not approve that provider's later tool requests.
+The latter remains the provider's responsibility; Rirei's proposed external decision channel
+is inactive. M5 profiles are handoff preview/offline controls, not new `run`/`switch` options.
+
+## Flow 3: daemon-owned interactive session
+
+1. A desktop/TUI client discovers or explicitly starts the daemon and authenticates through a
+   private descriptor. Discovery of an incompatible live daemon does not delete its endpoint.
+2. Start admission reserves an in-memory claim before asynchronous PTY work. Capacity is four
+   active terminals; the server and task service enforce their respective ownership checks.
+3. Native `node-pty` starts the relay controller with a real PTY. The default is not the Python
+   bridge; Python is an explicitly selected compatibility/test branch.
+4. Provider lifecycle hooks/supervisors report normalized status using a terminal-scoped token.
+   They do not answer permission requests or inject terminal input.
+5. Output enters a 2 MiB memory ring. Availability events prompt clients to pull at most 64 KiB
+   from an absolute byte cursor. Electron waits for renderer acknowledgement before the next
+   delivery; readers do not implicitly acquire write control.
+6. One connection can own terminal write/resize control. Explicit takeover revokes the prior
+   controller; disconnect/detach releases connection control without terminating the PTY.
+7. A coalescing sync queue sends normalized runtime/lifecycle updates through a reusable
+   `relay bridge --worker` process. Final updates outrank transitions and heartbeats.
+8. Stop escalates from interrupt to termination/tree kill. Finalization uses a provider result
+   when available, falls back conservatively, and records any pending state-sync failure.
+
+Detailed frames, tokens, operation families, and the Electron bridge are in
+[runtime-protocols.md](runtime-protocols.md).
+
+## Flow 4: observed work becomes retrievable continuity
+
+The sequence is **explicit task consent → scoped capture grant → allowlisted visible observation →
+validated journal → requirement-first selection → current covered identity/receipts → bounded
+inspection → exact targeted retrieval**. M5 can then transform an already-selected control prompt
+for an explicitly requested policy preview. It cannot evict requirements to make policy text fit.
+
+The native managed capture launcher currently installs Claude hooks. Codex visible exec JSON is
+normalized in benchmarks; the native interactive Codex lifecycle observer is status-only. These
+are different capabilities. See [continuity-architecture.md](continuity-architecture.md).
+
+## Consistency and failure boundaries
+
+- **Authoritative mutation:** `updateState`/`replaceState` lock, re-read, validate, and publish a
+  replacement file. `writeState` itself is a lower-level validated atomic writer and does not
+  acquire the lock or increment revisions.
+- **Atomic visibility:** state readers should see complete old/new files after a same-filesystem
+  rename. This writer does not explicitly fsync the file/directory, so atomicity is not a claim
+  of power-loss durability. Threads, context journal, and benchmark artifacts have their own
+  explicit sync policies.
+- **Ownership:** one managed writing lease per worktree is a cooperative scheduling invariant.
+  Other programs or ordinary shells can still edit the files. Heartbeat age alone does not
+  prove a provider stopped; uncertain ownership remains blocked/orphaned.
+- **Projection:** activity publication and renderer refresh can fail after state commits. Their
+  errors do not roll back task authority. Private terminal journals are recovery hints, not
+  public activity and not proof that a process has exited.
+- **Observation:** file scans, source hashes, receipts, cursors, and visible-event IDs prove
+  only the declared observed input/content relationship. They neither authenticate local
+  authorship nor establish a hermetic environment or filesystem sandbox.
+- **Compatibility:** task state, config, activity, daemon protocol, journal, receipt, snapshot,
+  inspection, retrieval, and policy metadata version independently.
+
+## Release and qualification boundary
+
+`scripts/build.mjs` produces `dist/index.cjs`; `node-pty`, Ink, React, and Yoga remain external
+runtime dependencies. npm's narrow allowlist and Electron's larger ASAR/unpacked resources are
+different artifacts. Vendored xterm assets avoid runtime CDN dependencies. Release automation
+packs once and installs the same tarball across an OS/Node matrix before optional npm publication.
+
+Source docs do not establish registry publication, macOS signing/notarization, native Windows
+continuity, or a model-efficiency advantage. The M5 full suite passed serially with 850 tests and
+3 skipped; the earlier parallel deadline failures remain recorded in its milestone notes.
+Live E1/E2 gates remain separately authorized work. See the [audit](architecture-audit.md) for
+the current evidence/coverage ledger and [publication](publication.md) for distribution status.

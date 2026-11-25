@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 import { Command } from 'commander';
 import { readConfig } from '../config/loader.js';
 import { createCheckpoint, taskContext } from '../lifecycle.js';
@@ -6,6 +7,10 @@ import { appendEvent } from '../state/events.js';
 import { activeLeases } from '../state/leases.js';
 import { updateState } from '../state/store.js';
 import { expireQueuedMessages } from '../messages/service.js';
+import {
+  beginVerification,
+  completeVerification,
+} from '../context/verification.js';
 
 async function runConfiguredTest(
   root: string,
@@ -34,36 +39,40 @@ export function finishCommand(): Command {
           throw new Error(
             'No tests.command is configured in .relay/config.json.',
           );
-        const started = Date.now();
-        const exitCode = await runConfiguredTest(
+        const pending = await beginVerification(
           context.root,
+          context.state.sessionId,
           config.tests.command,
         );
-        const now = new Date().toISOString();
-        const command = config.tests.command;
-        await updateState(context.root, (current) => ({
-          ...current,
-          tests: [
-            ...current.tests,
-            {
-              command,
-              status: exitCode === 0 ? 'passed' : 'failed',
-              exitCode,
-              durationMs: Date.now() - started,
-              createdAt: now,
-            },
-          ],
-          task: { ...current.task, updatedAt: now },
-        }));
+        const started = performance.now();
+        let exitCode: number | null;
+        try {
+          exitCode = await runConfiguredTest(
+            context.root,
+            config.tests.command,
+          );
+        } catch (error) {
+          await completeVerification(
+            context.root,
+            pending,
+            null,
+            performance.now() - started,
+            { interrupted: true },
+          );
+          throw error;
+        }
+        const durationMs = performance.now() - started;
+        await completeVerification(context.root, pending, exitCode, durationMs);
+        const command = pending.command.text;
+        await appendEvent(context.root, 'test_run', {
+          command,
+          status: exitCode === 0 ? 'passed' : 'failed',
+          durationMs,
+        });
         if (exitCode !== 0)
           throw new Error(
             `Configured tests failed with exit code ${exitCode ?? 'unknown'}.`,
           );
-        await appendEvent(context.root, 'test_run', {
-          command,
-          status: exitCode === 0 ? 'passed' : 'failed',
-          durationMs: Date.now() - started,
-        });
       }
       const checkpoint = await createCheckpoint(context.root, 'Final');
       const now = new Date().toISOString();

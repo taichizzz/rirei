@@ -4,28 +4,30 @@
 
 - Node.js 22.12 or newer (`engines.node >= 22.12.0`).
 - `git` on `PATH`.
-- macOS with `/usr/bin/python3` for the desktop integrated terminal (system Python is fine).
+- A supported native `node-pty` package for the host OS/architecture; Windows uses ConPTY.
+- Python at `/usr/bin/python3` only when explicitly exercising the legacy POSIX bridge, not
+  for the default integrated terminal. Desktop packaging remains macOS-focused.
 
 ## Install
 
 ```sh
-npm install
+npm ci
 ```
 
 ## npm scripts
 
-| Script                    | Command                           | Purpose                                                                       |
-| ------------------------- | --------------------------------- | ----------------------------------------------------------------------------- |
-| `dev`                     | `tsx src/index.ts`                | Run the CLI from source, e.g. `npm run dev -- status`.                        |
-| `build`                   | esbuild bundle → `dist/index.cjs` | Bundle a self-contained CLI (CommonJS, node22 target) and mark it executable. |
-| `check`                   | `tsc --noEmit`                    | Type-check without emitting.                                                  |
-| `lint`                    | `eslint .`                        | Lint the project.                                                             |
-| `format` / `format:write` | `prettier --check` / `--write`    | Check or apply formatting.                                                    |
-| `test`                    | `vitest run`                      | Run the test suite once.                                                      |
-| `install:local`           | build + symlink                   | Link `dist/index.cjs` to `~/.local/bin/relay`.                                |
-| `desktop:dev`             | build + `electron .`              | Launch the desktop app against the freshly built CLI.                         |
-| `desktop:build`           | build + `electron-builder --mac`  | Package the desktop DMG/ZIP.                                                  |
-| `launcher:build`          | `osacompile …`                    | Build the AppleScript `Relay Launcher.app`.                                   |
+| Script                    | Command                                                   | Purpose                                                                                   |
+| ------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `dev`                     | `tsx src/index.ts`                                        | Run the CLI from source, e.g. `npm run dev -- status`.                                    |
+| `build`                   | esbuild bundle → `dist/index.cjs`                         | Bundle the CLI entry as CommonJS/node22; native/ESM runtime dependencies remain external. |
+| `check`                   | `tsc --noEmit`                                            | Type-check without emitting.                                                              |
+| `lint`                    | `eslint desktop src tests eslint.config.js`               | Lint the selected source/test/config surfaces.                                            |
+| `format` / `format:write` | `prettier --check` / `--write`                            | Check or apply formatting.                                                                |
+| `test`                    | `vitest run`                                              | Run the test suite once.                                                                  |
+| `install:local`           | build + symlink                                           | Link `dist/index.cjs` to `~/.local/bin/relay`.                                            |
+| `desktop:dev`             | build + `electron desktop/main.mjs`                       | Launch the desktop app against the freshly built CLI.                                     |
+| `desktop:build`           | build + `scripts/build-desktop.mjs --mac --publish never` | Package desktop DMG/ZIP without publication.                                              |
+| `launcher:build`          | `osacompile …`                                            | Build the AppleScript `Relay Launcher.app`.                                               |
 
 ## Typical loops
 
@@ -54,6 +56,23 @@ smoke test separately exercises an actual user-prefix install, first-task setup 
 real PTY, reinstall, and uninstall.
 
 ## Tests
+
+The experimental continuity feature has a zero-provider fixture check:
+
+```sh
+npm run benchmark:continuity
+npm run benchmark:handoff
+```
+
+`tests/context/` also replays hook histories and exercises fake Claude-to-Codex launches
+through both TypeScript and the compiled CLI, so build before running it directly. These
+tests do not establish native provider event delivery or continuation-quality improvements.
+See [the prototype contract](continuity-prototype.md) for the live pilot's separate budget.
+
+The implementation/decision map is in [architecture](architecture.md),
+[architecture decisions](architecture-decisions.md), and the [coverage audit](architecture-audit.md).
+M0–M5 milestone notes retain their own as-tested results rather than becoming an assertion that
+every later working-copy command passed those same gates.
 
 Vitest suites live under `tests/`, mirroring `src/`:
 
@@ -88,11 +107,15 @@ globals (`window`, `document`, `Terminal`, `FitAddon`, …) with a `/* global */
 `npm run build` bundles `src/index.ts` with esbuild:
 
 - `--platform=node --format=cjs --target=node22`
-- production dependencies bundled into the artifact
+- most CLI implementation bundled into the entry
+- `node-pty`, `ink`, `react`, `react/*`, and `yoga-layout` deliberately external
 - output `dist/index.cjs`, made executable.
 
 The desktop app, packaged `cli/index.cjs` resource, and `install:local` all consume the same
-self-contained artifact.
+CLI entry. This is not a standalone executable with no runtime dependencies. Keeping Ink and
+React external avoids separate React dispatcher instances; native PTY and Yoga/ESM modules
+must resolve from the installation. `package:check` specifically rejects accidental bundled
+React. Native install/ASAR-unpacked behavior requires packed smoke checks, not just `tsc`.
 
 ## Packaging the desktop app
 
@@ -113,9 +136,19 @@ by packed daemon launches (`provider-lifecycle-hook.cjs`, `codex-lifecycle-wrapp
 if local state, source trees, tests, unrelated desktop assets, private keys, or local user paths
 enter the tarball.
 
+The extended architecture/decision/audit guides are repository documentation, not an expansion
+of the minimal CLI package allowlist. Generated root `ARCHITECTURE*.md` tool reports and local
+sync duplicates are not inputs to the release artifact or canonical architecture authority.
+
 ## Keeping docs in sync
 
 Documentation is treated as part of each change: when you alter behavior, update the relevant
 file in `docs/` (and the root `README.md` if the change is user-facing) in the same commit.
 Watch for the "Honored today?" / "Current limitation" / "not yet implemented" notes scattered
 through these docs — when you implement one of those, flip the note.
+
+Use [architecture-audit.md](architecture-audit.md) as the source-to-document coverage ledger.
+For a changed boundary, update its mechanism, rationale/tradeoff, source/test reference, storage
+or protocol version, and shipped/experimental qualification. Label reconstructed rationale rather
+than inventing a historical approval. For documentation-only changes, check the touched Markdown,
+local links/anchors and referenced source paths; an old runtime test result is not a newly run test.

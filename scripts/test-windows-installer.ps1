@@ -1,5 +1,7 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'install-windows.ps1')
+$manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../package.json') -Raw | ConvertFrom-Json
+$expectedPackage = '{0}@{1}' -f $manifest.name, $manifest.version
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("rirei-installer-test-" + [guid]::NewGuid())
 $prefix = Join-Path $root 'CLI with spaces'
@@ -23,7 +25,7 @@ function Reset-RireiMocks {
     $script:windows = $true
     $script:windowsBuild = 22631
     $script:nodeVersion = '22.12.0'
-    $script:installedVersion = '0.1.0-alpha.5.1'
+    $script:installedVersion = $manifest.version
     $script:failInstall = $false
     $env:Path = 'C:\Windows;C:\Existing Tools'
 }
@@ -75,7 +77,7 @@ try {
     Reset-RireiMocks
     Install-Rirei -InstallRoot $prefix -NonInteractive
     $install = @($script:calls | Where-Object { $_.Arguments[0] -eq 'install' })[0]
-    Assert-Rirei ($install.Arguments -contains '@taichizzz/rirei@0.1.0-alpha.5.1') 'Must install the exact requested alpha'
+    Assert-Rirei ($install.Arguments -contains $expectedPackage) 'Must install the alpha pinned by the package manifest'
     Assert-Rirei ($install.Arguments -contains $prefix) 'Paths with spaces must remain a single argument'
     Assert-Rirei ($script:userPath.EndsWith('C:\Existing Tools;%APPDATA%\npm')) 'Existing user PATH entries must be preserved'
     Assert-Rirei ($script:userPath.StartsWith($prefix + ';')) 'The user prefix must take precedence over older user installs'
@@ -96,7 +98,7 @@ try {
     Install-Rirei -InstallRoot $prefix -PackageFile $packageFile -NonInteractive
     $install = @($script:calls | Where-Object { $_.Arguments[0] -eq 'install' })[0]
     Assert-Rirei ($install.Arguments -contains $packageFile) 'A local release package path must remain a single argument'
-    Assert-Rirei (-not ($install.Arguments -contains '@taichizzz/rirei@0.1.0-alpha.5.1')) 'A local package must not request the unpublished registry version'
+    Assert-Rirei (-not ($install.Arguments -contains $expectedPackage)) 'A local package must not request the unpublished registry version'
     Reset-RireiMocks
     Assert-RireiThrows { Install-Rirei -InstallRoot $prefix -PackageFile (Join-Path $root 'missing.tgz') -NonInteractive } 'Missing release tarballs must be rejected'
     Assert-RireiThrows { Install-Rirei -InstallRoot $prefix -PackageFile $state -NonInteractive } 'Non-tarball package files must be rejected'

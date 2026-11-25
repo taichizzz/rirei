@@ -1,155 +1,180 @@
-# Security and safety
+# Security and safety boundaries
 
-Relay is built on the assumption that a repository may contain misleading or malicious
-content, and that provider credentials must never pass through Relay. This document collects
-the guarantees and the code that enforces them.
+Rirei is a same-user local orchestration tool. It constrains its control-plane requests and
+generated data, but it is **not an operating-system sandbox for a provider, shell, or repository**.
+This page describes the security boundaries in the current source, including the experimental
+continuity feature in the alpha.5.5 CLI.
 
-## Authentication boundary
+## Authority model
 
-Relay does **not**:
+| Surface                                             | Authority                                                       | Limitation                                                                                    |
+| --------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Installed provider CLI                              | Own account, model execution, billing, permissions              | Rirei does not validate every installed binary or isolate its filesystem access               |
+| Task state and writer lock                          | Primary worktree's cooperative task/run state                   | A same-user process can still edit files outside the CLI contracts                            |
+| Daemon reconnect capability                         | Authenticated local terminal-control client                     | Private descriptor possession is not a provider-account credential or multiuser sandbox       |
+| Terminal lifecycle capability                       | One terminal's working/wait state reports                       | Cannot submit permission decisions or use another terminal's lifecycle channel                |
+| Message capability                                  | Current task/run/terminal actor through supported messaging CLI | Removing process markers does not create an OS isolation boundary from the same-user operator |
+| Capture grant (prototype)                           | Task/run/provider/workspace/session and current consent epoch   | Does not prove every provider event was delivered or authenticate human authorship            |
+| Source/receipt hash or retrieval cursor (prototype) | Content/continuation consistency                                | Not authenticated origin, a secret permission token, or hermetic verification                 |
 
-- authenticate with Claude Code, Codex, or Gemini on your behalf;
-- read or copy provider credential files;
-- extract or reuse OAuth tokens between applications;
-- treat a subscription as a general-purpose API key;
-- attempt to bypass provider usage limits.
+For implementation detail, see [architecture decisions](architecture-decisions.md),
+[runtime protocols](runtime-protocols.md), and [continuity architecture](continuity-architecture.md).
 
-Each official CLI owns its authentication, billing, rate limits, model availability, and
-permissions. Relay launches the executable with explicit argument arrays and, where documented,
-a generated session-only settings file for sanitized usage collection. This is why
-`detectAuthentication()` returns `unknown` rather than `ready` — Relay refuses to inspect
-credentials, so it cannot assert they are valid. See [agents.md](agents.md).
+## Provider authentication and permissions
 
-Relay switches to a _separately authenticated_ provider when one is unavailable; it is not a
-way around any provider's limits.
+Each official CLI owns its authentication, billing, limits, model availability, and permission
+UI. Rirei does not read/copy provider credential files, extract OAuth tokens, reuse one provider's
+subscription as another provider's API key, or bypass quotas. A new provider launch is explicit;
+an exit/usage-limit handoff suggestion does not automatically switch providers.
 
-Permission approval is not active in the current release. Its future local command channel
-is specified in [approval-protocol.md](approval-protocol.md): loopback-only, bearer
-authenticated, terminal-owned, expiring, one-shot, and fail-closed. Commands and paths needed
-for an informed approval remain transient and never enter the public activity snapshot or
-durable Relay state.
+Authentication discovery uses bounded official status commands where supported. Claude can
+report authenticated through CLI JSON, Codex through its status output, and OpenCode can report
+configured provider scopes. “Configured” does not establish remote token validity; unavailable
+evidence remains unknown/unsupported/error. The older blanket statement that authentication
+always returns unknown is not the current adapter contract. See [agents](agents.md).
 
-## Git safety
+Passive lifecycle supervisors use separate ephemeral local capabilities: daemon terminal tokens,
+Codex's loopback WebSocket token, and OpenCode's loopback server password. They are not provider
+account tokens and are not put in task/activity/history projections. They report waits only.
+The [external permission-decision channel](approval-protocol.md) remains inactive: no transport
+listener or provider permission-reply path is activated by the validated protocol/store code.
 
-Relay treats Git as shared project memory. It performs **exactly one** kind of Git mutation,
-and only through an explicit, previewed user action. Distinguish three categories:
+## Git operations and workspace ownership
 
-1. **Read-only inspection** — the default. `rev-parse`, `status`, `branch --show-current`,
-   `diff`, `worktree list`, `show-ref`, `rev-list --count` in `src/git/repository.ts`. These
-   never write to the repository, and every read-only command (`status`, `checkpoint`,
-   `handoff`, cleanup inspection) stays in this category.
-2. **User-approved workspace creation** — `relay workspace create` runs a single mutating
-   command, `git worktree add -b <rirei/…branch> <path> <base-commit>` (`addWorktree`), to
-   give a concurrent agent an isolated branch and linked worktree. It is previewed, additive,
-   and never touches the main working tree.
-3. **Explicit manual cleanup** — `relay workspace cleanup <id>` **inspects** a worktree and
-   prints copyable `git worktree remove` / `git branch -d` commands. Relay does not run them;
-   removal stays in the user's hands in this release.
+There are two kinds of intentional metadata/workspace mutation:
 
-Operations Relay still **never** performs, automatically or otherwise:
+1. `init` and stateful compatibility setup add one `/.relay/` line to the repository-local
+   `info/exclude`, preserving its existing content. This never edits tracked `.gitignore`.
+2. Explicit workspace creation previews and runs `git worktree add -b` for an additive managed
+   branch/worktree, then registers it under the task's repository authority.
 
-commit · push · merge · reset · rebase · clean · force-checkout · force-delete ·
-discard uncommitted changes · delete a worktree or branch.
+Inspection commands query Git; cleanup inspection prints commands instead of removing anything.
+Rirei product commands do not commit, push, merge, reset, rebase, clean, force-checkout, discard
+changes, or automatically delete worktrees/branches. Partial workspace creation is reported,
+not silently rolled back through deletion. Test/benchmark fixtures create temporary repositories
+and commits as a separate evaluator behavior.
 
-Worktrees are stored outside the repository (under the Rirei data home, default
-`~/.local/share/rirei/worktrees/`), so a linked worktree never nests inside `.git` or appears
-in the main repository's status. The repository key that namespaces them is a stable directory
-key derived from the canonical root and remote — never a security boundary.
+“Read-only Git inspection” describes the logical operation, not a universal promise that Git
+never refreshes its own internal stat/index cache. The stronger prototype scanner explicitly
+suppresses optional Git locks and ignores inherited repository-routing variables. Legacy snapshot
+and checkpoint fingerprints keep their older, weaker interpretation.
 
-Supporting behaviors:
+One managed writing lease per worktree is a scheduling rule. Other shells/editors can change
+the files, worktree separation does not isolate credentials/processes, and workspace roles are
+not OS access controls. Age alone never establishes authoritative state-lock/controller death;
+reconciliation uses the qualified local evidence described in [runtime protocols](runtime-protocols.md).
 
-- **Dirty-tree warning.** `relay start` refuses to begin on a dirty working tree unless
-  `--allow-dirty` is passed, and records `dirtyAtStart` so pre-existing changes are
-  distinguishable from task changes.
-- **Unborn repositories.** When there is no `HEAD` yet, snapshots diff against `--cached`
-  instead of `HEAD`, and the commit is recorded as `unborn`.
-- **Detached/no branch.** `inspectGitBaseline` requires a checked-out branch and errors
-  otherwise, avoiding ambiguous state.
+## Path checks and local files
 
-## Path confinement
+`relayPath()` lexically confines project-owned record paths to `.relay/`, rejecting `..` escapes.
+It does **not** canonicalize the complete filesystem namespace or itself reject symlinks. Context,
+Threads, message capabilities, checkpoint readers, daemon descriptors and source readers perform
+additional path/file-type/no-follow checks appropriate to their contracts. Do not generalize one
+reader's checks to every read/write helper.
 
-Every path Relay writes goes through `relayPath()` (`src/safety/path-policy.ts`), which
-resolves the target and throws if it would fall outside `.relay/`:
+Global activity, terminal descriptors/journals, managed worktrees, quota samples, analytics, and
+benchmarks live outside the project `.relay/` namespace. Their own resolvers/validators apply.
+Platform application support, legacy worktree roots, and Electron userData are not yet fully
+unified. [Architecture](architecture.md#authorities-storage-and-derived-views) documents actual roots.
 
-```ts
-if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) {
-  throw new Error('Relay state paths must remain within .relay.');
-}
-```
+Generated directories/files request private modes such as `0700`/`0600` on POSIX. POSIX mode bits
+are not a Windows ACL model. Descriptor readers have platform-specific checks. No documentation
+claim should turn restrictive creation modes into protection from a malicious same-user process.
 
-This blocks path traversal (`../`) in checkpoint ids, temp filenames, and any other computed
-path. Checkpoint pruning also deletes only paths resolved through this policy.
+State publication uses a validated temporary file and same-filesystem rename. `updateState`/
+`replaceState` acquire the authoritative writer lock; the lower-level `writeState` does not.
+This is atomic publication, not a universal power-loss durability guarantee. Threads/context
+journals and benchmark writers have separate explicit fsync contracts. See [state](state-and-events.md).
 
-## Local state permissions
+## Subprocesses and frontend control
 
-- `.relay/` and its subdirectories are created with mode `0700`.
-- `state.json`, `config.json`, activity source files, and checkpoint files are written `0600`.
-- State writes are atomic (temp file + `rename`) so interruption cannot corrupt state — see
-  [state-and-events.md](state-and-events.md).
-- Authoritative task-state mutations and task replacement are serialized by a
-  repository-scoped writer lock. State carries a monotonic `revision`, and guarded operations
-  can supply an operation ID or expected revision to reject retries and stale writes.
-  Migrations back up the pre-migration file before the first upgraded write, and a
-  newer-than-supported `schemaVersion` is refused rather than opened.
+Provider/Git commands use explicit executable/argument arrays instead of interpolating task text
+into a generic shell command. Windows wrapper support and argument newline folding are documented
+platform transformations. Installed providers and Git retain their normal configured behavior;
+argument arrays do not make untrusted executables or repository hooks safe.
 
-## Subprocess hygiene
+Two shell uses are intentional: an ordinary interactive shell tab and `finish --run-tests`'s
+operator-configured `tests.command`. Neither is a claim that arbitrary historical tool commands
+can be rerun automatically. Provider stdin/stdout is inherited or PTY-hosted; raw terminal bytes
+remain in the daemon's ephemeral bounded ring, not a default durable transcript.
 
-- Provider CLIs and Git are invoked with **argument arrays**, never shell-interpolated
-  strings, so repository-controlled text cannot inject shell commands. (The one shell use is
-  `relay finish --run-tests`, which runs the _user-configured_ `tests.command` you set
-  yourself in `config.json`.)
-- Interactive agents inherit stdio (CLI) or run under a PTY (desktop); Relay does not capture
-  or persist the full terminal session by default.
-- Searchable history contains Relay task/run metadata only. It does not index provider
-  conversations or terminal output.
-- Handoff notes contain only text explicitly submitted through `relay note` (including the
-  batch `relay note import` path); Relay does not derive them by reading provider
-  conversations. `user` and `agent` are declared provenance, and for imported batches
-  provenance always comes from trusted CLI options, never from the payload; unknown payload
-  fields are rejected. Git labels are
-  generated from machine-observed facts. Historical tests include their recorded time and
-  explicitly say that current freshness is unknown.
-- Claude usage collection stores only sanitized percentages, reset epochs, and a capture time
-  under `~/.relay/provider-usage/`; it does not read credentials or make provider API calls.
-- The desktop app runs its renderer with `contextIsolation: true`, `nodeIntegration: false`,
-  and `sandbox: true`, exposing only a small `window.relay` bridge. See [desktop.md](desktop.md).
+Electron uses `contextIsolation`, disabled Node integration and a sandboxed renderer. Preload
+exposes named methods; main validates requests and owning renderer/project/terminal relationships.
+Writing/resizing requires terminal control, while observing output and explicit takeover have
+separate contracts. Only exact terminal-UUID deep links are accepted; paths/commands/queries are
+not deep-link execution inputs. See the full [IPC inventory](runtime-protocols.md#9-complete-electron-preload-surface).
 
-## Token analytics privacy and log isolation
+## Stored content and redaction
 
-Machine-wide token analytics (`relay usage tokens` and desktop Usage View) inspect local agent logs using a pinned native `ccusage` binary. The following security and privacy boundaries are strictly enforced:
+| Store/view                           | Contents and handling                                                                                                                                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Task records/notes                   | Operator/caller text can contain sensitive material; selected unresolved notes can enter an approved provider prompt                                                                             |
+| Checkpoint patch                     | Real local tracked diff, bounded but not redacted by a checkpoint-output pass                                                                                                                    |
+| Public activity                      | Bounded sanitized status and optional project/task/branch labels; excludes full command/prompt/source payload fields, paths, terminal output, provider session IDs, model/effort and credentials |
+| Private terminal journals            | Project/controller/run lifecycle metadata, including project paths needed for restart discovery; no terminal transcript                                                                          |
+| Threads                              | Recognized secrets rejected unless explicit redaction is requested; rendered control/bidi content is escaped and framed as user-level data                                                       |
+| Continuity journal (prototype)       | Allowlisted visible fields, recognized-secret redaction, explicit capture truncation and known gaps                                                                                              |
+| Inspection (prototype)               | Bounded display excerpts may be redacted/truncated; hashes still identify the observed source version                                                                                            |
+| Exact file windows (prototype)       | Sensitive paths/refused source kinds fail; recognized-secret content is withheld rather than silently altered                                                                                    |
+| Verification environment (prototype) | Documented conventional values/presence only; withheld values are not hashed as secret values                                                                                                    |
+| Private live benchmark traces        | Explicit experiment artifacts with allowlist/redaction and strict retained-trace validity; review before any publication                                                                         |
 
-1. **Local-only offline execution**: `ccusage` is invoked with `--offline --no-cost` and a neutral working directory (`tmpdir()`). It never initiates network requests, never connects to provider APIs, and never sends data to any external server.
-2. **Telemetry only**: Only token counts, timestamps, and model identifiers are extracted. Prompts, completions, reasoning traces, terminal buffers, and credentials are never read into Rirei or retained in memory.
-3. **Strict path sanitization**: Project directories in session telemetry are scrubbed through `sanitizeProjectLabel`. Usernames (`$USER`, `$USERNAME`, `os.userInfo().username`), user home directories (`~`, `/Users/*`, `/home/*`), and full directory hierarchies are stripped, leaving only the immediate folder basename or a deterministic privacy hash.
-4. **Explicit opt-in**: Token counting requires explicit user opt-in saved to `rireiDataHome()/token-usage-opt-in.json`. Un-opted installations show an explanatory consent card and do not execute log scans.
-5. **Periodic quota poll separation**: The 1-minute background quota poll in the desktop app and daemon uses `--plans-only` to read status-line telemetry; it never invokes `ccusage` or executes full log scans.
-6. **Binary comes only from Rirei's own install**: the `ccusage` binary is resolved from the packaged app's resources or from `node_modules` beside the running CLI (walking up its parent folders), never from the working directory. The working directory is the opened project, so a repository cannot supply a binary that Rirei would execute.
-7. **Errors carry fixed wording**: token usage failures reach stderr and the desktop window as fixed messages ("Another token usage refresh is still running", "failed a privacy check", "could not be read"), never a lock path, cache path, or the username a privacy check matched. The desktop app forwards only that message, not raw stderr.
+`src/safety/redaction.ts` **exists and is used** by messaging/continuity. The missing feature is
+a redaction pass over legacy checkpoint patches, not a missing redaction module everywhere.
+Recognized-pattern redaction and sensitive-filename detection are finite heuristics, not guarantees
+that arbitrary task text, ordinary tracked files, diffs, logs, or user-selected artifacts contain
+no secrets. Treat private records according to what they actually contain.
 
-## Secrets
+Public task labels derive from the task title and can repeat the first line of a task. The
+absence of a full prompt field is not a guarantee of zero task-derived text; `activity.privacyMode`
+selects generic public labels.
 
-The strongest protection is that Relay avoids collecting secrets at all: it stores Git
-metadata, status, diff stats, and a bounded patch — not environment variables, not
-credential files, not raw conversations.
+## Token analytics and quota isolation
 
-> Note on the bounded patch: `changes.patch` is a real `git diff` of your working tree. If
-> you have staged/unstaged secrets in tracked files, they can appear there like in any diff.
-> A dedicated redaction pass over stored output (planned as `src/safety/redaction.ts` in the
-> original design) is **not yet implemented**. Until it exists, treat `.relay/checkpoints/`
-> as you would any local diff, keep it git-ignored, and don't check working-tree secrets in.
+Provider plan telemetry and token analytics are different paths. Claude's session-only status-line
+collector writes sanitized quota values; Codex quota reading uses local numeric rate-limit
+records. Unknown/expired data stays explicitly stale/unknown. These observations do not become
+an API key, a monetary bill, or model-token telemetry when that source does not expose it.
 
-`relay note` text can also contain anything the caller supplies, including secrets. Notes are
-stored under `.relay/` and never enter the sanitized activity snapshot, but unresolved notes
-selected for a handoff are sent to the receiving provider. Do not put secrets in notes.
-The Git fingerprint hashes commit, branch, status, and tracked/index patch data; it detects
-untracked path additions but not content-only changes to an already-untracked file.
+Numeric quota projection can read bounded chunks of mixed-content provider log files before
+selecting supported rate-limit records. Retaining only numeric fields is not a claim that every
+raw byte read by the parser was already telemetry-only. This path is separate from continuity's
+opt-in hook journal and does not reconstruct provider conversations for handoff.
 
-## What belongs in version control
+Machine-wide token analytics requires its own explicit opt-in. Rirei invokes a pinned native
+`ccusage` from its own installation, never a binary planted in the opened repository, using:
 
-- **Ignore:** the complete generated `.relay/` directory and the global sanitized Rirei
-  activity snapshot. `.relay/` may contain local paths, task text, run metadata, checkpoints,
-  patches, and captured test output.
-- **Optionally commit later:** separately designed human-authored project files that do not
-  share the generated `.relay/` namespace.
+- offline/no-cost flags, empty-config override, closed stdin and neutral cwd;
+- per-agent timeout/output bounds;
+- strict numeric normalization, path/username sanitization and privacy assertions before storage;
+- timezone-bound cache, per-agent refresh serialization, and last-good snapshot retention.
 
-`relay init` prints this guidance when it sets up the directory.
+Rirei requests and retains numeric reports rather than prompts/completions. The external scanner
+necessarily has access to provider log files; this architecture does not prove those files are
+never parsed in its process memory or that offline flags are OS-enforced network isolation.
+No architecture audit here scans private provider logs or credentials to establish that claim.
+Background quota polling remains separate and does not automatically invoke token-history scans.
+
+## Experimental continuity disclosure
+
+Task capture consent is independent of analytics. Disable revokes grants and excludes retained
+history from automatic handoffs. Clear removes the current task's generated capture artifacts;
+task receipts and other authoritative task data are preserved. Explicit operator lookup of
+retained evidence after disable follows the existing same-user operator contract.
+
+Submitted text and historical tool/assistant output have different roles. Path-display suppression
+does not authorize or enforce filesystem isolation. A source hash, matching snapshot, receipt,
+or cursor establishes only its declared observation relationship. Current environment/ignored
+input gaps are explicit, no CLI creates trusted automatic test reuse, and tests are never
+silently skipped. [Continuity architecture](continuity-architecture.md) describes the complete flow.
+
+## Publication boundary
+
+Keep generated `.relay/`, daemon descriptors, global private journals/caches, live workspaces,
+and private benchmark artifacts out of ordinary source publication. `.relay/` was tracked in
+early history; deleting it in a later tree does not erase earlier commits. Release review and
+any history rewrite remain owner actions described in [publication](publication.md).
+
+The package allowlist/private-path checks are useful release checks, not proof that all possible
+secrets are absent. Source publication, npm publication, desktop signing/notarization, and native
+provider/platform acceptance have separate evidence requirements.

@@ -68,6 +68,26 @@ async function normalizeDestinationExistsError(
   }
 }
 
+async function publishClaim(claim: string, destination: string): Promise<void> {
+  let retried = false;
+  for (;;) {
+    try {
+      await rename(claim, destination);
+      return;
+    } catch (error) {
+      const failure = error as NodeJS.ErrnoException;
+      await normalizeDestinationExistsError(failure, destination);
+      if (process.platform !== 'win32' || failure.code !== 'EPERM' || retried)
+        throw error;
+      // A competing holder can release the destination before the existence
+      // check sees it. Retry the atomic rename once; never remove the destination
+      // or assume ownership on an ambiguous permission error.
+      retried = true;
+      await delay(ACQUIRE_INTERVAL_MS);
+    }
+  }
+}
+
 function processIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -119,12 +139,8 @@ async function createOwnedDirectory(directory: string): Promise<LockOwner> {
     await writeFile(`${claimDirectory}/${LOCK_META}`, JSON.stringify(owner), {
       mode: 0o600,
     });
-    await rename(claimDirectory, directory);
+    await publishClaim(claimDirectory, directory);
   } catch (error) {
-    await normalizeDestinationExistsError(
-      error as NodeJS.ErrnoException,
-      directory,
-    );
     await removeDirectory(claimDirectory);
     throw error;
   }

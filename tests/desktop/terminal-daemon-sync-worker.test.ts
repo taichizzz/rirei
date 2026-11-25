@@ -14,13 +14,9 @@ import {
 
 const roots: string[] = [];
 const cleanups: Array<() => Promise<void>> = [];
-const entrypoint = fileURLToPath(
-  new URL('../../src/index.ts', import.meta.url),
+const compiledCli = fileURLToPath(
+  new URL('../../dist/index.cjs', import.meta.url),
 );
-const tsxLoader = new URL(
-  '../../node_modules/tsx/dist/loader.mjs',
-  import.meta.url,
-).href;
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((c) => c()));
@@ -247,11 +243,9 @@ for await (const line of rl) {
   });
 
   test('rejects an oversized unterminated worker request before EOF', async () => {
-    const child = spawn(
-      process.execPath,
-      ['--import', tsxLoader, entrypoint, 'bridge', '--worker'],
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    );
+    const child = spawn(process.execPath, [compiledCli, 'bridge', '--worker'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     child.stdin.on('error', () => undefined);
     cleanups.push(
       () =>

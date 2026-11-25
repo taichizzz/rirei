@@ -35,6 +35,6 @@ notarization-output/
 # Private implementation roadmap.
 plan.md
 atlas.html
-ARCHITECTURE.md
-ARCHITECTURE.en.md
-Architecture.zh.md
+/ARCHITECTURE.md
+/ARCHITECTURE.en.md
+/Architecture.zh.md

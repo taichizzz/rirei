@@ -1,0 +1,169 @@
+[
+  {
+    "id": "repository-sufficient",
+    "request": "Implement clamp(value, min, max). Return the closest bound outside the interval and the input inside it.",
+    "snapshot": "export function clamp(value, min, max) { return value; }\n",
+    "reference": "export function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }\n",
+    "checks": "assert.equal(api.clamp(-2, 0, 5), 0); assert.equal(api.clamp(9, 0, 5), 5); assert.equal(api.clamp(3, 0, 5), 3);",
+    "events": [
+      { "hook_event_name": "SessionStart", "source": "startup" },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "Implement clamp(value, min, max). Return the closest bound outside the interval and the input inside it."
+      },
+      {
+        "hook_event_name": "Stop",
+        "last_assistant_message": "The function is still a stub."
+      }
+    ],
+    "mustRetain": ["The function is still a stub."],
+    "pendingTools": 0
+  },
+  {
+    "id": "late-requirement",
+    "request": "Add a helper to return unique IDs.",
+    "snapshot": "export function uniqueIds(ids) { return ids; }\n",
+    "reference": "export function uniqueIds(ids) { return [...new Set(ids)]; }\n",
+    "checks": "assert.deepEqual(api.uniqueIds(['b', 'a', 'b']), ['b', 'a']); assert.deepEqual(api.uniqueIds([]), []); assert.deepEqual(Object.keys(api), ['uniqueIds']);",
+    "events": [
+      { "hook_event_name": "SessionStart", "source": "startup" },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "Add a helper to return unique IDs."
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "Keep the exported uniqueIds(ids) API unchanged, preserve first-occurrence order, and add no dependencies."
+      },
+      {
+        "hook_event_name": "Stop",
+        "last_assistant_message": "I will use a built-in Set and retain the original order."
+      }
+    ],
+    "mustRetain": [
+      "Keep the exported uniqueIds(ids) API unchanged, preserve first-occurrence order, and add no dependencies."
+    ],
+    "pendingTools": 0
+  },
+  {
+    "id": "rejected-approach",
+    "request": "Implement lookup(records, id) for stored identifiers.",
+    "snapshot": "export function lookup(records, id) { return records.find(row => row.id.toLowerCase() === id.toLowerCase()); }\n",
+    "reference": "export function lookup(records, id) { return records.find(row => row.id === id); }\n",
+    "checks": "const records = [{id:'Ab', value:1}, {id:'ab', value:2}]; assert.equal(api.lookup(records, 'ab').value, 2); assert.equal(api.lookup(records, 'AB'), undefined);",
+    "events": [
+      { "hook_event_name": "SessionStart", "source": "startup" },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "Identifiers are case-sensitive. Do not normalize their case."
+      },
+      {
+        "hook_event_name": "PreToolUse",
+        "tool_use_id": "lookup-test",
+        "tool_name": "Bash",
+        "tool_input": { "command": "node --test test/lookup.test.mjs" }
+      },
+      {
+        "hook_event_name": "PostToolUseFailure",
+        "tool_use_id": "lookup-test",
+        "tool_name": "Bash",
+        "tool_input": { "command": "node --test test/lookup.test.mjs" },
+        "error": "Expected value 2, received 1: case folding selected the wrong record."
+      },
+      {
+        "hook_event_name": "Stop",
+        "last_assistant_message": "I rejected case folding because Ab and ab must remain distinct identifiers."
+      }
+    ],
+    "mustRetain": [
+      "Identifiers are case-sensitive. Do not normalize their case.",
+      "Expected value 2, received 1",
+      "I rejected case folding"
+    ],
+    "pendingTools": 0
+  },
+  {
+    "id": "unverified-edit",
+    "request": "Make parsePort(text) accept only integer decimal ports from 1 through 65535.",
+    "snapshot": "export function parsePort(text) { const n = Number.parseInt(text, 10); return n >= 1 && n <= 65535 ? n : null; }\n",
+    "reference": "export function parsePort(text) { if (!/^\\d+$/.test(text)) return null; const n = Number(text); return n >= 1 && n <= 65535 ? n : null; }\n",
+    "checks": "assert.equal(api.parsePort('80junk'), null); assert.equal(api.parsePort('80.5'), null); assert.equal(api.parsePort('0'), null); assert.equal(api.parsePort('65536'), null); assert.equal(api.parsePort('80'), 80);",
+    "events": [
+      { "hook_event_name": "SessionStart", "source": "startup" },
+      {
+        "hook_event_name": "PreToolUse",
+        "tool_use_id": "ports-test",
+        "tool_name": "Bash",
+        "tool_input": { "command": "npm test" }
+      },
+      {
+        "hook_event_name": "PostToolUseFailure",
+        "tool_use_id": "ports-test",
+        "tool_name": "Bash",
+        "tool_input": { "command": "npm test" },
+        "error": "80junk must be rejected."
+      },
+      {
+        "hook_event_name": "PostToolUse",
+        "tool_use_id": "ports-edit",
+        "tool_name": "Edit",
+        "tool_input": { "file_path": "src/index.mjs" },
+        "tool_response": { "success": true }
+      },
+      {
+        "hook_event_name": "Stop",
+        "last_assistant_message": "All tests pass now."
+      }
+    ],
+    "mustRetain": ["80junk must be rejected.", "All tests pass now."],
+    "pendingTools": 0
+  },
+  {
+    "id": "superseded-instruction",
+    "request": "Implement isExpired(now, expiresAt) with an inclusive expiry boundary.",
+    "snapshot": "export function isExpired(now, expiresAt) { return now >= expiresAt; }\n",
+    "reference": "export function isExpired(now, expiresAt) { return now > expiresAt; }\n",
+    "checks": "assert.equal(api.isExpired(10, 10), false); assert.equal(api.isExpired(11, 10), true); assert.equal(api.isExpired(9, 10), false);",
+    "events": [
+      { "hook_event_name": "SessionStart", "source": "startup" },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "Use inclusive expiry: now >= expiresAt."
+      },
+      {
+        "hook_event_name": "Stop",
+        "last_assistant_message": "I implemented inclusive expiry."
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "Correction: replace the inclusive rule with strict expiry. now === expiresAt must remain valid; expire only when now > expiresAt."
+      }
+    ],
+    "mustRetain": [
+      "Use inclusive expiry",
+      "Correction: replace the inclusive rule with strict expiry"
+    ],
+    "pendingTools": 0
+  },
+  {
+    "id": "abrupt-interruption",
+    "request": "Implement sum(values). Return zero for an empty array and sum all numeric values.",
+    "snapshot": "export function sum(values) { return values.reduce((a, b) => a + b); }\n",
+    "reference": "export function sum(values) { return values.reduce((a, b) => a + b, 0); }\n",
+    "checks": "assert.equal(api.sum([]), 0); assert.equal(api.sum([1,2,3]), 6); assert.equal(api.sum([-1,1]), 0);",
+    "events": [
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "Return zero for an empty array. Do not change the exported sum(values) function."
+      },
+      {
+        "hook_event_name": "PreToolUse",
+        "tool_use_id": "sum-test",
+        "tool_name": "Bash",
+        "tool_input": { "command": "npm test" }
+      }
+    ],
+    "mustRetain": ["Return zero for an empty array", "npm test"],
+    "pendingTools": 1
+  }
+]

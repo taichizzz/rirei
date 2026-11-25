@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "mode": "offline-inspection-qualification",
+  "providerSessions": 0,
+  "capturedAt": "2026-11-06T17:41:11.853Z",
+  "host": { "nodeVersion": "v22.14.0", "platform": "darwin", "arch": "arm64" },
+  "sourceHashes": {
+    "src/context/inspection.ts": "07aa313aca9f6901206ac9c3e7951d509a38e74ef4619ca0c9caf72e26c9f7ab",
+    "src/context/inspection-code.ts": "2665a3929f4a3a8635f8f5594f4565e73880dbfd792081204d1ffbb8e9d9142f",
+    "src/context/inspection-schema.ts": "0aef48f5e941552cc8f97cf294d0a88043dfc6e21877fa2e1778db6627389e65",
+    "src/context/snapshot.ts": "9dc3075884d0ded6c4533402f8952c768c03920881dc6d078342457d63efec9c",
+    "src/context/render.ts": "0ec5a3972f6beed68d361132daba8b7abcfd374e3a061741ced035e8ba3c0d5a",
+    "src/context/briefing.ts": "bed13d5269bd3a8a6c45f2c8193d637631b194af4e69dc93d4e5fa0ce0fe25f7",
+    "src/context/verification.ts": "3137231eb673c2ffbee2bcb2312132db7ca40b53b0abee7ea1b2a26867ae41cc",
+    "src/lifecycle.ts": "28a31a428ac87fb986ee60989269a6287f81ac6b0339deace44e83e5b7381939",
+    "src/cli/context.ts": "84aade3af2141f057ff902b4b9571e68cbf580085c3a14743d7cddcaa6d5ddd8",
+    "benchmarks/continuity/inspect.mjs": "4b0fde8a2141c985df38b5c40a95443b3f519fe9773d750785172a516ed829b5"
+  },
+  "savedControl": {
+    "manifestSha256": "2746bec73f694e6e1587cbb1cf5c36911c9f1fadf87517087af1a751abc822d1",
+    "sourceReportHash": "1e0bde884fdfb04f879e61d6708c2c189733b7bc458de9de90f4aa9fa2222862",
+    "rows": [
+      {
+        "index": 0,
+        "task": "tenant-ledger",
+        "receiver": "codex",
+        "checkpointHash": "dc1d5df7ee0aad70b12196f115774cad2afc34e5af0ccd1dd3c9b681c57893e1",
+        "historyHash": "631a93f7d36a9ea5fac69ec0cc1a8da52f371f519ab20a9f029584319993583a",
+        "snapshotCoverage": "complete",
+        "handoffCharacters": 4316,
+        "briefingCharacters": 3998,
+        "exactRequirementsInline": 6,
+        "submittedMessagesFullyInline": 1,
+        "inspections": [
+          {
+            "format": "text",
+            "characters": 4201,
+            "bytes": 4201,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          },
+          {
+            "format": "json",
+            "characters": 4627,
+            "bytes": 4627,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "task": "cursor-feed",
+        "receiver": "claude",
+        "checkpointHash": "a7c1c235e2d5c7df4023ede7759e9cd8d9c61199423b5fb50db43bdceb181043",
+        "historyHash": "fbd2776152102d366a608766a1b4674327bb54188ca07bdd45fc2bacdfa19c26",
+        "snapshotCoverage": "complete",
+        "handoffCharacters": 4855,
+        "briefingCharacters": 4520,
+        "exactRequirementsInline": 6,
+        "submittedMessagesFullyInline": 1,
+        "inspections": [
+          {
+            "format": "text",
+            "characters": 4141,
+            "bytes": 4141,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          },
+          {
+            "format": "json",
+            "characters": 4567,
+            "bytes": 4567,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "task": "cursor-feed",
+        "receiver": "codex",
+        "checkpointHash": "555254dbdaa7fde6721efbceec45b1cfdfa6c15f2b1b66b38131b41818266c84",
+        "historyHash": "7e4bcf633d978ad55fbcaee0af3450abc1898d7979311d6110fdf6a623008ac6",
+        "snapshotCoverage": "complete",
+        "handoffCharacters": 5371,
+        "briefingCharacters": 5036,
+        "exactRequirementsInline": 6,
+        "submittedMessagesFullyInline": 1,
+        "inspections": [
+          {
+            "format": "text",
+            "characters": 4266,
+            "bytes": 4266,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          },
+          {
+            "format": "json",
+            "characters": 4692,
+            "bytes": 4692,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "task": "tenant-ledger",
+        "receiver": "claude",
+        "checkpointHash": "5730d654d35446fdfe35e5ea4bd60124ea99cf08a20e2635e77ea3a677f65bff",
+        "historyHash": "0b3256673be6f33a17be56d513857b600abe31b1f2fd3a2178881cbbcc563c41",
+        "snapshotCoverage": "complete",
+        "handoffCharacters": 5469,
+        "briefingCharacters": 5151,
+        "exactRequirementsInline": 6,
+        "submittedMessagesFullyInline": 1,
+        "inspections": [
+          {
+            "format": "text",
+            "characters": 2981,
+            "bytes": 2981,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          },
+          {
+            "format": "json",
+            "characters": 3413,
+            "bytes": 3413,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          }
+        ]
+      }
+    ]
+  },
+  "timings": [
+    {
+      "id": "tenant-ledger",
+      "files": 6,
+      "fixtureBytes": 1163,
+      "initialFilesSha256": "c36c095dec9a227fafbb2c639df90a79295101746d92b0f4c99cf97d8d57ffd3",
+      "handoffMs": [
+        92.482, 92.368, 90.177, 92.018, 90.925, 88.162, 87.294, 93.079, 87.63,
+        88.962, 115.494, 107.856
+      ],
+      "inspectionMs": [
+        80.149, 75.339, 73.615, 71.159, 71.674, 76.204, 71.052, 95.053, 72.359,
+        88.114, 89.867, 91.841
+      ],
+      "handoffP50Ms": 90.925,
+      "handoffP95Ms": 115.494,
+      "inspectionP50Ms": 75.339,
+      "inspectionP95Ms": 95.053,
+      "inspectionCharacters": 2995
+    },
+    {
+      "id": "ledger-plus-256-fixed-inputs",
+      "files": 262,
+      "fixtureBytes": 525451,
+      "initialFilesSha256": "0692bd81aff1c180009582944d00806b7e8007065463dc0011d32bb906166aaa",
+      "handoffMs": [
+        246.461, 222.52, 213.371, 215.541, 213.377, 213.125, 215.658, 211.39,
+        211.276, 212.691, 214.072, 244.938
+      ],
+      "inspectionMs": [
+        201.953, 195.075, 195.165, 196.415, 198.266, 194.079, 193.197, 194.566,
+        194.242, 195.779, 200.493, 221.468
+      ],
+      "handoffP50Ms": 213.377,
+      "handoffP95Ms": 246.461,
+      "inspectionP50Ms": 195.165,
+      "inspectionP95Ms": 221.468,
+      "inspectionCharacters": 2997
+    }
+  ],
+  "limitations": [
+    "12 sequential samples per local fixture; nearest-rank descriptive percentiles, warm filesystem cache. Node/CLI startup excluded.",
+    "Handoff preparation includes legacy Git inspection and covered scans. Inspection includes live rescans and task/journal validation; eligible derived packets may be cached after the first call in the same process.",
+    "No new model-quality, token, or continuation-time result. Saved histories are rebound only in disposable fixture repositories; source control archive is read-only."
+  ]
+}

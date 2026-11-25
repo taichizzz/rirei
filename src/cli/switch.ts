@@ -83,7 +83,9 @@ export function switchCommand(): Command {
         const expectedHandoffStateFingerprint = handoffStateFingerprint(
           checkpoint.state,
         );
-        const hasNotes = hasContinuationNotes(handoff.capsule.notes);
+        const hasNotes =
+          hasContinuationNotes(handoff.capsule.notes) ||
+          Boolean(handoff.continuity?.useful);
         process.stdout.write(
           `Checkpoint: ${checkpoint.id}\nEstimated handoff: ${handoff.budget.estimatedTokens} tokens (${handoff.budget.usedCharacters} characters)` +
             `${handoff.budget.omittedItems ? `; ${handoff.budget.omittedItems} items omitted` : ''}\n\n${handoff.text}\n`,
@@ -132,6 +134,13 @@ export function switchCommand(): Command {
             operationId: options.operationId,
             terminalId: options.terminalId,
             expectedHandoffStateFingerprint,
+            expectedContextFingerprint:
+              handoff.continuity?.digest ?? 'disabled',
+            expectedCoveredSnapshotId:
+              handoff.coveredSnapshot?.coverage.status === 'complete'
+                ? handoff.coveredSnapshot.id
+                : undefined,
+            promptIsHandoff: true,
             failOnExhausted: options.failOnExhausted,
           },
         );

@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "mode": "offline-targeted-retrieval",
+  "providerSessions": 0,
+  "capturedAt": "2026-11-10T15:29:12.993Z",
+  "host": { "nodeVersion": "v22.14.0", "platform": "darwin", "arch": "arm64" },
+  "sourceHashes": {
+    "src/cli/context.ts": "849cb13638b3fd7dde7ac8925c0df0b3811169d5b29a13d8b0296e3b53c0ad36",
+    "src/context/briefing.ts": "4b493a5ea5f72afd284730fe337dd0ea6ab58c6184f9600af707dcb6b4423bfc",
+    "src/context/snapshot.ts": "d8aba172269b2af82bacbed64deef7a1c890750d65ac24261bbc071e02fc284d",
+    "src/context/retrieval.ts": "df7813b8c65dffbc4fc4fe83541e43adc50a56d911255145988ba7a888b5465f",
+    "src/context/retrieval-schema.ts": "6764b535246d18eebb075714b4815391067449bd4d5592bed59e6c9a9e15e47c",
+    "src/context/retrieval-cursor.ts": "78e72f69f08eec15a4daea0c15959c34d81466b2c6580f81f9c9a0dfd258f08c",
+    "src/context/retrieval-index.ts": "f309d8e544560f4ab3c3d02d98be94b21762dedc68268aa8bec0c753c82323c1",
+    "src/context/retrieval-file.ts": "ebcb90f439f1359cefd53c757a2e48579b91c020310cdb309de272ffc9f2fae7",
+    "src/context/retrieval-output.ts": "15be8883f07d5d4b1aa86589517b237cd8b9f3533de2fb00590228cf70ac5006",
+    "benchmarks/continuity/retrieve.mjs": "55aa019e63b17a97d74063706048dacbaeb6c2ce5f96823accf382f4d4d3a6c1",
+    "benchmarks/continuity/inspect.mjs": "d2baa843afa64787e6bae5125610e1eb62d2e07248b74c4698a65c268cd5880c"
+  },
+  "bundleSha256": "9fde0955a5310136fc603a1223ba0ec38685c616f300bcf47ab36de9ba3dbd76",
+  "workload": {
+    "fixture": {
+      "events": 43,
+      "fileCount": 2,
+      "linesPerFile": 1200,
+      "filesSha256": "89a21dc5e3314117d0794d5838b67a5caffec9b8772c775d6361d273ed7f2634",
+      "requestedEvidenceCharacters": 200,
+      "requestedStartLine": 601,
+      "requestedLineCount": 2
+    },
+    "baseline": {
+      "calls": 5,
+      "returnedBytes": 279909,
+      "returnedCharacters": 279909,
+      "responses": [
+        { "kind": "full-history-page", "characters": 93900, "bytes": 93900 },
+        { "kind": "full-history-page", "characters": 99265, "bytes": 99265 },
+        { "kind": "full-history-page", "characters": 14384, "bytes": 14384 },
+        { "kind": "full-file-read", "characters": 34980, "bytes": 34980 },
+        { "kind": "full-file-read", "characters": 37380, "bytes": 37380 }
+      ]
+    },
+    "targeted": {
+      "calls": 2,
+      "returnedBytes": 4764,
+      "returnedCharacters": 4764,
+      "responses": [
+        { "kind": "exact-field-find", "characters": 1345, "bytes": 1345 },
+        { "kind": "bounded-batch", "characters": 3419, "bytes": 3419 }
+      ]
+    },
+    "returnedByteReductionPercent": 98.3,
+    "exactSourceWindows": true,
+    "queryStatusesComplete": true,
+    "sourceStateAndJournalUnchanged": true
+  },
+  "savedControl": {
+    "manifestSha256": "2746bec73f694e6e1587cbb1cf5c36911c9f1fadf87517087af1a751abc822d1",
+    "sourceReportHash": "1e0bde884fdfb04f879e61d6708c2c189733b7bc458de9de90f4aa9fa2222862",
+    "rows": [
+      {
+        "index": 0,
+        "task": "tenant-ledger",
+        "receiver": "codex",
+        "checkpointHash": "dc1d5df7ee0aad70b12196f115774cad2afc34e5af0ccd1dd3c9b681c57893e1",
+        "historyHash": "631a93f7d36a9ea5fac69ec0cc1a8da52f371f519ab20a9f029584319993583a",
+        "snapshotCoverage": "complete",
+        "handoffCharacters": 4339,
+        "briefingCharacters": 4021,
+        "exactRequirementsInline": 6,
+        "submittedMessagesFullyInline": 1,
+        "inspections": [
+          {
+            "format": "text",
+            "characters": 4200,
+            "bytes": 4200,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          },
+          {
+            "format": "json",
+            "characters": 4626,
+            "bytes": 4626,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "task": "cursor-feed",
+        "receiver": "claude",
+        "checkpointHash": "a7c1c235e2d5c7df4023ede7759e9cd8d9c61199423b5fb50db43bdceb181043",
+        "historyHash": "fbd2776152102d366a608766a1b4674327bb54188ca07bdd45fc2bacdfa19c26",
+        "snapshotCoverage": "complete",
+        "handoffCharacters": 4878,
+        "briefingCharacters": 4543,
+        "exactRequirementsInline": 6,
+        "submittedMessagesFullyInline": 1,
+        "inspections": [
+          {
+            "format": "text",
+            "characters": 4140,
+            "bytes": 4140,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          },
+          {
+            "format": "json",
+            "characters": 4566,
+            "bytes": 4566,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "task": "cursor-feed",
+        "receiver": "codex",
+        "checkpointHash": "555254dbdaa7fde6721efbceec45b1cfdfa6c15f2b1b66b38131b41818266c84",
+        "historyHash": "7e4bcf633d978ad55fbcaee0af3450abc1898d7979311d6110fdf6a623008ac6",
+        "snapshotCoverage": "complete",
+        "handoffCharacters": 5394,
+        "briefingCharacters": 5059,
+        "exactRequirementsInline": 6,
+        "submittedMessagesFullyInline": 1,
+        "inspections": [
+          {
+            "format": "text",
+            "characters": 4265,
+            "bytes": 4265,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          },
+          {
+            "format": "json",
+            "characters": 4691,
+            "bytes": 4691,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "task": "tenant-ledger",
+        "receiver": "claude",
+        "checkpointHash": "5730d654d35446fdfe35e5ea4bd60124ea99cf08a20e2635e77ea3a677f65bff",
+        "historyHash": "0b3256673be6f33a17be56d513857b600abe31b1f2fd3a2178881cbbcc563c41",
+        "snapshotCoverage": "complete",
+        "handoffCharacters": 5492,
+        "briefingCharacters": 5174,
+        "exactRequirementsInline": 6,
+        "submittedMessagesFullyInline": 1,
+        "inspections": [
+          {
+            "format": "text",
+            "characters": 2980,
+            "bytes": 2980,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          },
+          {
+            "format": "json",
+            "characters": 3412,
+            "bytes": 3412,
+            "exactRequirementsInline": 6,
+            "excerpts": 1
+          }
+        ]
+      }
+    ]
+  },
+  "limitations": [
+    "Authored, preselected retrieval workload; query fields and desired source ranges are known to both comparisons. This is not a best-possible shell baseline or a model behavior experiment.",
+    "Calls count executed read commands, not model turns or provider tokens. Bytes are returned UTF-8 output, not tokenization or subscription usage.",
+    "The targeted caller stops after the requested windows; non-null cursors truthfully expose remaining source content. No provider was launched."
+  ]
+}

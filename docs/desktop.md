@@ -41,7 +41,7 @@ quota status are labeled as unsupported or checked on launch rather than guessed
 The **Usage** entry in the icon rail opens the full-stage **Usage View**, providing machine-wide token analytics alongside verified provider quota windows:
 
 - **Stage view persistence**: Clicking Usage replaces the terminal/task stage (`#mainContent`) with the dedicated usage analytics canvas (`#usageView`). Terminal tabs, active PTY processes, and daemon IPC subscriptions remain connected in the background. Pressing **Task** in the rail, the **Escape** key, or closing the view returns immediately to the active terminal without re-initialization.
-- **Privacy & opt-in flow**: Machine-wide token counting is gated by an explicit opt-in (`token-usage-opt-in.json`). When disabled, an opt-in card explains that local logs are processed strictly on this machine by the bundled native `ccusage` binary. No prompts, code, conversations, or credentials are read into Rirei or uploaded over the network.
+- **Privacy & opt-in flow**: Machine-wide token counting is gated by an explicit opt-in (`token-usage-opt-in.json`). Rirei requests offline numeric reports from its install-owned native `ccusage` binary and validates/sanitizes the retained projection. The scanner has access to provider logs; offline flags are not an OS sandbox or proof that raw log fields never enter that dependency's memory. See [security](security.md#token-analytics-and-quota-isolation).
 - **Ten interactive dashboard widgets**:
   1. **Date range filter**: Instant switching across 7 days, 30 days, or 90 days.
   2. **Agent filter chips**: Toggle individual agents (Claude, Codex, Gemini, Antigravity, OpenCode) with visual badge status and color coding.
@@ -160,11 +160,10 @@ clears the terminal (or restores the how-to text when idle).
 > rebuilt with `npm run desktop:build`, which writes `dist/mac-arm64/Rirei.app`. When testing
 > changes, prefer `npm run desktop:dev`, which always runs the current source.
 >
-> Rebuilding needs an ad-hoc signature, because the available Apple Development certificates
-> are expired and electron-builder therefore skips signing. This repository lives in an
-> iCloud-synced folder, which continually re-adds the `com.apple.FinderInfo` attribute that
-> `codesign --verify --deep --strict` rejects, so stage the bundle outside the synced tree
-> before signing:
+> Unsigned development packaging can require an ad-hoc signature, depending on local signing
+> setup. This is separate from release Developer ID/notarization. Synced folders can re-add
+> extended attributes rejected by strict `codesign` verification; the following is an owned
+> staging workflow for that development issue, not evidence that a build is release-signed:
 >
 > ```
 > ditto --norsrc --noextattr --noacl dist/mac-arm64/Rirei.app /tmp/stage/Rirei.app
@@ -186,13 +185,13 @@ clears the terminal (or restores the how-to text when idle).
 
 The app routes work down one of two paths depending on the command:
 
-| Path            | Commands                                                               | Mechanism                                                      | Where output goes                   |
-| --------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------- |
-| Non-interactive | `init`, `start`, `status`, `doctor`, `checkpoint`, `handoff`, `finish` | `runCli()` spawns the CLI, captures stdout/stderr              | Printed into the `#output` pane     |
-| Interactive     | `run`, `switch`, `resume`, `shell`                                     | The daemon spawns the command inside a PTY via `pty_bridge.py` | Streamed into the xterm.js terminal |
+| Path            | Commands                                                               | Mechanism                                                                                      | Where output goes                   |
+| --------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Non-interactive | `init`, `start`, `status`, `doctor`, `checkpoint`, `handoff`, `finish` | `runCli()` spawns the CLI, captures stdout/stderr                                              | Printed into the `#output` pane     |
+| Interactive     | `run`, `switch`, `resume`, `shell`                                     | The daemon uses native `node-pty`; Python is explicitly forced compatibility/test hosting only | Streamed into the xterm.js terminal |
 
-Interactive sessions require an initialized project (`.relay/config.json`) and an active task
-(`.relay/state.json`), and up to **four** terminal sessions may run concurrently, optionally
+Managed agent sessions require an initialized project (`.relay/config.json`) and an active task
+(`.relay/state.json`); ordinary shell tabs do not. Up to **four active** terminal sessions may run concurrently, optionally
 backed by Git worktree workspaces.
 While sessions are active, project selection is disabled. Usage remains
 available because it is read-only, and terminal tabs restore the live PTY view per agent.
@@ -264,7 +263,7 @@ Two consequences worth knowing:
 ```
 desktop/
 ├── main.mjs                     # Electron main process: windows, IPC, daemon client
-├── terminal-daemon.mjs          # Detached daemon entrypoint and session owner
+    ├── terminal-daemon.mjs          # Detached daemon entrypoint and session owner
 ├── terminal-daemon-server.mjs   # Authenticated socket server, PTYs, bounded output
 ├── terminal-daemon-protocol.mjs # Framing and protocol validation
 ├── provider-lifecycle-hook.cjs  # Terminal-scoped status-only daemon reporter
@@ -272,7 +271,11 @@ desktop/
 ├── opencode-lifecycle-wrapper.mjs # Native TUI plus authenticated SSE observer
 ├── terminal-journal.mjs         # Durable restart reconciliation evidence
 ├── terminal-control.mjs         # PTY bridge control frames
-├── pty_bridge.py                # Allocates a PTY, relays bytes, applies terminal size
+├── terminal-host.mjs            # Active native node-pty host and parent guard
+├── node-pty-loader.cjs          # Native package/prebuild loading and exited ConPTY cleanup
+├── terminal-daemon-client.mjs   # Authenticated request, inventory, cursor, and control client
+├── daemon-bridge-worker.mjs     # Reused CLI worker for state/bridge synchronization
+├── pty_bridge.py                # Explicit compatibility/test PTY bridge
 ├── preload.cjs         # contextBridge: the window.relay API exposed to the renderer
 └── renderer/
     ├── index.html      # Loads xterm assets + the UI
@@ -281,7 +284,7 @@ desktop/
     └── vendor/         # Vendored xterm.js, xterm.css, addon-fit.js (no runtime network)
 ```
 
-### `pty_bridge.py`
+### `pty_bridge.py` (compatibility path)
 
 A small Python helper that:
 
@@ -295,17 +298,18 @@ A small Python helper that:
   interrupt, terminate, and kill actions. Resize applies `TIOCSWINSZ`; provider supervisors
   receive signals without prematurely killing the Relay controller that must finalize state.
 
-Requires the system `python3` at `/usr/bin/python3` (macOS ships this).
+This explicitly selected path requires a usable `/usr/bin/python3` and POSIX PTY modules.
+The default native host has no Python prerequisite and does not automatically fall back to it.
 
 Packaged apps unpack the daemon entry, its static import closure, and `pty_bridge.py` beside
 `app.asar`; Python cache directories and `.pyc`/`.pyo` files are excluded from the bundle.
 
 ### `main.mjs`
 
-- `runCli(project, command, args)` — spawns the CLI with piped stdio for non-interactive
-  commands and resolves `{ ok, output }`.
-- `startTerminal(event, project, command, agent, size)` — sends a validated start request to
-  the detached daemon, which launches `pty_bridge.py` and owns the resulting PTY.
+- Non-interactive handlers use `runCli()` to spawn the compiled CLI with piped stdio and wrap
+  its parsed/printed result in the corresponding IPC response shape.
+- Interactive handlers send a validated start request to the detached daemon, which owns a
+  native `node-pty` host around the relay controller.
 - Managed terminals are keyed by generated terminal ID, not renderer ID. Every terminal IPC
   action validates both terminal identity and owning `webContents`; the CLI receives the same
   value as its operation and terminal IDs, linking the PTY to its durable run lease.
@@ -322,29 +326,33 @@ Packaged apps unpack the daemon entry, its static import closure, and `pty_bridg
 The renderer only sees `window.relay`, exposed over `contextBridge` with
 `contextIsolation: true`, `nodeIntegration: false`, and `sandbox: true`:
 
-| `window.relay` method      | Channel                    | Direction                               |
-| -------------------------- | -------------------------- | --------------------------------------- |
-| `selectProject()`          | `relay:select-project`     | invoke                                  |
-| `command(request)`         | `relay:command`            | invoke (non-interactive commands)       |
-| `usage(request)`           | `relay:usage`              | invoke (read provider plan usage)       |
-| `dashboard(request)`       | `relay:dashboard`          | invoke (read structured task status)    |
-| `interactive(request)`     | `relay:interactive`        | invoke (starts a terminal)              |
-| `openShell(request)`       | `relay:shell`              | invoke (starts a login-shell PTY)       |
-| `workspaceList(request)`   | `relay:workspace-list`     | invoke (list workspaces)                |
-| `workspaceCreate(request)` | `relay:workspace-create`   | invoke (create workspace)               |
-| `terminalInput(id,data)`   | `relay:terminal-input`     | send (validated terminal → PTY stdin)   |
-| `resizeTerminal(id,size)`  | `relay:terminal-resize`    | send (validated terminal → PTY fd 3)    |
-| `stopTerminal(id)`         | `relay:terminal-stop`      | invoke (bounded stop escalation)        |
-| `stopAllTerminals()`       | `relay:terminal-stop-all`  | invoke (stop every active terminal)     |
-| `interruptTerminal(id)`    | `relay:terminal-interrupt` | invoke (validated terminal SIGINT)      |
-| `closeTerminal(id)`        | `relay:terminal-close`     | invoke (remove terminal from manager)   |
-| `hideTerminal(id)`         | `relay:terminal-hide`      | invoke (visually hide running agent)    |
-| `terminalInventory()`      | `relay:terminal-inventory` | invoke (owned terminal inventory)       |
-| `onTerminalData(cb)`       | `relay:terminal-data`      | receive (`{terminalId,data}`)           |
-| `onTerminalStatus(cb)`     | `relay:terminal-status`    | receive (`{terminalId,status}`)         |
-| `onTerminalExit(cb)`       | `relay:terminal-exit`      | receive (identified session ended)      |
-| `onDeepLink(cb)`           | `relay:deep-link`          | receive (`{terminalId}`)                |
-| `activity(request)`        | `relay:activity`           | invoke (read validated global activity) |
+The table below is a terminal-oriented summary, not the complete bridge inventory. Project
+validation, catalogs/history/checkpoints, token preferences, Threads, rendering acknowledgements,
+and control events are enumerated in [the complete runtime IPC surface](runtime-protocols.md#9-complete-electron-preload-surface).
+
+| `window.relay` method      | Channel                    | Direction                                                                         |
+| -------------------------- | -------------------------- | --------------------------------------------------------------------------------- |
+| `selectProject()`          | `relay:select-project`     | invoke                                                                            |
+| `command(request)`         | `relay:command`            | invoke (non-interactive commands)                                                 |
+| `usage(request)`           | `relay:usage`              | invoke (read provider plan usage)                                                 |
+| `dashboard(request)`       | `relay:dashboard`          | invoke (read structured task status)                                              |
+| `interactive(request)`     | `relay:interactive`        | invoke (starts a terminal)                                                        |
+| `openShell(request)`       | `relay:shell`              | invoke (starts a login-shell PTY)                                                 |
+| `workspaceList(request)`   | `relay:workspace-list`     | invoke (list workspaces)                                                          |
+| `workspaceCreate(request)` | `relay:workspace-create`   | invoke (create workspace)                                                         |
+| `terminalInput(id,data)`   | `relay:terminal-input`     | send (validated terminal → native host input; control required)                   |
+| `resizeTerminal(id,size)`  | `relay:terminal-resize`    | send (validated terminal → native resize; control required)                       |
+| `stopTerminal(id)`         | `relay:terminal-stop`      | invoke (bounded stop escalation)                                                  |
+| `stopAllTerminals()`       | `relay:terminal-stop-all`  | invoke (stop every active terminal)                                               |
+| `interruptTerminal(id)`    | `relay:terminal-interrupt` | invoke (validated terminal SIGINT)                                                |
+| `closeTerminal(id)`        | `relay:terminal-close`     | invoke (remove terminal from manager)                                             |
+| `hideTerminal(id)`         | `relay:terminal-hide`      | invoke (visually hide running agent)                                              |
+| `terminalInventory()`      | `relay:terminal-inventory` | invoke (owned terminal inventory)                                                 |
+| `onTerminalData(cb)`       | `relay:terminal-data`      | receive (base64 data, byte cursors, truncation); renderer acknowledges end cursor |
+| `onTerminalStatus(cb)`     | `relay:terminal-status`    | receive (`{terminalId,status}`)                                                   |
+| `onTerminalExit(cb)`       | `relay:terminal-exit`      | receive (identified session ended)                                                |
+| `onDeepLink(cb)`           | `relay:deep-link`          | receive (`{terminalId}`)                                                          |
+| `activity(request)`        | `relay:activity`           | invoke (read validated global activity)                                           |
 
 ### `renderer.js`
 
@@ -352,7 +360,8 @@ The renderer only sees `window.relay`, exposed over `contextBridge` with
 - `term.onData(...)` forwards every keystroke (including control characters and arrow keys)
   to the PTY — no hand-rolled keymap.
 - `onTerminalData` writes **raw** PTY bytes straight into xterm (`term.write(data)`), so all
-  escape sequences are interpreted by the emulator.
+  escape sequences are interpreted by the emulator. IPC transports base64 slices, and the
+  matching rendering acknowledgement allows main to advance that terminal's delivery cursor.
 - Before launching an agent it reveals and fits the terminal, then passes the measured
   `{cols, rows}` into the `interactive` request so the PTY starts at the correct size. A
   window `resize` listener re-fits and calls `resizeTerminal`.
@@ -360,6 +369,17 @@ The renderer only sees `window.relay`, exposed over `contextBridge` with
 - The dashboard caches the returned `agentHistory` only for rendering, updates the Sessions
   count, and rebuilds the open modal whenever fresh status arrives. Timeline durations are
   derived in the renderer from persisted timestamps rather than written back to state.
+
+The runtime's byte ring, pull/ack flow, controller takeover, parent guard, coalesced bridge-worker
+queue, recovery matrix, and active-runtime sequencing are described in
+[runtime-protocols.md](runtime-protocols.md). The ring is bounded per terminal and survives a
+renderer reconnect, not daemon death; the active-terminal limit is not a bound on all lifetime
+completed records. `LatestRequestGate` also prevents stale asynchronous view responses from
+overwriting newer project/provider selections.
+
+Experimental continuity capture, inspection, retrieval, and M5 handoff policy previews are currently
+CLI contracts, not a second desktop task store or a promise of corresponding new GUI controls.
+Session model/effort profiles in localStorage are distinct from M5 output/layout profiles.
 
 ## Content Security Policy
 

@@ -88,7 +88,8 @@ Show installed adapters, CLI versions, discovered models, and supported effort l
 picker. Codex models come from `codex debug models`; Antigravity uses a catalog verified from
 `agy models`; OpenCode reads live `provider/model` lines from `opencode models`; Claude uses
 documented model aliases and effort values. Discovery failures return an empty
-model list rather than guessing.
+values list with an explicit unavailable/unsupported/error discovery status rather than silently
+pretending an available catalog is empty. See the typed adapter contract in [agents.md](agents.md).
 
 ---
 
@@ -165,19 +166,148 @@ The default handoff is a compact continuation prompt: one `Task:` line, a short 
 (`Git: main@<7-char commit>; dirty` when the working tree has changes), and the safety line
 `Inspect the working tree and preserve existing changes.` Unresolved notes are added newest
 first in priority order: `next`, `blocker`, `rejected`, `decision`, `question`, then the latest
-failed test. Lower-priority items are omitted rather than truncated into fragments, and an
+verification observation in M2 (a failed-test fallback for older
+capsules). Lower-priority items are omitted rather than truncated into fragments, and an
 `Omitted:` count is added when it fits. The rendered text is capped at the lower of
 `handoff.maxCharacters` and the effective `handoff.maxTokens` target (defaults: 1,200
 characters and 300 estimated tokens); the reported `estimatedTokens` is a deterministic
 provider-neutral estimate (`characters / 4`), never an exact provider count. The raw diff,
-`done` notes, passed tests, and changed-file lists stay in the structured capsule and are not
-sent to providers.
+`done` notes, full test records, and changed-file lists stay in the structured capsule. A
+verification line can include a reported zero exit with its freshness/qualification label.
 
 **Option:** `--json` — print the versioned portable capsule, rendered text, freshness labels,
 budget/omission metadata, and content checks (task-occurrence count and note-instruction
 detection).
 
+**Experimental rendering option:** `--profile control|focused-output|stable-layout|stable-focused`.
+`control` is the default. Focused output adds a short provider-neutral receiver policy; stable
+layout reorders already-selected content with current workspace authority early and runtime
+warnings grouped at the end. Neither policy removes requirements/citations/uncertainty to fit.
+Additional characters use existing legacy-capsule headroom; insufficient space retains control
+text and reports the fallback on stderr or in JSON `policy` metadata.
+
+Profiles apply to `handoff` previews and offline candidate preparation, not `run`/`switch` launch
+options. They do not persist configuration or enable provider cache controls. In reordered JSON,
+`text` is the composed candidate; `continuity.text` remains the control-selected evidence audit
+view. See [M5 notes](handoff-efficiency-m5.md) for profile, budget, and evaluation contracts.
+
 > Current limitation: `handoff` prints to stdout only; it does not write `.relay/handoff.md`.
+
+---
+
+## `relay context` (experimental)
+
+Opt-in, task-local continuation evidence for new managed Claude runs. Requires an initialized
+project and a Relay task. This is separate from token analytics and does not scan transcripts.
+
+```sh
+relay context enable
+relay context status --json
+relay context task
+relay context task --after 10 --limit 10
+relay context history --kind prompt_submission --limit 20
+relay context history --after 20 --limit 20
+relay context evidence <event-id>
+relay context evidence <event-id> --start 0 --length 2000
+relay context evidence <event-id> --full
+relay context find --file src/feed.mjs --kind tool_result --limit 5
+relay context read --file src/feed.mjs --start-line 20 --line-count 60 --snapshot <id>
+relay context batch --request-file queries.json --snapshot <id>
+relay context verification
+relay context verification --receipt <receipt-uuid>
+relay context inspect --format text
+relay context inspect --snapshot <covered-snapshot-id> --format json
+relay context inspect --file src/feed.mjs --max-characters 6000
+relay context disable
+relay context clear
+```
+
+- `enable`: retain bounded, redacted submitted prompts and visible hook/tool results for the
+  current task. Only the operator can change consent or clear records through the CLI.
+- `status`: report capture policy, retained workspace event count, and known coverage gaps.
+- `task`: read the original task record, current workspace, and retained submitted messages.
+  Follow `submittedMessages.nextAfter` using `--after` until null; `--limit` accepts 1–20.
+  Empty task requirement fields do not imply there are no later submitted instructions.
+  Submitted messages are excluded while capture/disclosure is disabled.
+- `history`: read up to 20 historical events per page, optionally filtered by kind; follow
+  `nextAfter` using `--after`. Managed readers need capture/disclosure enabled.
+- `evidence`: retrieve a cited record in the current task and worktree. No options, or `--full`,
+  returns the legacy full retained record. `--start`, `--length`, `--cursor`, `--format`, or
+  `--max-characters` selects the bounded schema-v1 window response; `--full` cannot be mixed
+  with window options. Offsets are zero-based UTF-16 units in retained sanitized text, with
+  explicit surrogate-boundary adjustments and separate capture/page truncation flags.
+- `find`: bounded historical references filtered by exact `--file`, `--kind`, `--tool-id`, or
+  derived `--command-id`. `--limit` accepts 1–20, default 5. A command ID groups reported tool
+  evidence within a provider/run; file dependencies are never inferred from shell text.
+- `read`: an exact current-file window from consistent covered scans. Requires relative `--file`
+  and a matching complete `--snapshot` or matching `--content-hash`. The hash-only option covers
+  that file, not the whole environment/worktree. `--start-line` is one-based (default 1), and
+  `--line-count` accepts 1–1,000 (default 60). Long lines can continue at an explicit column offset.
+  Missing, ignored, sensitive, linked, binary, invalid-UTF-8, oversized, or unstable sources fail
+  clearly; recognized-secret source text is withheld rather than silently altered.
+- `batch`: one to eight schema-v1 queries from a regular relative `--request-file` of at most
+  32 KiB. Every query has an `ok`, `error`, `deferred`, or `done` status. `--snapshot` supplies a
+  default read anchor. Create a covered request file before taking its snapshot, and keep
+  continuation cursors on the command line rather than changing the request file. A generated
+  batch can contain per-item errors; callers must inspect statuses. See the [request schema and
+  example](handoff-efficiency-m4.md#batch-requests).
+- `inspect`: one read-only current-state packet containing retained requirements, staged/worktree
+  file states and code excerpts, verification freshness, and explicitly recorded next/blocker items.
+  `--format text|json` defaults to text. `--max-characters` accepts 1,200–12,000, default 6,000,
+  and bounds the complete serialized response, including escaping, metadata, and final newline.
+  `--snapshot` requires the same complete current covered-input identity; stale/partial identities
+  fail clearly. `--file` focuses optional source context on one relative path, while `--no-code`
+  returns metadata/instructions only. Managed readers need disclosure consent; operators can
+  also inspect closed tasks. No query telemetry or persistent source cache is written.
+- `verification`: inspect up to 64 host-command/legacy verification summaries and current covered
+  input/environment identities when relevant. `--receipt` includes one retained current-task
+  receipt. Output is JSON and always reports `automaticTestReuse: false`; no tests are run.
+  Managed readers need the existing disclosure consent. Another-worktree receipt cannot verify
+  the current workspace. Lookup also works after task completion.
+- `disable`: revoke grants and exclude retained evidence from automatic handoffs.
+- `clear`: disable capture and remove current-task generated evidence, preserving task state
+  (including verification receipts) and other tasks.
+- `ingest`: internal bounded-stdin receiver; requires a managed capture grant and active run.
+
+Enabled handoffs append up to 6,000 characters of evidence beyond the existing compact
+handoff budget. The combined budget and omissions are reported. Generated launch prompts
+are distinguished from later submissions; tool success does not prove tests passed.
+Captured evidence can satisfy the switch's continuation-context gate without manual notes,
+while preview approval and stale-context/working-tree checks remain in force.
+Complete submitted messages take priority over tool logs. `submissionCoverage` identifies
+messages not fully inline; the prompt requires source lookup before editing when any are
+missing. Historical path-bearing tool/assistant text is cited rather than repeated in previews,
+and retrieval reports the current workspace alongside exact retained records.
+
+M3 handoffs also include a snapshot-bound inspection lookup when it fits after submitted text.
+Source excerpts remain on demand. `inspect` selects whole retained requirements first and reports
+`lookup-required` or `source-incomplete` when appropriate. Follow the required task pagination
+before editing; optional code never establishes requirement completeness. Display diffs can be
+truncated/redacted, with explicit binary, missing, sensitive, and size/coverage omissions. See
+[M3 notes](handoff-efficiency-m3.md) for bounds, schema, caching, and offline results.
+
+Bounded `evidence`, `find`, and `read` responses default to a **2,000-character complete
+envelope**, adjustable with `--max-characters` from 1,200 to **8,000**. `batch` uses 12,000 by
+default and accepts 2,400–12,000. All include final serialization, metadata, and cursors in the
+budget. `find`/`read` default to text; bounded evidence and batch default to JSON. `--format`
+selects either representation.
+
+`--length` and `--line-count` are per-page limits. To continue, repeat the same source query,
+filters, and ranges with `--cursor`; format and output budget may change. Changed task state,
+workspace, consent, history, or selected source makes the cursor stale. Batch returns an aggregate
+cursor plus per-result cursors, and deferred queries receive later turns. A null cursor means
+the retained/observed source is exhausted, not that uncaptured context is complete. Read-only
+queries revalidate their sources and write no persistent index or query telemetry. See
+[M4 notes](handoff-efficiency-m4.md) for the full contract and qualification.
+
+Verification freshness is `historical`, `pending`, `stale`, or `current-observation` in the
+current CLI. Matching covered files leave the environment unqualified. `reuse-eligible` is
+reserved for an explicit trusted deterministic host qualification; the CLI creates no such
+qualification and never automatically skips tests. See [M2 notes](handoff-efficiency-m2.md).
+
+See [Automatic continuity prototype](continuity-prototype.md) for qualification limits and
+the evaluation history. Native interactive Codex capture remains a follow-up; Codex can receive
+the generated handoff.
 
 ---
 
@@ -238,6 +368,10 @@ Sequence:
 7. `launchAgent()` for the target CLI (records `agent_started` / `agent_ended`). A cancellation
    or refusal keeps the checkpoint but launches nothing.
 8. If the run exits at a usage or rate limit, Relay suggests alternative providers and commands.
+
+The CLI also rechecks an approved complete covered-input identity
+after provider setup, immediately before launch. A changed or unavailable identity requires a
+fresh preview; a storage-only revision does not. Legacy Git fingerprint semantics are unchanged.
 
 > Current limitation: `switch` records agent start/end events but does not append a distinct
 > `switch` event.
@@ -316,12 +450,14 @@ bodies, and never changes Git state.
 
 Show how much each registered agent has been used during the current task.
 
-**Option:** `--json` — print a machine-readable summary (used by the desktop Usage panel).
+**Options:** `--json` prints the machine-readable task/plan summary. `--plans-only` reads provider
+plan telemetry without requiring a Git task, including for background polling. This does not
+invoke the separate token-history scanner or opt into analytics.
 
-The numbers come entirely from Relay's own `agentHistory` — run counts, total active
-duration, when each agent last ran, and its last exit reason. Relay does **not** read
-provider quotas, token counts, or credential files, so it reports only what it observed while
-launching agents itself. Agents that have never run are listed with zero runs.
+The task-use section derives run counts/duration summaries, last-run time and last exit reason
+from Relay's own `agentHistory`. Agents never run on that task have zero task runs. The separate
+plan section reads the supported numeric quota sources described below; neither section is a
+machine-wide model-token/cost measurement or a credential-file read.
 
 `--json` additionally includes a `plans` array with provider plan usage where a
 machine-readable source exists: Claude (sanitized `rate_limits` captured from Claude Code's
@@ -347,8 +483,12 @@ Show machine-wide token analytics across all coding agents on this computer, pow
 
 Behavior and guarantees:
 
-- Local agent logs are parsed strictly on this machine by the bundled native `ccusage` binary. Nothing is uploaded; prompts, conversations, code, and credentials are never read.
-- Project labels are sanitized across CLI and IPC boundaries: usernames and full paths are purged or hashed so private filesystem structure is never exposed.
+- Rirei requests offline/no-cost numeric reports from its install-owned native `ccusage` binary,
+  normalizes them and privacy-validates the retained fields. The scanner has provider-log access;
+  these flags are not OS-enforced network isolation or proof that raw log fields never enter
+  that dependency's memory. See [the security boundary](security.md#token-analytics-and-quota-isolation).
+- Project labels are sanitized across CLI/IPC boundaries: usernames/full paths are purged or
+  hashed; a permitted project basename can still be shown as a label.
 - Results are cached in `rireiDataHome()/token-usage-cache.json` with 180-day history per agent, file-lock-based single-flight deduplication, and instant range derivation (7D/30D/90D) without rescanning.
 - Coverage is judged against the selected range. An agent is `(Partial)` only when its logs start after the range begins, `No activity found` when it has no logs in the 180-day window, and `[data through YYYY-MM-DD]` when the last scan predates today. Days after that date were not collected and are not counted as zero.
 - JSON reports include `coverage.complete`, `coverage.dataThrough`, and `coverage.noActivity` per agent, a report-level `dataThrough`, `unitemizedTokens` (the part of a total its components don't account for; within a 1% gap the components are still shown), `sessionsUntimed` (sessions logged without times, such as OpenCode's), and a 13-week `calendar` used by the activity heatmap.
@@ -371,6 +511,11 @@ Behavior:
 - With `--run-tests`: requires `tests.command` in config; runs it via a shell with inherited
   stdio; records a `TestResult` (`passed`/`failed`, exit code, duration). If tests fail,
   Relay records the result and then errors without completing the task.
+- A durable pending receipt is saved before launch and
+  completed with observed exit, start/end covered-input/environment identities, and monotonic
+  command duration. Spawn errors or signal exits leave interrupted/unknown evidence and block
+  task completion; an unrecorded completion remains pending after a controller crash. Output
+  remains `not-captured`. Receipts never authorize automatic test skipping.
 - Creates a final checkpoint labeled `Final`.
 - Sets task status to `completed`, clears the current agent, and appends a `task_completed`
   event.
@@ -412,6 +557,10 @@ All current adapters support `inbox` delivery only. `next_safe_turn` and `wake` 
 unless a future adapter advertises a verified official integration; Relay never silently falls
 back. See [relay-threads.md](relay-threads.md) for storage and security details.
 
+`preview`, `send`, and `reply` accept `--delivery <mode>` with default `inbox`. The schema also
+recognizes `next_safe_turn`/`wake`, but capability checks reject them for current adapters; naming
+a reserved mode does not inject a message into a provider or synthesize terminal input.
+
 ---
 
 ## `relay session label`
@@ -441,11 +590,15 @@ Reports:
 - **Node.js**: the running `process.version`.
 - **Relay**: whether `.relay/` is writable / initialized.
 - A per-agent table: `Installed` (from a `PATH` scan for an executable file), and
-  `Authentication` (`unknown` when installed, per the conservative policy).
+  `Authentication` from the bounded official provider status interface where available.
+- Advertised `Interactive` and `Headless` capabilities printed as Yes/No.
 
-> Current limitation: the `Interactive` and `Headless` columns always print `Unknown`.
-> Non-interactive execution is not yet implemented in the adapters, so these are honest
-> placeholders rather than probed capabilities. See [agents.md](agents.md).
+These are capability declarations and conservative auth observations, not live model/native
+terminal acceptance tests. Authentication can be authenticated/configured/not_authenticated or
+unknown/unsupported/error according to the provider source. Headless builders remain unimplemented
+in current adapters even where an upstream provider has a separate headless command. The normal
+doctor also inspects local data-directory/rollout availability; `--installation` is the separate
+no-agent-scan package diagnostic. See [agents.md](agents.md).
 
 ---
 
@@ -514,6 +667,31 @@ relay attach <terminal-id> [--read-only | --takeover]
 
 ---
 
+## `relay bridge` (internal)
+
+Internal CLI/state boundary used by the detached daemon. It does not run a provider command
+or approve a tool request. One-shot modes require a Git repository and `--terminal-id <id>`:
+
+- Registration: `--instance-id <id>`, `--pid <pid>`, and `--protocol-version <version>` record
+  a matching active terminal-owned run's bridge identity.
+- Observation: `--status <status>` records a normalized terminal observation, with optional
+  `--lifecycle-state`, `--attention-kind`, `--active-runtime-seconds`, and `--runtime-sequence`.
+  Stale runtime sequences and invalid status/lifecycle combinations are not accepted as newer work.
+- Daemon adoption supplies the complete identity tuple `--daemon-id`, `--daemon-pid`, and
+  `--daemon-boot-id`; partial tuples fail validation.
+- Final outcomes can supply `--exit-code`, `--exit-reason`, `--exit-confidence`, `--exit-source`,
+  `--provider-code`, and `--retry-at`. Validated finalization merges by terminal/run identity and
+  releases the lease; missing data remains conservatively qualified.
+
+`relay bridge --worker` instead keeps one process alive, reading bounded newline-delimited
+version-1 JSON from stdin. Each request supplies its project, terminal ID, correlation ID, and
+`register`/`update` type. Replies use `{v:1,id,ok}` with an error field on failure. The client
+bounds frames to 128 KiB, pending requests to 64, and request duration to five seconds. Worker
+request fields do not activate arbitrary command execution. See
+[runtime synchronization](runtime-protocols.md#7-lifecycle-active-runtime-and-state-synchronization).
+
+---
+
 ## `relay daemon`
 
 Internal command used by the TUI and Electron application to launch and supervise the detached terminal daemon.
@@ -525,15 +703,22 @@ relay daemon --internal --socket <socket-path-or-named-pipe> --descriptor <descr
 Options:
 
 - `--internal`: Runs the terminal daemon process in the foreground.
+- `--ensure`: Explicitly start/reuse a compatible detached CLI daemon through the platform manager.
 - `--socket <path>`: Path to Unix socket (`.sock`) or Windows named pipe (`\\.\pipe\...`).
 - `--descriptor <path>`: Path to daemon descriptor JSON file.
 - `--cli <path>`: Path to Relay CLI bundle.
 - `--node <path>`: Path to Node.js executable.
+- `--bridge <path>`: Legacy Python bridge location; merely supplying it does not activate the
+  internally forced Python compatibility branch of the current daemon server.
 
 ---
 
 ## Exit codes
 
-- Commands throw on error; the top-level handler in `src/index.ts` prints `relay: <message>`
-  to stderr and sets `process.exitCode = 1`.
+- Commands throw on error; the top-level handler in `src/index.ts` normally prints
+  `relay: <message>` to stderr and sets `process.exitCode = 1`. If argv contains `--json`, it
+  emits a versioned JSON error object instead. `--format json` on bounded retrieval selects
+  its success representation but does not itself switch the global error handler.
 - `run` and `switch` propagate the launched agent's non-zero exit code.
+- A generated retrieval batch can return process success while individual queries have error
+  statuses. Callers must inspect every item; one process exit is not a universal success claim.

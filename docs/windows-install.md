@@ -1,8 +1,8 @@
 # Install the Windows CLI alpha
 
-The alpha.5.1 GitHub release includes a compiled npm tarball and a PowerShell installer.
+The alpha.5.5 GitHub prerelease includes a compiled npm tarball and a PowerShell installer.
 Use the GitHub download steps below while npm registry publication is pending. Registry
-commands become available when `@taichizzz/rirei@0.1.0-alpha.5.1` has been published.
+commands become available when `@taichizzz/rirei@0.1.0-alpha.5.5` has been published.
 Alpha.5.0 is a source-only release and cannot be installed from npm.
 
 ## Requirements
@@ -24,7 +24,7 @@ relay.cmd --version
 relay.cmd doctor --installation
 ```
 
-For a reproducible version, replace `@alpha` with `@0.1.0-alpha.5.1`.
+For a reproducible version, replace `@alpha` with `@0.1.0-alpha.5.5`.
 `relay` also works where PowerShell permits npm-generated scripts. If an execution policy
 blocks `relay.ps1`, use `relay.cmd`; changing the machine-wide execution policy is unnecessary.
 
@@ -39,10 +39,10 @@ Download the installer and compiled tarball from the exact GitHub release, then 
 installer with the local package:
 
 ```powershell
-$release = "https://github.com/taichizzz/rirei/releases/download/v0.1.0-alpha.5.1"
+$release = "https://github.com/taichizzz/rirei/releases/download/v0.1.0-alpha.5.5"
 Invoke-WebRequest "$release/install-windows.ps1" -UseBasicParsing -OutFile install-windows.ps1
-Invoke-WebRequest "$release/taichizzz-rirei-0.1.0-alpha.5.1.tgz" -UseBasicParsing -OutFile rirei.tgz
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1 -Version 0.1.0-alpha.5.1 -PackageFile .\rirei.tgz
+Invoke-WebRequest "$release/taichizzz-rirei-0.1.0-alpha.5.5.tgz" -UseBasicParsing -OutFile rirei.tgz
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1 -Version 0.1.0-alpha.5.5 -PackageFile .\rirei.tgz
 ```
 
 The process-local execution-policy flag applies only to this script invocation.

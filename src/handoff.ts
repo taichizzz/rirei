@@ -3,6 +3,11 @@ import type { RelayConfig } from './config/schema.js';
 import type { GitSnapshot } from './git/repository.js';
 import { noteFreshness, type NoteFreshness } from './state/notes.js';
 import type { HandoffNote, RelayState } from './state/schema.js';
+import type { ContinuityContext } from './context/schema.js';
+import type { VerificationSummary } from './context/verification.js';
+import type { SnapshotIdentity } from './context/snapshot-schema.js';
+import type { InspectionAnchor } from './context/inspection-schema.js';
+import type { PromptPolicyMetadata } from './context/prompt-policy.js';
 
 const CHARACTERS_PER_TOKEN_ESTIMATE = 4;
 const TASK_ITEM_FRACTION = 0.7;
@@ -34,6 +39,7 @@ export interface HandoffCapsule {
   };
   notes: HandoffCapsuleNote[];
   tests: RelayState['tests'];
+  verification?: VerificationSummary[];
   legacy: {
     completedWork: RelayState['completedWork'];
     remainingWork: RelayState['remainingWork'];
@@ -43,6 +49,10 @@ export interface HandoffCapsule {
 }
 
 export interface RenderedHandoff {
+  policy?: PromptPolicyMetadata;
+  inspection?: InspectionAnchor;
+  continuity?: ContinuityContext;
+  coveredSnapshot?: SnapshotIdentity;
   capsule: HandoffCapsule;
   text: string;
   budget: {
@@ -68,9 +78,12 @@ export function handoffStateFingerprint(state: RelayState): string {
           title: state.task.title,
           originalRequest: state.task.originalRequest,
           status: state.task.status,
+          requirements: state.task.requirements,
+          constraints: state.task.constraints,
         },
         notes: state.notes,
         tests: state.tests,
+        verificationReceipts: state.verificationReceipts,
         completedWork: state.completedWork,
         remainingWork: state.remainingWork,
         decisions: state.decisions,
@@ -172,6 +185,36 @@ function normalizeForComparison(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+export function handoffContentChecks(text: string, request: string) {
+  const normalizedText = normalizeForComparison(text);
+  const normalizedRequest = normalizeForComparison(request);
+  const normalizedTaskBlock = normalizeForComparison(
+    text.split('\n\n').find((block) => block.startsWith('Task:')) ?? '',
+  );
+  const countOccurrences = (haystack: string, needle: string) => {
+    let count = 0;
+    let index = 0;
+    while (index < haystack.length) {
+      const found = haystack.indexOf(needle, index);
+      if (found < 0) break;
+      count++;
+      index = found + needle.length;
+    }
+    return count;
+  };
+  let duplicateTaskOccurrences = normalizedTaskBlock.startsWith('Task:')
+    ? 1
+    : 0;
+  if (normalizedRequest.length > 0)
+    duplicateTaskOccurrences +=
+      countOccurrences(normalizedText, normalizedRequest) -
+      countOccurrences(normalizedTaskBlock, normalizedRequest);
+  return {
+    duplicateTaskOccurrences,
+    containsNoteInstruction: /relay\s+note/i.test(text),
+  };
+}
+
 export function renderCompactHandoff(
   capsule: HandoffCapsule,
   config: RelayConfig['handoff'],
@@ -243,8 +286,28 @@ export function renderCompactHandoff(
       });
   }
   blocks.push(...remainingBlocks);
-  const failedTest = failedTestItem(capsule.tests);
-  if (failedTest) blocks.push({ title: 'Test', items: [failedTest] });
+  const latestVerification = capsule.verification?.at(-1);
+  if (latestVerification) {
+    const observed =
+      latestVerification.exitCode === null
+        ? 'exit unknown'
+        : `reported exit ${latestVerification.exitCode}`;
+    const detail =
+      latestVerification.freshness === 'current-observation'
+        ? '; environment unqualified'
+        : latestVerification.freshness === 'stale'
+          ? '; does not verify current inputs'
+          : '';
+    blocks.push({
+      title: 'Verification',
+      items: [
+        `[${latestVerification.freshness}] ${compact(latestVerification.command)}: ${observed}${detail}`,
+      ],
+    });
+  } else {
+    const failedTest = failedTestItem(capsule.tests);
+    if (failedTest) blocks.push({ title: 'Test', items: [failedTest] });
+  }
 
   let body = mandatory;
   let omittedItems = 0;
@@ -284,30 +347,6 @@ export function renderCompactHandoff(
   }
 
   const text = body;
-  const normalizedText = normalizeForComparison(text);
-  const normalizedRequest = normalizeForComparison(request);
-  const normalizedTaskBlock = normalizeForComparison(
-    text.split(separator, 1)[0] ?? '',
-  );
-  const countOccurrences = (haystack: string, needle: string) => {
-    let count = 0;
-    let index = 0;
-    while (index < haystack.length) {
-      const found = haystack.indexOf(needle, index);
-      if (found < 0) break;
-      count += 1;
-      index = found + needle.length;
-    }
-    return count;
-  };
-  let duplicateTaskOccurrences = normalizedTaskBlock.startsWith('Task:')
-    ? 1
-    : 0;
-  if (normalizedRequest.length > 0) {
-    duplicateTaskOccurrences +=
-      countOccurrences(normalizedText, normalizedRequest) -
-      countOccurrences(normalizedTaskBlock, normalizedRequest);
-  }
   return {
     capsule,
     text,
@@ -318,9 +357,6 @@ export function renderCompactHandoff(
       estimatedTokens: Math.ceil(text.length / CHARACTERS_PER_TOKEN_ESTIMATE),
       omittedItems,
     },
-    contentChecks: {
-      duplicateTaskOccurrences,
-      containsNoteInstruction: /relay\s+note/i.test(text),
-    },
+    contentChecks: handoffContentChecks(text, request),
   };
 }

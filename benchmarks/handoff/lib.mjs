@@ -112,8 +112,11 @@ export function parseProviderMetrics(provider, text) {
         'candidates_token_count',
       ]);
       const reasoning =
-        numberAt(usage, ['reasoning_tokens', 'thoughts_token_count']) ??
-        numberAt(usage.output_tokens_details, ['reasoning_tokens']);
+        numberAt(usage, [
+          'reasoning_tokens',
+          'reasoning_output_tokens',
+          'thoughts_token_count',
+        ]) ?? numberAt(usage.output_tokens_details, ['reasoning_tokens']);
       if (input !== null || cached !== null || output !== null)
         usageEvents += 1;
       if (input !== null) inputEvents += 1;

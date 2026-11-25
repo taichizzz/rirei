@@ -56,6 +56,17 @@ Guards against loading a config written by an incompatible future version.
 > provider token count. Lower user-configured ceilings are always preserved; adding target
 > fields never raises them.
 
+The table describes the file emitted by `defaultConfig`. For compatibility, omitted schema
+`maxCharacters`/`maxTokens` fields have 4,000/1,000 parsing defaults, while omitted target fields
+use 1,200/300; effective minima still govern the result. The schema is not strict about every
+unknown key: unsupported keys can be stripped during parsing rather than activating a feature.
+In particular, adding an arbitrary handoff profile key does not enable M5 profiles for launches.
+
+The opt-in continuity postlude has its own 6,000-character ceiling beyond this legacy
+capsule budget. Inspection/retrieval envelopes have separate per-command ceilings. M5 policy
+overhead uses existing capsule headroom and otherwise falls back, not a larger configured limit.
+See [continuity budgets](continuity-architecture.md#10-bounds-and-units).
+
 ### `checkpoint`
 
 | Field                | Type / default     | Honored today?                                                       |
@@ -114,6 +125,14 @@ In addition to repository-level `.relay/config.json`, Rirei stores machine-wide 
 - **Linux**: `~/.local/share/rirei/` (or `$XDG_DATA_HOME/rirei/`)
 - **Windows**: `%LOCALAPPDATA%\Rirei\`
 
+These defaults refer to `src/platform/runtime-paths.ts`, used by activity/token analytics and
+the CLI/TUI daemon manager. They are not yet universal: managed worktrees still use
+`src/worktrees/data-dir.ts`'s XDG/`~/.local/share/rirei` resolver, Electron descriptors use its
+`userData`, and quota samples use the legacy home-level `.relay/provider-usage/` namespace.
+Relative `RIREI_DATA_HOME` resolves against home in the platform helper and against cwd in the
+legacy worktree helper. Prefer an intentional absolute override when aligning consumers; see
+[the storage map](architecture.md#authorities-storage-and-derived-views) for exact boundaries.
+
 ### Token usage opt-in (`token-usage-opt-in.json`)
 
 Stores the user's explicit consent state for machine-wide token analytics:
@@ -130,6 +149,12 @@ Manage via `relay usage tokens --opt-in` or `--opt-out`.
 ### Token usage cache (`token-usage-cache.json`)
 
 Caches 180-day history per agent (`AgentCacheSnapshot`) so standard ranges (7D, 30D, 90D) and preceding equal-length comparison windows are derived dynamically and instantly without subprocess execution. Per-agent directory locks serialize concurrent scans and prevent duplicate executions. If a scan completes within 15 seconds, the cached snapshot is reused. Use `--refresh` on CLI commands or the desktop Refresh button to force a new log scan.
+
+The normal cache API is cache-only even when data is stale; callers explicitly request refresh.
+The ten-minute freshness interval and fifteen-second competing-refresh reuse window are different
+policies. UI/TUI controllers decide when opening a missing/stale view should trigger a refresh.
+Per-agent `capturedAt`, not only the cache file's last attempted-update time, determines the
+displayed data age. Scanner/source failure preserves last-good data with its failure metadata.
 
 - **Competing refreshes wait.** A refresh that finds another scan of the same agent running waits for it (up to two scan timeouts plus 15 seconds: 75 seconds for most agents, 255 for Antigravity) and then reuses its result. If the other scan still holds the lock after that, the last good snapshot is kept and the rest of the report is returned.
 - **One timezone per cache.** Daily totals are grouped in the timezone they were collected in, so the cache records it. A read in a different timezone treats the cache as empty, which makes the dashboard rescan, and a refresh in the new timezone drops snapshots from the old one instead of mixing them.

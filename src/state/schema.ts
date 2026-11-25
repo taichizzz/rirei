@@ -3,6 +3,10 @@ import {
   AGENT_EXIT_REASONS,
   EXIT_CLASSIFICATION_SOURCES,
 } from '../agents/adapter.js';
+import {
+  MAX_VERIFICATION_RECEIPTS,
+  verificationReceiptSchema,
+} from '../context/verification-schema.js';
 
 const workItemSchema = z.object({
   description: z.string().min(1),
@@ -22,6 +26,7 @@ const testResultSchema = z.object({
   durationMs: z.number().nonnegative(),
   summary: z.string().optional(),
   createdAt: z.string().datetime(),
+  verificationReceiptId: z.string().uuid().optional(),
 });
 
 const checkpointIdSchema = z
@@ -320,6 +325,10 @@ export const relayStateSchema = z.object({
   completedWork: z.array(workItemSchema),
   remainingWork: z.array(workItemSchema),
   tests: z.array(testResultSchema),
+  verificationReceipts: z
+    .array(verificationReceiptSchema)
+    .max(MAX_VERIFICATION_RECEIPTS)
+    .optional(),
   checkpoints: z.array(checkpointSchema),
   blockers: z.array(blockerSchema),
   notes: z.array(handoffNoteSchema).max(500),

@@ -14,7 +14,9 @@ Rirei is pre-release software. Review [Security](docs/security.md) and [Publicat
 
 ## Quick Start (TUI Dashboard)
 
-The alpha.5.1 GitHub release includes a compiled CLI tarball and PowerShell installer.
+The [alpha.5.5 GitHub prerelease](https://github.com/taichizzz/rirei/releases/tag/v0.1.0-alpha.5.5)
+includes a compiled CLI tarball and PowerShell installer. See the
+[alpha.5.5 update notes](docs/release-0.1.0-alpha.5.5.md) for what changed and how to upgrade.
 Follow [Windows installation](docs/windows-install.md#guided-powershell-installer) to install
 the downloaded package without cloning or building. Node.js 22.12+ and Git are required;
 the installer offers to install missing prerequisites with WinGet.
@@ -53,6 +55,11 @@ Rirei itself consumes no model tokens and has no provider backend. The official 
 
 The only additional model input is the prompt or handoff supplied at launch. Default handoffs are bounded to 1,200 characters and an estimated 300 input tokens using the common four-characters-per-token estimate, and the task request appears exactly once with no note-recording instruction. Full checkpoint patches remain local and are not inserted into handoffs. Every additional provider launch still starts a model turn, so unnecessary switching can cost more than continuing an existing provider session.
 
+The opt-in continuity path adds
+a separately bounded 6,000-character evidence postlude; exact retained submissions can repeat
+parts of the original brief. Its combined budget/omissions are reported, and M5 policy overhead
+uses existing capsule headroom. None of these character estimates is an exact provider token count.
+
 ## Handoff benchmark
 
 Rirei includes an eight-task handoff benchmark with a full-request baseline, a no-notes condition,
@@ -78,6 +85,10 @@ Detailed docs live in [`docs/`](docs/README.md):
 
 - [Benchmarks](docs/benchmarks.md) — handoff protocol, archived results, limitations, and safe reproduction commands.
 - [Architecture](docs/architecture.md) — module layout and how a command executes end to end.
+- [Architecture decisions](docs/architecture-decisions.md) — decision rationale, implementation mechanics, tradeoffs, and source/test evidence.
+- [Runtime protocols](docs/runtime-protocols.md) — daemon ownership, IPC, terminal output/control, and recovery.
+- [Continuity architecture](docs/continuity-architecture.md) — how opt-in capture, handoffs, retrieval, and verification work.
+- [Documentation audit](docs/architecture-audit.md) — coverage, corrected stale claims, and remaining implementation/qualification gaps.
 - [CLI reference](docs/cli-reference.md) — every command, its options, and exact behavior.
 - [Configuration](docs/configuration.md) — `.relay/config.json` schema and which fields are honored.
 - [State and activity](docs/state-and-events.md) — the `RelayState` schema, migrations, and sanitized activity projection.
@@ -91,6 +102,15 @@ Detailed docs live in [`docs/`](docs/README.md):
 - [License](LICENSE) — MIT license for this repository.
 
 ## Development
+
+Alpha.5.5 includes [experimental automatic continuity](docs/continuity-prototype.md)
+for task-local Claude hook capture and cited handoffs. Capture is opt-in. Run
+`npm run benchmark:continuity` for its six zero-provider fixtures;
+recorded pilot/retest results and their limits are linked from the prototype notes. Broader native
+capture/platform acceptance and repeatable model-efficiency benefit remain unqualified.
+
+See the [architecture map](docs/architecture.md) for covered-input verification, bounded
+inspection, exact source retrieval, and preview-only output and layout profiles.
 
 Requires Node.js 22.12 or newer.
 

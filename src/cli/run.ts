@@ -57,6 +57,7 @@ export function runCommand(): Command {
             operationId: options.operationId,
             terminalId: options.terminalId,
             failOnExhausted: options.failOnExhausted,
+            promptIsHandoff: options.prompt === undefined,
           },
         );
         if (result.exitCode !== 0) {

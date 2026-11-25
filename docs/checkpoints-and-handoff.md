@@ -7,7 +7,7 @@ storing or forwarding the full diff by default.
 
 ## Checkpoints
 
-`createCheckpoint(root, state, label?)` backs `relay checkpoint`, and also runs inside
+`createCheckpoint(root, label?)` backs `relay checkpoint`, and also runs inside
 `relay switch` (label `Switch to <agent>`) and `relay finish` (label `Final`).
 
 ### Git snapshot
@@ -106,6 +106,36 @@ the entire diff would waste tokens and duplicate what the agent can read from th
 tree. The handoff therefore carries the task, Git anchor, and continuation notes — enough to
 orient, not to re-read the whole change.
 
+### Covered verification observations (M2)
+
+The working-copy CLI additionally uses `rirei-covered-inputs-v1` for host-command receipts.
+This identity hashes actual tracked/nonignored untracked content and the staged index;
+it does not redefine existing checkpoint fingerprints or note anchors. Ignored inputs,
+symlinks, submodule checkouts, limits, and environment gaps remain explicitly qualified.
+
+When test records exist, the latest freshness summary can replace the default failed-test
+line with `Verification: [historical|pending|stale|current-observation] <command>: <observed exit>`
+within the same compact budget. A matching observation leaves the environment unqualified;
+a stale one does not verify current inputs. Full summaries stay in `capsule.verification`,
+with an optional `coveredSnapshot` in the JSON handoff. `relay context verification --receipt
+<id>` retrieves one retained current-task receipt without running its command.
+
+Receipt/current-input changes invalidate an approved switch preview. An approved complete
+input identity is checked again immediately before provider launch. No automatic test omission
+is enabled. See [M2 milestone notes](handoff-efficiency-m2.md) for limits and offline qualification.
+
+### On-demand inspection packet (M3)
+
+Enabled continuity handoffs additionally expose `inspection` in their JSON envelope and offer
+`relay context inspect --snapshot <id>` when space permits after whole submitted instructions.
+The anchor and verification classification use the same covered scan. The lookup remains inside
+the existing 6,000-character evidence budget, with its own omission count if it cannot fit.
+
+Inspection returns bounded requirements, staged/worktree file states, source display hunks,
+verification freshness, and explicitly recorded actions. Current code bytes come from the stable
+covered scan; historical text is resolved by immutable Git object ID. Code excerpts stay on demand.
+See [M3 milestone notes](handoff-efficiency-m3.md) for the full response and freshness contract.
+
 ### Continuation gate
 
 `relay switch` refuses to launch when no unresolved `next`, `blocker`, `rejected`, `decision`,
@@ -125,6 +155,10 @@ worktrees, and uses the unresolved Git path plus an atomic replacement so it ref
 a symlinked or non-regular exclude file. Tracked `.gitignore`
 files, the index, remotes, and branches are never modified. This local metadata exclusion is
 the only Git mutation Relay performs besides creating worktrees.
+
+This describes Rirei's intended project operations. Git itself can refresh internal stat/index
+cache metadata during a logically read-only query. Source arrays and `--no-ext-diff` avoid generic
+shell interpolation/external diff execution; they do not provide an OS sandbox for Git or providers.
 
 ### Known gaps
 

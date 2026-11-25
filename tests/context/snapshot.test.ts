@@ -77,13 +77,14 @@ describe('covered-input snapshot v1', () => {
     expect(after.identity.indexDigest).not.toBe(before.identity.indexDigest);
     expect(after.identity.id).not.toBe(before.identity.id);
   });
-  it('handles spaces, Unicode, tabs and newlines through NUL-safe Git paths', async () => {
+  it('handles spaces, Unicode, and platform-supported separators in NUL-safe Git paths', async () => {
     const root = await repo();
     const names = [
       'space name.mjs',
       '日本語.mjs',
-      'tab\tname.mjs',
-      'line\nbreak.mjs',
+      ...(process.platform === 'win32'
+        ? []
+        : ['tab\tname.mjs', 'line\nbreak.mjs']),
     ];
     for (const name of names) await writeFile(path.join(root, name), name);
     await git(root, 'add', '--', ...names);

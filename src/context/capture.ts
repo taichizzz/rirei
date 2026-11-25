@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { CommandSpec } from '../agents/adapter.js';
 import type { RelayState } from '../state/schema.js';
 import { inspectGitSnapshot } from '../git/repository.js';
+import { inheritedLaunchArgument } from '../platform/executable.js';
 import { normalizeClaudeHook } from './claude.js';
 import { CONTEXT_INPUT_LIMIT } from './schema.js';
 import {
@@ -51,8 +52,9 @@ export async function prepareContextLaunch(options: {
     workspace: await realpath(options.workspace),
     provider: 'claude',
     providerSessionId: options.providerSessionId,
+    // Identify the opening handoff as delivered through argv, including the Windows line folding.
     launchPromptHash: options.handoffPrompt
-      ? hash(options.handoffPrompt)
+      ? hash(inheritedLaunchArgument(options.handoffPrompt))
       : undefined,
     launchGitFingerprint: snapshot.fingerprint,
   });

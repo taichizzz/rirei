@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import spawn from 'cross-spawn';
 import type { ProcessResult } from '../agents/adapter.js';
+import { inheritedLaunchArgument } from '../platform/executable.js';
 import type {
   ProcessEvent,
   ProcessHandle,
@@ -31,12 +32,9 @@ export class InheritedProcessHost implements ProcessHost {
 
   async start(request: ProcessStartRequest): Promise<ProcessHandle> {
     const id = randomUUID();
-    const args =
-      process.platform === 'win32'
-        ? request.command.args.map((argument) =>
-            argument.replace(/\r\n?|\n/g, ' '),
-          )
-        : request.command.args;
+    const args = request.command.args.map((argument) =>
+      inheritedLaunchArgument(argument),
+    );
     const child = spawn(request.command.executable, args, {
       cwd: request.cwd,
       env: request.env ?? process.env,

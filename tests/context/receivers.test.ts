@@ -151,129 +151,149 @@ if (process.env.TEST_STAY_ALIVE === '1') setInterval(() => {}, 1000);
 }
 
 describe('frozen-checkpoint receiver retest', () => {
-  it('spends no launch on failed preflight and stops a fake provider immediately on a logger fault', async () => {
-    const context = await setup();
-    await prepareReceivers(context.source, context.output, context.hash, {
-      runtimeCheck,
-    });
-    await expect(
-      runReceiverPair(context.output, 0, {
-        runtimeCheck: async () => {
-          throw new Error('storage preflight failed');
-        },
-      }),
-    ).rejects.toThrow('storage preflight');
-    expect(
-      JSON.parse(
-        await readFile(path.join(context.output, 'sessions.json'), 'utf8'),
-      ),
-    ).toEqual([]);
-    vi.stubEnv('TEST_STAY_ALIVE', '1');
-    const result = await runReceiverPair(context.output, 0, {
-      runtimeCheck,
-      traceOptions: { maxRecords: 0 },
-    });
-    expect(result.arms).toHaveLength(1);
-    expect(result.arms[0].execution).toMatchObject({
-      failed: true,
-      timedOut: false,
-      trace: { complete: false },
-      metricIntegrity: 'observed-stream-incomplete',
-    });
-    expect(result.arms[0].execution.captureError).toContain(
-      'TRACE_RECORD_LIMIT',
-    );
-    expect(
-      JSON.parse(
-        await readFile(path.join(context.output, 'sessions.json'), 'utf8'),
-      ),
-    ).toHaveLength(1);
-    await expect(runReceiverPair(context.output, 1)).rejects.toThrow('stopped');
-  }, 60000);
-  it('prepares eight paired inputs, runs only fake receivers, and preserves source evidence', async () => {
-    const context = await setup();
-    const prepared = await prepareReceivers(
-      context.source,
-      context.output,
-      context.hash,
-      { runtimeCheck },
-    );
-    expect(prepared).toMatchObject({
-      preparedReceivers: 8,
-      providerSessions: 0,
-    });
-    expect(
-      JSON.parse(
-        await readFile(path.join(context.output, 'sessions.json'), 'utf8'),
-      ),
-    ).toEqual([]);
-    for (const [index, definition] of CASES.entries()) {
-      const base = path.join(
-        context.output,
-        `case-${index}-${definition.task}-${definition.predecessor}-to-${definition.receiver}`,
-      );
-      const inputs = JSON.parse(
-        await readFile(path.join(base, 'prepared.json'), 'utf8'),
-      );
-      expect(new Set(inputs.map((input) => input.checkpointHash)).size).toBe(1);
-      expect(new Set(inputs.map((input) => input.historyHash)).size).toBe(1);
-      for (const input of inputs) {
-        const prompt = await readFile(
-          path.join(input.metadata, 'prompt.txt'),
-          'utf8',
-        );
-        expect(prompt).toContain(
-          `Current authorized workspace: ${JSON.stringify(input.directory)}`,
-        );
-        const task = WORKFLOWS.find((task) => task.id === definition.task)!;
-        for (const requirement of task.requirements)
-          expect(prompt).toContain(requirement);
-      }
-      const row = await runReceiverPair(context.output, index, {
+  // The live receiver harness explicitly excludes Windows. Source validation still runs there.
+  const itNativeReceiver = it.skipIf(process.platform === 'win32');
+  itNativeReceiver(
+    'spends no launch on failed preflight and stops a fake provider immediately on a logger fault',
+    async () => {
+      const context = await setup();
+      await prepareReceivers(context.source, context.output, context.hash, {
         runtimeCheck,
       });
-      expect(row.arms).toHaveLength(2);
+      await expect(
+        runReceiverPair(context.output, 0, {
+          runtimeCheck: async () => {
+            throw new Error('storage preflight failed');
+          },
+        }),
+      ).rejects.toThrow('storage preflight');
       expect(
-        row.arms.every((arm) => arm.evidenceIntact && !arm.execution.failed),
+        JSON.parse(
+          await readFile(path.join(context.output, 'sessions.json'), 'utf8'),
+        ),
+      ).toEqual([]);
+      vi.stubEnv('TEST_STAY_ALIVE', '1');
+      const result = await runReceiverPair(context.output, 0, {
+        runtimeCheck,
+        traceOptions: { maxRecords: 0 },
+      });
+      expect(result.arms).toHaveLength(1);
+      expect(result.arms[0].execution).toMatchObject({
+        failed: true,
+        timedOut: false,
+        trace: { complete: false },
+        metricIntegrity: 'observed-stream-incomplete',
+      });
+      expect(result.arms[0].execution.captureError).toContain(
+        'TRACE_RECORD_LIMIT',
+      );
+      expect(
+        JSON.parse(
+          await readFile(path.join(context.output, 'sessions.json'), 'utf8'),
+        ),
+      ).toHaveLength(1);
+      await expect(runReceiverPair(context.output, 1)).rejects.toThrow(
+        'stopped',
+      );
+    },
+    60000,
+  );
+  itNativeReceiver(
+    'prepares eight paired inputs, runs only fake receivers, and preserves source evidence',
+    async () => {
+      const context = await setup();
+      const prepared = await prepareReceivers(
+        context.source,
+        context.output,
+        context.hash,
+        { runtimeCheck },
+      );
+      expect(prepared).toMatchObject({
+        preparedReceivers: 8,
+        providerSessions: 0,
+      });
+      expect(
+        JSON.parse(
+          await readFile(path.join(context.output, 'sessions.json'), 'utf8'),
+        ),
+      ).toEqual([]);
+      for (const [index, definition] of CASES.entries()) {
+        const base = path.join(
+          context.output,
+          `case-${index}-${definition.task}-${definition.predecessor}-to-${definition.receiver}`,
+        );
+        const inputs = JSON.parse(
+          await readFile(path.join(base, 'prepared.json'), 'utf8'),
+        );
+        expect(new Set(inputs.map((input) => input.checkpointHash)).size).toBe(
+          1,
+        );
+        expect(new Set(inputs.map((input) => input.historyHash)).size).toBe(1);
+        for (const input of inputs) {
+          const prompt = await readFile(
+            path.join(input.metadata, 'prompt.txt'),
+            'utf8',
+          );
+          expect(prompt).toContain(
+            `Current authorized workspace: ${JSON.stringify(input.directory)}`,
+          );
+          const task = WORKFLOWS.find((task) => task.id === definition.task)!;
+          for (const requirement of task.requirements)
+            expect(prompt).toContain(requirement);
+        }
+        const row = await runReceiverPair(context.output, index, {
+          runtimeCheck,
+        });
+        expect(row.arms).toHaveLength(2);
+        expect(
+          row.arms.every((arm) => arm.evidenceIntact && !arm.execution.failed),
+        ).toBe(true);
+      }
+      const report = await finalizeReceivers(context.output);
+      expect(report).toMatchObject({
+        providerSessions: 8,
+        predecessorSessions: 0,
+        receiverSessions: 8,
+        reusedCheckpointCount: 4,
+      });
+      expect(
+        report.cases.every((row) => row.arms.every((arm) => arm.correct)),
       ).toBe(true);
-    }
-    const report = await finalizeReceivers(context.output);
-    expect(report).toMatchObject({
-      providerSessions: 8,
-      predecessorSessions: 0,
-      receiverSessions: 8,
-      reusedCheckpointCount: 4,
-    });
-    expect(
-      report.cases.every((row) => row.arms.every((arm) => arm.correct)),
-    ).toBe(true);
-    expect(
-      fingerprint(await readFile(path.join(context.source, 'report.json'))),
-    ).toBe(context.hash);
-    await expect(runReceiverPair(context.output, 0)).rejects.toThrow(
-      'already been attempted',
-    );
-    await expect(
-      reserveSession(context.output, 'extra', 'codex', 'receiver'),
-    ).rejects.toThrow('8-session budget');
-  }, 60000);
+      expect(
+        fingerprint(await readFile(path.join(context.source, 'report.json'))),
+      ).toBe(context.hash);
+      await expect(runReceiverPair(context.output, 0)).rejects.toThrow(
+        'already been attempted',
+      );
+      await expect(
+        reserveSession(context.output, 'extra', 'codex', 'receiver'),
+      ).rejects.toThrow('8-session budget');
+    },
+    60000,
+  );
 
-  it('stops after a provider failure instead of rerunning or starting the paired receiver', async () => {
-    const context = await setup();
-    await prepareReceivers(context.source, context.output, context.hash, {
-      runtimeCheck,
-    });
-    vi.stubEnv('TEST_FAIL', '1');
-    const row = await runReceiverPair(context.output, 0, { runtimeCheck });
-    expect(row.arms).toHaveLength(1);
-    expect(row.arms[0].execution.failed).toBe(true);
-    await expect(runReceiverPair(context.output, 1)).rejects.toThrow('stopped');
-    expect(
-      JSON.parse(
-        await readFile(path.join(context.output, 'sessions.json'), 'utf8'),
-      ),
-    ).toHaveLength(1);
-  }, 60000);
+  itNativeReceiver(
+    'stops after a provider failure instead of rerunning or starting the paired receiver',
+    async () => {
+      const context = await setup();
+      await prepareReceivers(context.source, context.output, context.hash, {
+        runtimeCheck,
+      });
+      vi.stubEnv('TEST_FAIL', '1');
+      const row = await runReceiverPair(context.output, 0, { runtimeCheck });
+      expect(row.arms).toHaveLength(1);
+      expect(row.arms[0].execution.failed).toBe(true);
+      await expect(runReceiverPair(context.output, 1)).rejects.toThrow(
+        'stopped',
+      );
+      expect(
+        JSON.parse(
+          await readFile(path.join(context.output, 'sessions.json'), 'utf8'),
+        ),
+      ).toHaveLength(1);
+    },
+    60000,
+  );
 
   it('rejects a changed source report before preparing a new run', async () => {
     const context = await setup();

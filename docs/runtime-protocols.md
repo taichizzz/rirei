@@ -146,7 +146,9 @@ bridge readiness/status. The daemon takes this branch only when internally passe
 `forcePythonBridge` and a bridge path. Ordinary CLI/Electron launches do not automatically switch
 to Python when native loading fails. The helper remains packaged/tested for compatibility.
 
-Windows inherited-provider arguments also fold newlines to spaces in `InheritedProcessHost`.
+Windows inherited-provider arguments fold newlines to spaces in `InheritedProcessHost`.
+The capture grant uses that same argument form to identify the opening handoff if it is echoed
+by a provider hook. Subsequent submitted messages follow the ordinary capture rules.
 This is a platform launch transformation, not proof of byte-identical cross-platform prompts.
 Native Windows terminal/provider continuity acceptance remains a separate qualification from
 the release tarball/native dependency smoke matrix.

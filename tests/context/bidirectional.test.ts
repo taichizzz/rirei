@@ -156,16 +156,20 @@ describe('two-way benchmark contracts', () => {
       }),
     ).rejects.toThrow('provider');
   });
-  it('captures both real process shapes and gives paired receivers identical frozen inputs without calling a model', async () => {
-    const root = await temporary();
-    const workflowModule = new URL(
-      '../../benchmarks/continuity/workflows.mjs',
-      import.meta.url,
-    ).href;
-    const fake = path.join(root, 'fake.mjs');
-    await writeFile(
-      fake,
-      `import { readFile, writeFile } from 'node:fs/promises';
+  const itNativeBenchmark = it.skipIf(process.platform === 'win32');
+  // Live execution of this benchmark harness and its launcher fixtures are POSIX-only.
+  itNativeBenchmark(
+    'captures both real process shapes and gives paired receivers identical frozen inputs without calling a model',
+    async () => {
+      const root = await temporary();
+      const workflowModule = new URL(
+        '../../benchmarks/continuity/workflows.mjs',
+        import.meta.url,
+      ).href;
+      const fake = path.join(root, 'fake.mjs');
+      await writeFile(
+        fake,
+        `import { readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { WORKFLOWS } from ${JSON.stringify(workflowModule)};
 const provider = process.env.TEST_PROVIDER;
@@ -201,40 +205,43 @@ if (predecessor) {
   else { emit({type:'thread.started',thread_id:session});emit({type:'turn.completed',usage:{input_tokens:10,cached_input_tokens:0,output_tokens:5}}); }
 }
 `,
-    );
-    for (const provider of ['claude', 'codex']) {
-      const wrapper = path.join(root, provider);
-      await writeFile(
-        wrapper,
-        `#!/bin/sh\nTEST_PROVIDER=${provider} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fake)} "$@"\n`,
       );
-      await chmod(wrapper, 0o700);
-    }
-    vi.stubEnv('PATH', `${root}${path.delimiter}${process.env.PATH}`);
-    const runtimeCheck = async () => ({ simulated: true });
-    const run = await createRun(path.join(root, 'run'), { runtimeCheck });
-    for (const index of [0, 1]) {
-      const row = await runCase(run, index, { runtimeCheck });
-      expect(row.captureQualified).toBe(true);
-      expect(row.arms).toHaveLength(2);
-      expect(new Set(row.arms.map((arm) => arm.checkpointHash)).size).toBe(1);
+      for (const provider of ['claude', 'codex']) {
+        const wrapper = path.join(root, provider);
+        await writeFile(
+          wrapper,
+          `#!/bin/sh\nTEST_PROVIDER=${provider} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fake)} "$@"\n`,
+        );
+        await chmod(wrapper, 0o700);
+      }
+      vi.stubEnv('PATH', `${root}${path.delimiter}${process.env.PATH}`);
+      const runtimeCheck = async () => ({ simulated: true });
+      const run = await createRun(path.join(root, 'run'), { runtimeCheck });
+      for (const index of [0, 1]) {
+        const row = await runCase(run, index, { runtimeCheck });
+        expect(row.captureQualified).toBe(true);
+        expect(row.arms).toHaveLength(2);
+        expect(new Set(row.arms.map((arm) => arm.checkpointHash)).size).toBe(1);
+        expect(
+          row.arms.every((arm) => arm.evidenceIntact && !arm.execution.failed),
+        ).toBe(true);
+      }
+      const report = await finalize(run);
+      expect(report.providerSessions).toBe(6);
       expect(
-        row.arms.every((arm) => arm.evidenceIntact && !arm.execution.failed),
+        report.cases.every(
+          (row) =>
+            !row.checkpointGrading.passed &&
+            row.arms.every((arm) => arm.correct),
+        ),
       ).toBe(true);
-    }
-    const report = await finalize(run);
-    expect(report.providerSessions).toBe(6);
-    expect(
-      report.cases.every(
-        (row) =>
-          !row.checkpointGrading.passed && row.arms.every((arm) => arm.correct),
-      ),
-    ).toBe(true);
-    const ledger = JSON.parse(
-      await readFile(path.join(run, 'sessions.json'), 'utf8'),
-    );
-    expect(ledger.filter((entry) => entry.role === 'predecessor')).toHaveLength(
-      2,
-    );
-  }, 60000);
+      const ledger = JSON.parse(
+        await readFile(path.join(run, 'sessions.json'), 'utf8'),
+      );
+      expect(
+        ledger.filter((entry) => entry.role === 'predecessor'),
+      ).toHaveLength(2);
+    },
+    60000,
+  );
 });
